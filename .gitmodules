@@ -1,0 +1,3 @@
+[submodule "YR_MPE/src/icytree"]
+	path = YR_MPE/src/icytree
+	url = https://github.com/tgvaughan/icytree
