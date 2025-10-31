@@ -1,0 +1,100 @@
+
+
+{
+  "version": "0.1.0",
+  "plugin_group": "YR-MPE",
+  "plugins": [
+    {
+      "name": "YR-MPEA",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "A platform plugin for molecular evolution analysis (resemble MEGA).",
+      "category": "Molecular Evolution",
+      "placement": { "path": "YR_MPE", "priority": 0 ,"favicon": "YR_MPE/icons/mpea.svg"},
+      "entry_point": "YR_MPE.platforms:YR_MPEA_entry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "Muscle5",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "A wrapper for MUSCLE5 aligner.",
+      "category": "Molecular Evolution",
+      "placement": { "path": "YR_MPE/Alignment", "priority": 0 ,"favicon": "YR_MPE/icons/software/muscle.svg"},
+      "entry_point": "YR_MPE.plugin:Muscle5_wrapper_entry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "MAFFT",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "A wrapper for MAFFT aligner.",
+      "category": "Molecular Evolution",
+      "placement": { "path": "YR_MPE/Alignment", "priority": 0 ,"favicon": "YR_MPE/icons/software/mafft.svg"},
+      "entry_point": "YR_MPE.plugin:MAFFT_wrapper_entry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "Clustal Omega",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "A wrapper for Clustal Omega aligner.",
+      "category": "Molecular Evolution",
+      "placement": { "path": "YR_MPE/Alignment", "priority": 0 ,"favicon": "YR_MPE/icons/software/clustalo.svg"},
+      "entry_point": "YR_MPE.plugin:ClustalOmega_wrapper_entry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "IcyTree",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "A QWebEngine-based phylogenetic tree viewer using IcyTree.",
+      "category": "Phylogeny",
+      "placement": { "path": "YR_MPE/Phylogeny", "priority": 0 ,"favicon": "YR_MPE/icons/software/icytree.svg"},
+      "entry_point": "YR_MPE.icytree:IcyTreePluginEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "序列编辑器",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "高性能序列编辑器，使用PyQt5界面和QWebEngine渲染，支持大量序列数据的高效显示和编辑。",
+      "category": "Sequence Analysis",
+      "placement": { "path": "YR_MPE/Sequence Editor", "priority": 0 ,"favicon": "YR_MPE/icons/file/sequence.svg"},
+      "entry_point": "YR_MPE.sequence_editor:SequenceEditorEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "BLISS",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "基于Xia (2003)方法的核苷酸替代饱和度检测工具，使用IQ-TREE模型选择和evolver模拟。",
+      "category": "Molecular Evolution",
+      "placement": { "path": "YR_MPE/Evolution", "priority": 0 ,"favicon": "YR_MPE/icons/phylogeny/mb.svg"},
+      "entry_point": "YR_MPE.saturation_plugin:SaturationAnalysisEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": ["numpy", "matplotlib"]
+      }
+    }
+  ]
+}
+

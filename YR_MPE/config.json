@@ -1,0 +1,18 @@
+[
+    {
+        "name": "Muscle5",
+        "path": "/bin/muscle5/muscle.exe"
+    },
+    {
+        "name": "Clustal Omega",
+        "path": "/bin/clustalo/clustalo.exe"
+    },
+    {
+        "name": "MAFFT",
+        "path": "/bin/mafft/mafft.bat"
+    },
+    {
+        "name": "IQ-Tree 3",
+        "path": "/bin/iqtree/iqtree3.exe"
+    }
+]

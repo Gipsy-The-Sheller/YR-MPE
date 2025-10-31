@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_1" data-name=" 图层 1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 45 45.7">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #4e6691;
+      }
+
+      .cls-1, .cls-2, .cls-3 {
+        stroke-width: 0px;
+      }
+
+      .cls-4 {
+        stroke: #b88184;
+      }
+
+      .cls-4, .cls-5 {
+        fill: none;
+        stroke-miterlimit: 10;
+        stroke-width: 3px;
+      }
+
+      .cls-5 {
+        stroke: #8995a8;
+      }
+
+      .cls-2 {
+        fill: #ba3e45;
+      }
+
+      .cls-3 {
+        fill: #f0f0f0;
+      }
+    </style>
+  </defs>
+  <g>
+    <rect class="cls-5" x="3.5" y="5.9" width="38.1" height="38.1" rx="3.7" ry="3.7"/>
+    <rect class="cls-3" x="3.5" y="3.8" width="38.1" height="38.1" rx="3.7" ry="3.7"/>
+    <rect class="cls-4" x="3.5" y="3.8" width="38.1" height="38.1" rx="3.7" ry="3.7"/>
+  </g>
+  <g>
+    <rect class="cls-1" x="7.9" y="8.3" width="8.7" height="8.7" rx="2.5" ry="2.5"/>
+    <rect class="cls-1" x="7.9" y="18.5" width="8.7" height="8.7" rx="2.5" ry="2.5"/>
+    <rect class="cls-1" x="18.2" y="18.5" width="8.7" height="8.7" rx="2.5" ry="2.5"/>
+    <rect class="cls-2" x="7.9" y="28.7" width="8.7" height="8.7" rx="2.5" ry="2.5"/>
+    <rect class="cls-2" x="18.2" y="28.7" width="8.7" height="8.7" rx="2.5" ry="2.5"/>
+    <rect class="cls-1" x="28.4" y="28.7" width="8.7" height="8.7" rx="2.5" ry="2.5"/>
+  </g>
+</svg>
