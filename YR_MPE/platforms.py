@@ -99,6 +99,7 @@ class YR_MPEA_Widget(QWidget):
         models_menu = QMenu()
         find_best_model_action = QAction("Find Best Substitution Model (ML)", model_button)
         find_best_model_action.setIcon(QIcon(os.path.join(self.plugin_path, "icons/find_model.svg")))
+        find_best_model_action.triggered.connect(self.open_modelfinder_wrapper)
         models_menu.addAction(find_best_model_action)
         model_button.setMenu(models_menu)
 
@@ -236,44 +237,64 @@ class YR_MPEA_Widget(QWidget):
         main_layout.addWidget(self.workspace)
 
     def open_muscle5_wrapper(self):
-        # TODO: import sequence file from YR-MPEA workspace
-        # TODO: new option: import the align result to YR-MPEA workspace
-        from YR_MPE.plugin import Muscle5_wrapper
-        # use QDialog to open the muscle5_wrapper
+        # create a QDialog to open the muscle5_wrapper
         from PyQt5.QtWidgets import QDialog
+        from .plugins.muscle5_plugin import Muscle5PluginEntry
         dialog = QDialog()
-        dialog.setWindowTitle("Muscle 5 - YR-MPEA")
+        dialog.setWindowTitle("MUSCLE5")
         dialog.setWindowIcon(QIcon(os.path.join(self.plugin_path, "icons/software/muscle.svg")))
-        dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
-
-        # get workspace type
+        
+        # Prepare import data
+        import_from = None
+        import_data = None
         workspace_type = type(self.workspace).__name__
-        # search if there's already an alignment
-        importfrom = None
-        importdata = None
         if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) ==1:
-                importfrom = "YR_MPEA"
-                importdata = self.workspace.items["alignments"][0]
-        muscle5_wrapper = Muscle5_wrapper(importfrom = importfrom, importdata = importdata)
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+        
+        # use QDialog to open the muscle5_wrapper
+        muscle5_wrapper = Muscle5PluginEntry().run(import_from=import_from, import_data=import_data)
+        muscle5_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
         dialog.layout().addWidget(muscle5_wrapper)
         dialog.exec_()
+
     
+    def add_alignment_to_workspace(self, sequences):
+        """将比对结果添加到工作区"""
+        self.workspace.add_sequence(sequences)
+
+    def add_model_to_workspace(self, model_data):
+        """将模型选择结果添加到工作区"""
+        self.workspace.add_model(model_data)
+
     def open_clustal_omega_wrapper(self):
-        from YR_MPE.plugin import ClustalOmega_wrapper
+        from .plugins.clustal_omega_plugin import ClustalOmegaPluginEntry
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
         dialog.setWindowTitle("Clustal Omega - YR-MPEA")
         dialog.setWindowIcon(QIcon(os.path.join(self.plugin_path, "icons/software/clustalo.svg")))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
-        clustal_omega_wrapper = ClustalOmega_wrapper()
-        dialog.layout().addWidget(clustal_omega_wrapper)
+
+                # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+        
+        # use QDialog to open the clustalo_wrapper
+        clustalo_wrapper = ClustalOmegaPluginEntry().run(import_from=import_from, import_data=import_data)
+        clustalo_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        dialog.layout().addWidget(clustalo_wrapper)
         dialog.exec_()
     
     def open_mafft_wrapper(self):
-        from YR_MPE.plugin import MAFFT_wrapper
+        from YR_MPE.aligners import MAFFT_wrapper
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
         dialog.setWindowTitle("MAFFT - YR-MPEA")
@@ -283,7 +304,32 @@ class YR_MPEA_Widget(QWidget):
         mafft_wrapper = MAFFT_wrapper()
         dialog.layout().addWidget(mafft_wrapper)
         dialog.exec_()
+    
+    def open_modelfinder_wrapper(self):
+        from .plugins.model_finder_plugin import ModelFinderPluginEntry
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle("ModelFinder - YR-MPEA")
+        dialog.setWindowIcon(QIcon(os.path.join(self.plugin_path, "icons/find_model.svg")))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
 
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+        
+        # use QDialog to open the modelfinder_wrapper
+        modelfinder_wrapper = ModelFinderPluginEntry().run(import_from=import_from, import_data=import_data)
+        modelfinder_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        modelfinder_wrapper.export_model_result_signal.connect(self.add_model_to_workspace)
+        dialog.layout().addWidget(modelfinder_wrapper)
+        dialog.exec_()
+    
     def open_icytree_wrapper(self):
         from YR_MPE.icytree import IcyTreePlugin
         from PyQt5.QtWidgets import QDialog
@@ -393,17 +439,30 @@ class SingleGeneWorkspace(QWidget):
         alignment_button.setIcon(alignment_icon)
         alignment_button.setIconSize(QSize(45, 45))
         # alignment_button.setToolTip("Alignment")
+        alignment_button.clicked.connect(lambda: self.view_alignment(sequences))
         self.grid_layout.addWidget(alignment_button, 0, 0)
     
     def add_model(self, model):
-        # add a model to items["models"]
-        self.items["models"].append(model)
-        # add a model icon to workspace
-        model_icon = QIcon(os.path.join(self.plugin_path, "icons/file/model.svg"))
-        model_button = QToolButton()
-        model_button.setIcon(model_icon)
-        model_button.setIconSize(QSize(45, 45))
-        self.grid_layout.addWidget(model_button, 0, 0)
+        # 检查是单个模型还是模型表
+        if isinstance(model, dict) and "type" in model and model["type"] == "model_table":
+            # 处理完整模型表
+            self.items["models"].append(model)
+            # 添加模型表图标到工作区
+            model_icon = QIcon(os.path.join(self.plugin_path, "icons/file/model.svg"))
+            model_button = QToolButton()
+            model_button.setIcon(model_icon)
+            model_button.setIconSize(QSize(45, 45))
+            model_button.setToolTip(f"Model Table ({len(model['data'])} models)")
+            self.grid_layout.addWidget(model_button, 1, 0)
+        else:
+            # 处理单个模型（向后兼容）
+            self.items["models"].append(model)
+            # add a model icon to workspace
+            model_icon = QIcon(os.path.join(self.plugin_path, "icons/file/model.svg"))
+            model_button = QToolButton()
+            model_button.setIcon(model_icon)
+            model_button.setIconSize(QSize(45, 45))
+            self.grid_layout.addWidget(model_button, 1, 0)
     
     def add_distance(self, distance):
         # add a distance to items["distances"]
@@ -428,6 +487,33 @@ class SingleGeneWorkspace(QWidget):
         # if clicked, open the tree by icytree
         phylogeny_button.clicked.connect(self.open_icytree_wrapper)
     
+    def add_model_to_workspace(self, model_data):
+        """添加模型结果到工作区"""
+        # 检查是单个模型还是模型表
+        if "type" in model_data and model_data["type"] == "model_table":
+            # 处理完整模型表
+            self.items["models"].append(model_data)
+            # 添加模型表图标到工作区
+            model_icon = QIcon(os.path.join(self.plugin_path, "icons/file/model.svg"))
+            model_button = QToolButton()
+            model_button.setIcon(model_icon)
+            model_button.setIconSize(QSize(45, 45))
+            model_button.setToolTip(f"Model Table ({len(model_data['data'])} models)")
+            self.grid_layout.addWidget(model_button, 1, 0)
+        else:
+            # 处理单个模型（向后兼容）
+            self.items["models"].append(model_data)
+            # 添加模型图标到工作区
+            model_icon = QIcon(os.path.join(self.plugin_path, "icons/file/model.svg"))
+            model_button = QToolButton()
+            model_button.setIcon(model_icon)
+            model_button.setIconSize(QSize(45, 45))
+            model_button.setToolTip(f"Model: {model_data['Model']}\n"
+                                   f"LogL: {model_data['LogL']}\n"
+                                   f"AIC: {model_data['AIC']}\n"
+                                   f"BIC: {model_data['BIC']}")
+            self.grid_layout.addWidget(model_button, 1, 0)
+    
     def open_icytree_wrapper(self):
         from YR_MPE.icytree import IcyTreePlugin
         from PyQt5.QtWidgets import QDialog
@@ -440,7 +526,18 @@ class SingleGeneWorkspace(QWidget):
         icytree_wrapper.set_newick_string(self.items["phylogenies"][-1])
         dialog.layout().addWidget(icytree_wrapper)
         dialog.exec_()
-        
+    
+    def view_alignment(self, sequences):
+        """查看序列比对结果"""
+        from .sequence_editor import SequenceAlignmentViewer
+        # convert sequences to diction format: {"header", "sequence"}
+        sequences = [{"header": seq.name, "sequence": str(seq.seq)} for seq in sequences]
+        viewer = SequenceAlignmentViewer(sequences)
+        viewer.show()
+        # 保存viewer引用以防被垃圾回收
+        if not hasattr(self, 'viewers'):
+            self.viewers = []
+        self.viewers.append(viewer)
 
 class YR_MPEA_entry:
     def run(self):
