@@ -13,8 +13,9 @@ class IcyTreePlugin(QWidget, BasePlugin):
     data_ready = pyqtSignal(dict)
     
     def __init__(self, config=None, plugin_path: str = None, **kwargs):
+        self.plugin_path = plugin_path or os.path.dirname(os.path.abspath(__file__))
         QWidget.__init__(self)
-        BasePlugin.__init__(self, config, plugin_path, **kwargs)
+        BasePlugin.__init__(self, config)
         self.nwk_string = ""
         self.icytree_path = None
         self.init_ui()
