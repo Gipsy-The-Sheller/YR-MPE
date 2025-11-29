@@ -31,532 +31,423 @@ except ImportError:
     from sequence_utils import SequenceUtils, SequenceValidator
 
 
-class EditorMode(Enum):
-    """编辑器模式"""
-    NORMAL = "normal"
-    ALIGNMENT = "alignment"
-    CONSENSUS = "consensus"
-
-
-@dataclass
-class EditorSettings:
-    """编辑器设置"""
-    font_family: str = "Consolas"
-    font_size: int = 12
-    show_line_numbers: bool = True
-    show_amino_acid_numbers: bool = True
-    wrap_text: bool = False
-    syntax_highlighting: bool = True
-    auto_completion: bool = True
-    show_consensus: bool = False
-    color_scheme: str = "default"
-
-
-class SequenceEditor(QMainWindow):
-    """高级序列编辑器主窗口"""
-    
-    # 信号定义
-    sequence_changed = pyqtSignal(str)  # 序列改变信号
-    file_opened = pyqtSignal(str)       # 文件打开信号
-    file_saved = pyqtSignal(str)        # 文件保存信号
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent = parent
-        self.current_file = None
-        self.sequence_model = SequenceModel()
-        self.settings = EditorSettings()
-        self.undo_stack = QUndoStack()
-        self.search_results = []
-        self.current_search_index = -1
+class SequenceAlignmentViewer(QMainWindow):
+    def __init__(self, sequences = []):
+        self.plugin_path = os.path.dirname(os.path.abspath(__file__))
+        super().__init__()
+        self.initUI()
+        self.sequences = sequences  # 存储序列数据
+        if sequences:
+            self.display_alignment()
+        # 初始化时更新序列列表
+        self.update_sequences_list()
         
-        self.init_ui()
-        self.setup_connections()
-        self.load_settings()
+    def initUI(self):
+        # 设置窗口属性
+        self.setWindowTitle('Sequence Alignment Viewer')
+        self.setGeometry(100, 100, 1000, 700)
         
-    def init_ui(self):
-        """初始化用户界面"""
-        self.setWindowTitle("YR-MPE Sequence Editor")
-        self.setMinimumSize(1000, 700)
-        
-        # 创建中央部件
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        # 主布局
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 创建工具栏
-        self.create_toolbar()
-        main_layout.addWidget(self.toolbar)
-        
-        # 创建状态栏
-        self.create_status_bar()
-        
-        # 创建主编辑区域
-        self.create_editor_area(main_layout)
-        
-        # 创建侧边栏
-        self.create_sidebar(main_layout)
+        # 创建中央部件和布局
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.layout = QVBoxLayout(self.central_widget)
         
         # 创建菜单栏
         self.create_menu_bar()
         
-    def create_toolbar(self):
-        """创建工具栏"""
-        self.toolbar = QToolBar("Main Toolbar")
-        self.toolbar.setMovable(False)
+        # 创建工具栏
+        self.create_toolbar()
         
-        # 文件操作
-        self.toolbar.addAction(self.create_action("Open", "open", "Open File", self.open_file))
-        self.toolbar.addAction(self.create_action("Save", "save", "Save File", self.save_file))
-        self.toolbar.addAction(self.create_action("Save As", "save_as", "Save As", self.save_as_file))
-        self.toolbar.addSeparator()
+        # 创建显示区域 - 使用分割器包含两个表格
+        self.splitter = QSplitter(Qt.Horizontal)
         
-        # 编辑操作
-        self.toolbar.addAction(self.create_action("Undo", "undo", "Undo", self.undo_stack.undo))
-        self.toolbar.addAction(self.create_action("Redo", "redo", "Redo", self.undo_stack.redo))
-        self.toolbar.addSeparator()
+        # 创建序列名称表格（固定在左侧）
+        self.font = QFont("Courier New", 10)
+
+        self.headers_table = QTableWidget(0, 1)
+        self.headers_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.headers_table.horizontalHeader().setVisible(False)
+        self.headers_table.verticalHeader().setVisible(False)
+        self.headers_table.setFont(self.font)
+        self.headers_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         
-        # 序列操作
-        self.toolbar.addAction(self.create_action("Reverse", "reverse", "Reverse Sequence", self.reverse_sequence))
-        self.toolbar.addAction(self.create_action("Complement", "complement", "Complement Sequence", self.complement_sequence))
-        self.toolbar.addAction(self.create_action("Reverse Complement", "rev_comp", "Reverse Complement", self.reverse_complement))
-        self.toolbar.addSeparator()
+        # 创建序列内容表格
+        self.alignment_table = QTableWidget(0, 0)
+        self.alignment_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.alignment_table.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)
+        self.alignment_table.verticalHeader().setVisible(False)
+        self.alignment_table.setFont(self.font)
+        self.alignment_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         
-        # 搜索功能
-        self.toolbar.addAction(self.create_action("Find", "find", "Find", self.show_find_dialog))
-        self.toolbar.addAction(self.create_action("Replace", "replace", "Replace", self.show_replace_dialog))
-        self.toolbar.addSeparator()
+        # 添加表格到分割器
+        self.splitter.addWidget(self.headers_table)
+        self.splitter.addWidget(self.alignment_table)
         
-        # 视图选项
-        self.toolbar.addAction(self.create_action("Settings", "settings", "Settings", self.show_settings))
+        # 设置分割器初始大小
+        self.splitter.setSizes([200, 800])
         
-    def create_status_bar(self):
-        """创建状态栏"""
+        # 添加到布局
+        self.layout.addWidget(self.splitter)
+        
+        # 连接两个表格的垂直滚动条
+        self.headers_table.verticalScrollBar().valueChanged.connect(
+            self.alignment_table.verticalScrollBar().setValue)
+        self.alignment_table.verticalScrollBar().valueChanged.connect(
+            self.headers_table.verticalScrollBar().setValue)
+        
+        # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
+        self.status_label = QLabel("Ready")
+        self.status_bar.addPermanentWidget(self.status_label)
         
-        # 位置信息
-        self.position_label = QLabel("Line: 1, Column: 1")
-        self.status_bar.addWidget(self.position_label)
+        # 添加序列选择和位置选择控件
+        self.create_selection_controls()
         
-        # 序列信息
-        self.sequence_info_label = QLabel("Sequences: 0, Length: 0")
-        self.status_bar.addPermanentWidget(self.sequence_info_label)
+        # 初始化变量
+        self.current_file = None
         
-        # 模式指示器
-        self.mode_label = QLabel("Normal Mode")
-        self.status_bar.addPermanentWidget(self.mode_label)
+    def create_selection_controls(self):
+        """创建序列和位置选择控件"""
+        # 序列选择组合框
+        self.sequence_combo = QComboBox()
+        self.sequence_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.sequence_combo.setMinimumWidth(100)
+        self.sequence_combo.setMaximumWidth(200)
         
-    def create_editor_area(self, parent_layout):
-        """创建编辑区域"""
-        # 创建分割器
-        splitter = QSplitter(Qt.Horizontal)
-        parent_layout.addWidget(splitter)
+        # 列索引输入框
+        self.column_input = QLineEdit()
+        self.column_input.setPlaceholderText("Column")
+        self.column_input.setMaximumWidth(80)
         
-        # 左侧编辑区域
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        # 行索引输入框
+        self.row_input = QLineEdit()
+        self.row_input.setPlaceholderText("Row")
+        self.row_input.setMaximumWidth(80)
         
-        # 创建标签页控件
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setTabsClosable(True)
-        self.tab_widget.tabCloseRequested.connect(self.close_tab)
-        self.tab_widget.currentChanged.connect(self.on_tab_changed)
+        # 连接信号
+        self.sequence_combo.currentIndexChanged.connect(self.on_sequence_changed)
+        self.column_input.editingFinished.connect(self.on_position_changed)
+        self.row_input.editingFinished.connect(self.on_position_changed)
         
-        left_layout.addWidget(self.tab_widget)
-        splitter.addWidget(left_widget)
+        # 添加到状态栏
+        self.status_bar.addPermanentWidget(QLabel("Sequence:"))
+        self.status_bar.addPermanentWidget(self.sequence_combo)
+        self.status_bar.addPermanentWidget(QLabel("Column:"))
+        self.status_bar.addPermanentWidget(self.column_input)
+        self.status_bar.addPermanentWidget(QLabel("Row:"))
+        self.status_bar.addPermanentWidget(self.row_input)
         
-        # 右侧信息面板
-        self.info_panel = self.create_info_panel()
-        splitter.addWidget(self.info_panel)
+    def on_sequence_changed(self, index):
+        """当序列选择改变时"""
+        if index >= 0:
+            # 获取当前选中的行列
+            current_row = self.alignment_table.currentRow()
+            current_col = self.alignment_table.currentColumn()
+            
+            # 如果当前没有选中单元格，则默认选中第一列
+            if current_row < 0:
+                current_row = 0
+            if current_col < 0:
+                current_col = 0
+                
+            # 更新表格选择
+            self.alignment_table.setCurrentCell(index, current_col)
+            
+    def on_position_changed(self):
+        """当位置输入改变时"""
+        try:
+            # 获取输入的行列值
+            row_text = self.row_input.text()
+            col_text = self.column_input.text()
+            
+            if row_text and col_text:
+                # 转换为整数并调整为0基索引
+                row = int(row_text) - 1
+                col = int(col_text) - 1
+                
+                # 检查范围有效性
+                if 0 <= row < self.alignment_table.rowCount() and 0 <= col < self.alignment_table.columnCount():
+                    # 选择对应的单元格
+                    self.alignment_table.setCurrentCell(row, col)
+                    # 确保单元格可见
+                    self.alignment_table.scrollToItem(self.alignment_table.item(row, col), QAbstractItemView.PositionAtCenter)
+        except ValueError:
+            # 输入不是有效数字，忽略
+            pass
         
-        # 设置分割器比例
-        splitter.setSizes([800, 200])
-        
-    def create_info_panel(self):
-        """创建信息面板"""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        
-        # 序列统计
-        stats_group = QGroupBox("Sequence Statistics")
-        stats_layout = QVBoxLayout(stats_group)
-        
-        self.stats_tree = QTreeWidget()
-        self.stats_tree.setHeaderLabels(["Property", "Value"])
-        stats_layout.addWidget(self.stats_tree)
-        
-        layout.addWidget(stats_group)
-        
-        # 序列质量
-        quality_group = QGroupBox("Sequence Quality")
-        quality_layout = QVBoxLayout(quality_group)
-        
-        self.quality_text = QTextEdit()
-        self.quality_text.setMaximumHeight(150)
-        self.quality_text.setReadOnly(True)
-        quality_layout.addWidget(self.quality_text)
-        
-        layout.addWidget(quality_group)
-        
-        # 搜索历史
-        search_group = QGroupBox("Search History")
-        search_layout = QVBoxLayout(search_group)
-        
-        self.search_list = QListWidget()
-        self.search_list.setMaximumHeight(100)
-        search_layout.addWidget(self.search_list)
-        
-        layout.addWidget(search_group)
-        
-        return panel
-        
-    def create_sidebar(self, parent_layout):
-        """创建侧边栏"""
-        # 这里可以添加侧边栏功能，如文件浏览器、序列列表等
-        pass
+    def update_sequences_list(self):
+        """更新序列列表"""
+        self.sequence_combo.clear()
+        for i, seq_data in enumerate(self.sequences):
+            self.sequence_combo.addItem(f"{i+1}. {seq_data['header']}", i)
         
     def create_menu_bar(self):
-        """创建菜单栏"""
-        menubar = self.menuBar()
-        
         # 文件菜单
-        file_menu = menubar.addMenu("File")
-        file_menu.addAction(self.create_action("New", "new", "New File", self.new_file))
-        file_menu.addAction(self.create_action("Open", "open", "Open File", self.open_file))
-        file_menu.addSeparator()
-        file_menu.addAction(self.create_action("Save", "save", "Save File", self.save_file))
-        file_menu.addAction(self.create_action("Save As", "save_as", "Save As", self.save_as_file))
-        file_menu.addSeparator()
-        file_menu.addAction(self.create_action("Export", "export", "Export", self.export_sequences))
-        file_menu.addSeparator()
-        file_menu.addAction(self.create_action("Exit", "exit", "Exit", self.close))
+        file_menu = self.menuBar().addMenu('&File')
         
-        # 编辑菜单
-        edit_menu = menubar.addMenu("Edit")
-        edit_menu.addAction(self.create_action("Undo", "undo", "Undo", self.undo_stack.undo))
-        edit_menu.addAction(self.create_action("Redo", "redo", "Redo", self.undo_stack.redo))
-        edit_menu.addSeparator()
-        edit_menu.addAction(self.create_action("Cut", "cut", "Cut", self.cut_sequence))
-        edit_menu.addAction(self.create_action("Copy", "copy", "Copy", self.copy_sequence))
-        edit_menu.addAction(self.create_action("Paste", "paste", "Paste", self.paste_sequence))
-        edit_menu.addSeparator()
-        edit_menu.addAction(self.create_action("Find", "find", "Find", self.show_find_dialog))
-        edit_menu.addAction(self.create_action("Replace", "replace", "Replace", self.show_replace_dialog))
+        open_action = QAction('&Open', self)
+        open_action.setShortcut('Ctrl+O')
+        open_action.setStatusTip('Open sequence alignment file')
+        open_action.triggered.connect(self.open_file)
+        file_menu.addAction(open_action)
         
-        # 序列菜单
-        sequence_menu = menubar.addMenu("Sequence")
-        sequence_menu.addAction(self.create_action("Reverse", "reverse", "Reverse", self.reverse_sequence))
-        sequence_menu.addAction(self.create_action("Complement", "complement", "Complement", self.complement_sequence))
-        sequence_menu.addAction(self.create_action("Reverse Complement", "rev_comp", "Reverse Complement", self.reverse_complement))
-        sequence_menu.addSeparator()
-        sequence_menu.addAction(self.create_action("Translate", "translate", "Translate to Protein", self.translate_sequence))
-        sequence_menu.addAction(self.create_action("Find ORFs", "orf", "Find Open Reading Frames", self.find_orfs))
+        exit_action = QAction('&Exit', self)
+        exit_action.setShortcut('Ctrl+Q')
+        exit_action.setStatusTip('Exit application')
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
         
         # 视图菜单
-        view_menu = menubar.addMenu("View")
-        view_menu.addAction(self.create_action("Settings", "settings", "Settings", self.show_settings))
-        view_menu.addAction(self.create_action("Zoom In", "zoom_in", "Zoom In", self.zoom_in))
-        view_menu.addAction(self.create_action("Zoom Out", "zoom_out", "Zoom Out", self.zoom_out))
+        view_menu = self.menuBar().addMenu('&View')
         
-        # 工具菜单
-        tools_menu = menubar.addMenu("Tools")
-        tools_menu.addAction(self.create_action("Align", "align", "Align Sequences", self.align_sequences))
-        tools_menu.addAction(self.create_action("Consensus", "consensus", "Generate Consensus", self.generate_consensus))
-        tools_menu.addAction(self.create_action("Statistics", "stats", "Sequence Statistics", self.show_statistics))
+        font_action = QAction('&Font', self)
+        font_action.setStatusTip('Change font')
+        font_action.triggered.connect(self.change_font)
+        view_menu.addAction(font_action)
         
-    def create_action(self, text, icon_name, tooltip, callback):
-        """创建动作"""
-        action = QAction(text, self)
-        action.setToolTip(tooltip)
-        action.triggered.connect(callback)
-        return action
-        
-    def setup_connections(self):
-        """设置信号连接"""
-        self.undo_stack.canUndoChanged.connect(self.update_undo_action)
-        self.undo_stack.canRedoChanged.connect(self.update_redo_action)
-        
-    def load_settings(self):
-        """加载设置"""
-        # 这里可以从配置文件加载设置
-        pass
-        
-    def save_settings(self):
-        """保存设置"""
-        # 这里可以保存设置到配置文件
-        pass
-        
-    # 文件操作方法
-    def new_file(self):
-        """新建文件"""
-        self.create_new_tab("Untitled")
+    def create_toolbar(self):
+        toolbar = QToolBar('Main Toolbar')
+        self.addToolBar(toolbar)
+
+        # get default action height and apply to icon        
+        open_action = QAction('Open', self)
+        font = open_action.font()
+        height = QFontMetrics(font).height()
+        toolbar.setIconSize(QSize(height, height))
+
+
+        open_action.setIcon(QIcon(os.path.join(self.plugin_path, 'icons/open.svg')))
+        open_action.setStatusTip('Open sequence alignment file')
+        open_action.triggered.connect(self.open_file)
+        toolbar.addAction(open_action)
         
     def open_file(self):
-        """打开文件"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open Sequence File", "",
-            "All Supported (*.fasta *.fas *.fa *.phy *.phylip *.nex *.nexus *.gb *.genbank);;"
-            "FASTA (*.fasta *.fas *.fa);;"
-            "Phylip (*.phy *.phylip);;"
-            "Nexus (*.nex *.nexus);;"
-            "GenBank (*.gb *.genbank)"
-        )
+        options = QFileDialog.Options()
+        file_name, _ = QFileDialog.getOpenFileName(
+            self, 'Open Sequence Alignment File', '', 
+            'FASTA Files (*.fasta *.fa *.aln *.fas *.fna);;All Files (*)', 
+            options=options)
         
-        if file_path:
-            self.load_file(file_path)
+        if file_name:
+            self.load_alignment(file_name)
             
-    def load_file(self, file_path):
-        """加载文件"""
+    def load_alignment(self, file_path):
+        """加载序列比对文件"""
         try:
-            sequences = SequenceUtils.load_sequences(file_path)
-            if sequences:
-                self.sequence_model.load_sequences(sequences)
-                self.create_new_tab(os.path.basename(file_path), file_path)
-                self.file_opened.emit(file_path)
-                self.update_sequence_info()
+            with open(file_path, 'r') as file:
+                content = file.read()
+                
+            # 解析FASTA格式文件
+            self.parse_fasta(content)
+            self.display_alignment()
+            self.current_file = file_path
+            self.status_label.setText(f"Loaded: {file_path[0:20]+'...' if len(file_path) > 20 else file_path}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load file:\n{str(e)}")
+            
+    def parse_fasta(self, content):
+        """解析FASTA格式的内容"""
+        self.sequences = []
+        lines = content.strip().split('\n')
+        
+        current_header = ""
+        current_sequence = ""
+        
+        for line in lines:
+            line = line.strip()
+            if line.startswith('>'):
+                # 如果已有上一个序列，则保存它
+                if current_header and current_sequence:
+                    self.sequences.append({
+                        'header': current_header,
+                        'sequence': current_sequence.upper()
+                    })
+                # 开始新的序列
+                current_header = line[1:]  # 去掉 '>' 符号
+                current_sequence = ""
             else:
-                QMessageBox.warning(self, "Warning", "No sequences found in file.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load file: {str(e)}")
+                # 继续累积序列数据
+                current_sequence += line.replace(' ', '').replace('\t', '')
+                
+        # 不要忘记最后一个序列
+        if current_header and current_sequence:
+            self.sequences.append({
+                'header': current_header,
+                'sequence': current_sequence.upper()
+            })
             
-    def save_file(self):
-        """保存文件"""
-        if self.current_file:
-            self.save_file_to_path(self.current_file)
-        else:
-            self.save_as_file()
+    def display_alignment(self):
+        """在表格中显示序列比对"""
+        if not self.sequences:
+            return
             
-    def save_as_file(self):
-        """另存为文件"""
-        file_path, file_type = QFileDialog.getSaveFileName(
-            self, "Save Sequence File", "",
-            "FASTA (*.fasta);;"
-            "Phylip (*.phy);;"
-            "Nexus (*.nex);;"
-            "All Files (*.*)"
-        )
+        # 清空表格
+        self.headers_table.clear()
+        self.alignment_table.clear()
         
-        if file_path:
-            self.save_file_to_path(file_path)
+        # 获取最长序列的长度作为列数
+        max_length = max(len(seq['sequence']) for seq in self.sequences) if self.sequences else 0
+        
+        # 设置行列数 (左侧表格增加一行用于标题)
+        self.headers_table.setRowCount(len(self.sequences) + 1)  # +1 用于标题行
+        self.headers_table.setColumnCount(1)
+        
+        self.alignment_table.setRowCount(len(self.sequences))
+        self.alignment_table.setColumnCount(max_length)
+        
+        # 检查每个位点的保守性
+        conservation_marks = self.check_conservation()
+        
+        # 设置序列内容表格的表头 (包含保守性标记)
+        headers = []
+        for i in range(max_length):
+            if conservation_marks[i] == 2:
+                mark = "*"
+            elif conservation_marks[i] == 1:
+                mark = "."
+            else:
+                mark = " "
+            headers.append(mark)
+        self.alignment_table.setHorizontalHeaderLabels(headers)
+        
+        # 添加左上角的标题单元格
+        index_header_item = QTableWidgetItem("Index")
+        index_header_item.setFlags(index_header_item.flags() ^ Qt.ItemIsEditable)
+        index_header_item.setTextAlignment(Qt.AlignCenter)
+        index_header_item.setBackground(QColor(220, 220, 220))  # 灰色背景突出显示
+        self.headers_table.setItem(0, 0, index_header_item)
+        
+        # 填充数据
+        for row, seq_data in enumerate(self.sequences):
+            # 在左侧表格显示序列名称 (row+1 因为第0行是标题)
+            header_item = QTableWidgetItem(f"{row+1}. {seq_data['header']}")
+            header_item.setFlags(header_item.flags() ^ Qt.ItemIsEditable)
+            header_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            self.headers_table.setItem(row + 1, 0, header_item)
             
-    def save_file_to_path(self, file_path):
-        """保存文件到指定路径"""
-        try:
-            sequences = self.sequence_model.get_sequences()
-            SequenceUtils.save_sequences(sequences, file_path)
-            self.current_file = file_path
-            self.file_saved.emit(file_path)
-            self.status_bar.showMessage(f"File saved: {file_path}", 3000)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save file: {str(e)}")
+            # 在右侧表格显示序列内容
+            sequence = seq_data['sequence']
+            for col, nucleotide in enumerate(sequence):
+                item = QTableWidgetItem(nucleotide)
+                item.setTextAlignment(Qt.AlignCenter)
+                item.setFlags(item.flags() ^ Qt.ItemIsEditable)
+                
+                # 根据核苷酸类型着色
+                if nucleotide.upper() == 'A':
+                    item.setBackground(QColor(255, 150, 150))  # 浅红色
+                elif nucleotide.upper() == 'T' or nucleotide.upper() == 'U':
+                    item.setBackground(QColor(150, 150, 255))  # 浅蓝色
+                elif nucleotide.upper() == 'G':
+                    item.setBackground(QColor(150, 255, 150))  # 浅绿色
+                elif nucleotide.upper() == 'C':
+                    item.setBackground(QColor(255, 255, 150))  # 浅黄色
+                elif nucleotide.upper() == '-':
+                    item.setBackground(QColor(200, 200, 200))  # 浅灰色，表示缺口
+                    
+                self.alignment_table.setItem(row, col, item)
+                
+            # 对于较短的序列，在末尾填充空白
+            for col in range(len(sequence), max_length):
+                item = QTableWidgetItem("")
+                item.setFlags(item.flags() ^ Qt.ItemIsEditable)
+                self.alignment_table.setItem(row, col, item)
+                
+        # 调整序列名称列宽度
+        self.headers_table.resizeColumnToContents(0)
+        self.headers_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        
+        # 设置默认列宽，避免一次性设置过多列宽导致卡顿
+        default_column_width = 0
+        self.alignment_table.horizontalHeader().setDefaultSectionSize(default_column_width)
+        
+        # 设置默认行高，让显示更紧凑
+        default_row_height = 0
+        self.headers_table.verticalHeader().setDefaultSectionSize(default_row_height)
+        self.alignment_table.verticalHeader().setDefaultSectionSize(default_row_height)
             
-    def export_sequences(self):
-        """导出序列"""
-        # 实现序列导出功能
-        pass
+        # 确保标题行高度与内容行一致
+        self.headers_table.resizeRowToContents(0)
         
-    # 编辑操作方法
-    def cut_sequence(self):
-        """剪切序列"""
-        # 实现剪切功能
-        pass
+        # 更新序列列表
+        self.update_sequences_list()
         
-    def copy_sequence(self):
-        """复制序列"""
-        # 实现复制功能
-        pass
+        # 连接表格点击事件
+        self.alignment_table.cellClicked.connect(self.on_alignment_cell_clicked)
         
-    def paste_sequence(self):
-        """粘贴序列"""
-        # 实现粘贴功能
-        pass
+    def on_alignment_cell_clicked(self, row, column):
+        """处理比对表格单元格点击事件"""
+        # 更新序列组合框，阻止触发on_sequence_changed事件
+        self.sequence_combo.blockSignals(True)
+        self.sequence_combo.setCurrentIndex(row)
+        self.sequence_combo.blockSignals(False)
         
-    # 序列操作方法
-    def reverse_sequence(self):
-        """反向序列"""
-        # 实现反向功能
-        pass
+        # 更新行列输入框
+        self.row_input.setText(str(row + 1))  # 行索引从1开始显示
+        self.column_input.setText(str(column + 1))  # 列索引从1开始显示
         
-    def complement_sequence(self):
-        """互补序列"""
-        # 实现互补功能
-        pass
-        
-    def reverse_complement(self):
-        """反向互补序列"""
-        # 实现反向互补功能
-        pass
-        
-    def translate_sequence(self):
-        """翻译序列"""
-        # 实现翻译功能
-        pass
-        
-    def find_orfs(self):
-        """查找开放阅读框"""
-        # 实现ORF查找功能
-        pass
-        
-    # 搜索和替换方法
-    def show_find_dialog(self):
-        """显示查找对话框"""
-        # 实现查找对话框
-        pass
-        
-    def show_replace_dialog(self):
-        """显示替换对话框"""
-        # 实现替换对话框
-        pass
-        
-    # 视图方法
-    def show_settings(self):
-        """显示设置对话框"""
-        # 实现设置对话框
-        pass
-        
-    def zoom_in(self):
-        """放大"""
-        # 实现放大功能
-        pass
-        
-    def zoom_out(self):
-        """缩小"""
-        # 实现缩小功能
-        pass
-        
-    # 工具方法
-    def align_sequences(self):
-        """对齐序列"""
-        # 实现序列对齐功能
-        pass
-        
-    def generate_consensus(self):
-        """生成一致性序列"""
-        # 实现一致性序列生成
-        pass
-        
-    def show_statistics(self):
-        """显示统计信息"""
-        # 实现统计信息显示
-        pass
-        
-    # 辅助方法
-    def create_new_tab(self, title, file_path=None):
-        """创建新标签页"""
-        # 创建新的标签页内容
-        tab_widget = QWidget()
-        layout = QVBoxLayout(tab_widget)
-        
-        # 创建序列表格视图
-        try:
-            from .sequence_models import SequenceTableModel
-        except ImportError:
-            from sequence_models import SequenceTableModel
-        table_model = SequenceTableModel(self.sequence_model.get_sequences())
-        table_view = QTableView()
-        
-        table_view.setModel(table_model)
-        table_view.setAlternatingRowColors(True)
-        table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
-        
-        # 设置表格样式
-        table_view.setStyleSheet("""
-            QTableView {
-                gridline-color: #d0d0d0;
-                background-color: white;
-                alternate-background-color: #f8f8f8;
-            }
-            QTableView::item:selected {
-                background-color: #3daee9;
-                color: white;
-            }
-        """)
-
-        layout.addWidget(table_view)
-        
-        # 添加到标签页
-        tab_index = self.tab_widget.addTab(tab_widget, title)
-        self.tab_widget.setCurrentIndex(tab_index)
-        
-        # 保存文件路径
-        if file_path:
-            self.tab_widget.setTabToolTip(tab_index, file_path)
-            self.current_file = file_path
-        
-    def close_tab(self, index):
-        """关闭标签页"""
-        if index >= 0 and index < self.tab_widget.count():
-            self.tab_widget.removeTab(index)
-            if self.tab_widget.count() == 0:
-                self.current_file = None
-        
-    def on_tab_changed(self, index):
-        """标签页改变事件"""
-        if index >= 0 and index < self.tab_widget.count():
-            file_path = self.tab_widget.tabToolTip(index)
-            if file_path:
-                self.current_file = file_path
-                self.setWindowTitle(f"YR-MPE Sequence Editor - {os.path.basename(file_path)}")
-            self.update_sequence_info()
-        
-    def update_sequence_info(self):
-        """更新序列信息"""
-        sequences = self.sequence_model.get_sequences()
-        if sequences:
-            total_sequences = len(sequences)
-            total_length = sum(seq.get_length() for seq in sequences)
-            self.sequence_info_label.setText(f"Sequences: {total_sequences}, Total Length: {total_length}")
+    def on_sequence_changed(self, index):
+        """当序列选择改变时"""
+        if index >= 0:
+            # 获取当前选中的行列
+            current_row = self.alignment_table.currentRow()
+            current_col = self.alignment_table.currentColumn()
             
-            # 更新统计信息
-            self.stats_tree.clear()
-            self.stats_tree.setHeaderLabels(["Property", "Value"])
+            # 如果当前没有选中单元格，则默认选中第一列
+            if current_row < 0:
+                current_row = 0
+            if current_col < 0:
+                current_col = 0
+                
+            # 更新表格选择
+            self.alignment_table.setCurrentCell(index, current_col)
             
-            # 添加统计信息
-            stats_items = [
-                ("Total Sequences", str(total_sequences)),
-                ("Total Length", str(total_length)),
-                ("Average Length", f"{total_length // total_sequences if total_sequences > 0 else 0}"),
-                ("Sequence Types", ", ".join(set(seq.sequence_type.value for seq in sequences)))
-            ]
+    def check_conservation(self):
+        """检查每个位点的保守性，如果所有序列在该位点碱基一致则返回True"""
+        if not self.sequences:
+            return []
             
-            for prop, value in stats_items:
-                item = QTreeWidgetItem([prop, value])
-                self.stats_tree.addTopLevelItem(item)
-        else:
-            self.sequence_info_label.setText("Sequences: 0, Total Length: 0")
-            self.stats_tree.clear()
+        max_length = max(len(seq['sequence']) for seq in self.sequences)
+        conservation_marks = [True] * max_length
         
-    def update_undo_action(self, can_undo):
-        """更新撤销动作状态"""
-        # 更新工具栏中的撤销按钮状态
-        for action in self.toolbar.actions():
-            if action.text() == "Undo":
-                action.setEnabled(can_undo)
-                break
-        
-    def update_redo_action(self, can_redo):
-        """更新重做动作状态"""
-        # 更新工具栏中的重做按钮状态
-        for action in self.toolbar.actions():
-            if action.text() == "Redo":
-                action.setEnabled(can_redo)
-                break
-        
-    def closeEvent(self, event):
-        """关闭事件"""
-        self.save_settings()
-        event.accept()
+        # 对每个位点检查保守性
+        for col in range(max_length):
+            bases = []
+            gap = [False for _ in range(max_length)]
+            for seq in self.sequences:
+                if col < len(seq['sequence']):
+                    base = seq['sequence'][col]
+                    # 忽略空白
+                    if base.strip() and base != '-':
+                        bases.append(base)
+                    if base == '-':
+                        gap[col] = True
+            
+            # 如果该列所有碱基相同且非空，则标记为保守
+            if bases and all(base == bases[0] for base in bases):
+                if not gap[col]:
+                    conservation_marks[col] = 2
+                else:
+                    conservation_marks[col] = 1
+            else:
+                conservation_marks[col] = 0
+                
+        return conservation_marks
+            
+    def change_font(self):
+        font, ok = QFontDialog.getFont(self.alignment_table.font(), self)
+        if ok:
+            self.font = font
+            self.headers_table.setFont(font)
+            self.alignment_table.setFont(font)
+            self.status_label.setText("Font changed")
 
 
 class SequenceEditorEntry:
     """序列编辑器入口类"""
     def run(self):
-        return SequenceEditor()
+        return SequenceAlignmentViewer()
 
 
 if __name__ == "__main__":
