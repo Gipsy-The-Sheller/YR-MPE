@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLabel, QTabWidget, 
                              QTextEdit, QPushButton, QHBoxLayout, QGroupBox)
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont, QPixmap
+from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtGui import QFont, QPixmap, QIcon
 import os
 
 
@@ -39,6 +39,58 @@ class AboutPlugin(QWidget):
         subtitle_label.setFont(subtitle_font)
         subtitle_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(subtitle_label)
+
+#         # 图标组
+#         icon_group_label = QLabel()
+#         icon_group_contents = f"""<img src='{self.plugin_path}/icons/yr-mpea.svg' width='20' height='20'/>
+#         <img src='{self.plugin_path}/icons/software/clustalo.svg' width='20' height='20'/>
+#         <img src='{self.plugin_path}/icons/software/muscle.svg' width='20' height='20'/>
+#         <img src='{self.plugin_path}/icons/software/mafft.svg' width='20' height='20'/>        
+#         <img src='{self.plugin_path}/icons/software/trimal.svg' width='20' height='20'/>
+#         <img src='{self.plugin_path}/icons/software/gblocks.svg' width='20' height='20'/>
+#         <img src='{self.plugin_path}/icons/software/iqtree.svg' width='20' height='20'/>
+# """
+#         icon_group_label.setText(icon_group_contents)
+#         main_layout.addWidget(icon_group_label)
+
+        icon_group_widget = QWidget()
+        icon_group_layout = QHBoxLayout()
+        IconLabel1 = QLabel()
+        IconLabel1.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "yr-mpea.svg")).pixmap(QSize(40, 40)))
+        icon_group_layout.addWidget(IconLabel1)
+
+        IconLabel2 = QLabel()
+        IconLabel2.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "clustalo.svg")).pixmap(QSize(40, 40)))
+        icon_group_layout.addWidget(IconLabel2)
+
+        IconLabel3 = QLabel()
+        IconLabel3.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "muscle.svg")).pixmap(QSize(40, 40)))
+        icon_group_layout.addWidget(IconLabel3)
+
+        IconLabel4 = QLabel()
+        IconLabel4.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "mafft.svg")).pixmap(QSize(40, 40)))
+        icon_group_layout.addWidget(IconLabel4)
+
+        IconLabel5 = QLabel()
+        IconLabel5.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "trimal.svg")).pixmap(QSize(40, 40)))
+        icon_group_layout.addWidget(IconLabel5)
+
+        IconLabel6 = QLabel()
+        IconLabel6.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "gblocks.svg")).pixmap(QSize(40, 40)))
+        icon_group_layout.addWidget(IconLabel6)
+
+        IconLabel7 = QLabel()
+        IconLabel7.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "iqtree.svg")).pixmap(QSize(40, 40)))
+        icon_group_layout.addWidget(IconLabel7)
+
+        IconLabel8 = QLabel()
+        IconLabel8.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "icytree.svg")).pixmap(QSize(40, 40)))
+        icon_group_layout.addWidget(IconLabel8)
+
+        icon_group_widget.setLayout(icon_group_layout)
+        icon_group_layout.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(icon_group_widget)
+
         
         # 创建许可证信息组
         license_group = QGroupBox()
