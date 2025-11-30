@@ -157,23 +157,23 @@ class BasePlugin(QWidget):
         config_guide.exec_()
 
     def handle_import_data(self, import_data):
-        """
-        处理从其他插件导入的数据
-        
-        Args:
-            import_data (list): 从其他插件导入的序列数据列表
-        """
+        """处理从YR-MPEA导入的数据"""
         if isinstance(import_data, list):
-            # 创建临时文件存储导入的序列数据
-            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.fas', delete=False)
-            self.temp_files.append(temp_file.name)
-            
-            with open(temp_file.name, 'w') as f:
+            # 创建临时文件来存储导入的序列数据
+            temp_file = self.create_temp_file(suffix='.fas')
+            with open(temp_file, 'w') as f:
                 for seq in import_data:
                     f.write(f">{seq.id}\n{seq.seq}\n")
+            self.temp_files.append(temp_file)
+            self.import_file = temp_file
+            self.imported_files = [temp_file]
             
-            temp_file.close()
-            self.import_file = temp_file.name
+            # 更新UI显示导入的文件
+            if hasattr(self, 'file_path_edit') and self.file_path_edit:
+                self.file_path_edit.setText(temp_file)
+        else:
+            self.import_file = None
+            self.imported_files = []
 
     def on_destroyed(self):
         """

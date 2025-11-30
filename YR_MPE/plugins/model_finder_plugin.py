@@ -520,8 +520,8 @@ class ModelFinderPlugin(BasePlugin):
         self.output_info.setText(f"Results from: {os.path.basename(iqtree_files[0])}")
         
         # 显示导出按钮
-        self.export_to_mpea_btn.setVisible(True)
-        self.export_table_to_mpea_btn.setVisible(True)
+        # self.export_to_mpea_btn.setVisible(True)
+        # self.export_table_to_mpea_btn.setVisible(True)
     
     def run_analysis(self):
         """运行ModelFinder分析"""
@@ -585,7 +585,7 @@ class ModelFinderPlugin(BasePlugin):
             self.import_to_platform_btn.setVisible(False)
             
         # 显示导出按钮
-        self.export_to_mpea_btn.setVisible(True)
+        # self.export_to_mpea_btn.setVisible(True)
         
         # 保存输出文件路径供导入使用
         self.alignment_output_files = output_files
