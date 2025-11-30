@@ -220,6 +220,7 @@ class SequenceAlignmentViewer(QMainWindow):
         open_action.setIcon(QIcon(os.path.join(self.plugin_path, 'icons/open.svg')))
         open_action.setStatusTip('Open sequence alignment file')
         open_action.triggered.connect(self.open_file)
+
         toolbar.addAction(open_action)
         
     def open_file(self):
@@ -448,11 +449,3 @@ class SequenceEditorEntry:
     """序列编辑器入口类"""
     def run(self):
         return SequenceAlignmentViewer()
-
-
-if __name__ == "__main__":
-    import sys
-    app = QApplication(sys.argv)
-    editor = SequenceEditor()
-    editor.show()
-    sys.exit(app.exec_())
