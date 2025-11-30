@@ -55,6 +55,16 @@ class IcyTreePlugin(QWidget, BasePlugin):
                 self.icytree_path = icytree_html
                 # Load icytree page
                 file_url = QUrl.fromLocalFile(icytree_html)
+                
+                # 断开可能存在的旧连接
+                try:
+                    self.web_view.loadFinished.disconnect()
+                except TypeError:
+                    pass  # 尚未连接
+                
+                # 连接页面加载完成信号
+                self.web_view.loadFinished.connect(self.on_load_finished)
+                
                 self.web_view.load(file_url)
                 self.status_changed.emit("IcyTree loaded")
             else:
@@ -65,48 +75,50 @@ class IcyTreePlugin(QWidget, BasePlugin):
             self.show_error_page(f"Failed to initialize IcyTree: {str(e)}")
             self.status_changed.emit(f"Error: {str(e)}")
     
+    def on_load_finished(self, success):
+        """页面加载完成后的回调函数"""
+        if success and self.nwk_string:
+            # 页面加载成功且有Newick字符串，则注入树数据
+            # 添加延时确保JavaScript完全加载
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(1000, lambda: self.send_newick_to_icytree(self.nwk_string))
+    
     def validate_newick(self, nwk_string):
         """Simple Newick format validation"""
         if not nwk_string:
             return False
         
-        # Basic check: should end with semicolon
-        if not nwk_string.endswith(';'):
-            return False
+        # # Basic check: should end with semicolon
+        # if not nwk_string.endswith(';'):
+        #     return False
         
         # Check bracket matching
         open_count = nwk_string.count('(')
         close_count = nwk_string.count(')')
-        
         return open_count == close_count
     
     def send_newick_to_icytree(self, nwk_string):
         """Send Newick string to IcyTree"""
         try:
             # Escape special characters in JavaScript string
-            escaped_nwk = nwk_string.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$')
+            escaped_nwk = nwk_string.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$').replace('"', '\\"')
             
             # Use JavaScript to pass Newick string to IcyTree
             js_code = f"""
-            // Wait for IcyTree to fully load
-            function loadTreeData() {{
-                if (typeof treeData !== 'undefined' && typeof reloadTreeData === 'function') {{
-                    // Set tree data
-                    treeData = `{escaped_nwk}`;
-                    treeFile = null;
-                    
-                    // Reload tree data
-                    reloadTreeData();
-                    
-                    console.log('Tree data loaded successfully');
-                }} else {{
-                    console.log('IcyTree not ready, retrying...');
-                    setTimeout(loadTreeData, 500);
+            (function() {{
+                try {{
+                    // Set the tree data
+                    window.treeData = `{escaped_nwk}`;
+                    // Reload the tree data
+                    if (typeof window.reloadTreeData === 'function') {{
+                        window.reloadTreeData();
+                    }} else {{
+                        console.error("reloadTreeData function not found");
+                    }}
+                }} catch (e) {{
+                    console.error("Error injecting tree:", e);
                 }}
-            }}
-            
-            // Start loading
-            loadTreeData();
+            }})();
             """
             
             self.web_view.page().runJavaScript(js_code)
@@ -120,28 +132,24 @@ class IcyTreePlugin(QWidget, BasePlugin):
         """Fallback: load tree via file"""
         try:
             # Escape special characters in JavaScript string
-            escaped_nwk = nwk_string.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$')
+            escaped_nwk = nwk_string.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$').replace('"', '\\"')
             
             # Use JavaScript to simulate drag and drop operation
             js_code = f"""
-            // Simulate drag and drop operation to load tree data
-            function simulateDragDrop() {{
-                if (typeof treeData !== 'undefined') {{
-                    // Directly set tree data and reload
-                    treeData = `{escaped_nwk}`;
-                    treeFile = null;
-                    
-                    if (typeof reloadTreeData === 'function') {{
-                        reloadTreeData();
-                        console.log('Tree loaded via fallback method');
+            (function() {{
+                try {{
+                    // Set the tree data
+                    window.treeData = `{escaped_nwk}`;
+                    // Reload the tree data
+                    if (typeof window.reloadTreeData === 'function') {{
+                        window.reloadTreeData();
+                    }} else {{
+                        console.error("reloadTreeData function not found");
                     }}
-                }} else {{
-                    console.log('IcyTree not ready for fallback, retrying...');
-                    setTimeout(simulateDragDrop, 500);
+                }} catch (e) {{
+                    console.error("Error injecting tree:", e);
                 }}
-            }}
-            
-            simulateDragDrop();
+            }})();
             """
             
             self.web_view.page().runJavaScript(js_code)
@@ -209,12 +217,19 @@ class IcyTreePlugin(QWidget, BasePlugin):
         # Update status
         self.status_changed.emit("Loading tree to IcyTree...")
         
-        # Send Newick string to IcyTree
-        self.send_newick_to_icytree(nwk_string)
-        
+        # 如果页面已加载，则直接发送Newick字符串
+        # 否则，将在on_load_finished中处理
+        if self.web_view.url().isValid():
+            self.send_newick_to_icytree(nwk_string)
+        # else: 页面尚未加载，将在on_load_finished中处理
+
         # Update status after delay
         from PyQt5.QtCore import QTimer
-        QTimer.singleShot(2000, lambda: self.status_changed.emit("Tree loaded to IcyTree"))
+        import logging
+        try:
+            QTimer.singleShot(2000, lambda: self.status_changed.emit("Tree loaded to IcyTree"))
+        except Exception as e:
+            logging.error(f"Failed to update status. Check whether the window is still open: {e}")
         
         return True
 
