@@ -80,11 +80,11 @@ class YR_MPEA_Widget(QWidget):
         trim_menu = QMenu()
         trimal_action = QAction("Trimal", trim_action)
         trimal_action.setIcon(QIcon(os.path.join(self.plugin_path, "icons/software/trimal.svg")))
-        # trimal_action.triggered.connect(self.open_trimal_wrapper)
+        trimal_action.triggered.connect(self.open_trimal_wrapper)
         trim_menu.addAction(trimal_action)
         gblocks_action = QAction("GBlocks", trim_action)
         gblocks_action.setIcon(QIcon(os.path.join(self.plugin_path, "icons/software/gblocks.svg")))
-        # gblocks_action.triggered.connect(self.open_gblocks_wrapper)
+        gblocks_action.triggered.connect(self.open_gblocks_wrapper)
         trim_menu.addAction(gblocks_action)
         trim_action.setMenu(trim_menu)
 
@@ -113,13 +113,18 @@ class YR_MPEA_Widget(QWidget):
         # distance_button.setFixedSize(60, 60)
         main_toolbar.addWidget(distance_button)
 
-        comp_dist_action = QAction("Compute Pairwise Distances", distance_button)
-        comp_dist_action.setIcon(QIcon(os.path.join(self.plugin_path, "icons/dist.svg")))
-        comp_mdist_action = QAction("Compute Overall Mean Distances", distance_button)
-        comp_mdist_action.setIcon(QIcon(os.path.join(self.plugin_path, "icons/mdist.svg")))
-
-        distance_button.addAction(comp_dist_action)
-        distance_button.addAction(comp_mdist_action)
+        # 添加"Compute Pairwise Distances"动作
+        self.comp_dist_action = QAction("Compute Pairwise Distances (ML)", self)
+        self.comp_dist_action.setIcon(QIcon(os.path.join(self.plugin_path, "icons/dist.svg")))
+        self.comp_dist_action.triggered.connect(self.open_ml_distance_wrapper)
+        distance_button.addAction(self.comp_dist_action)
+        
+        # 添加"Compute Overall Mean Distances"动作
+        self.comp_mdist_action = QAction("Compute Overall Mean Distances (ML)", self)
+        self.comp_mdist_action.setIcon(QIcon(os.path.join(self.plugin_path, "icons/mdist.svg")))
+        # TODO: 实现平均距离计算功能
+        # self.comp_mdist_action.triggered.connect(self.compute_mean_distances)
+        distance_button.addAction(self.comp_mdist_action)
 
         phylogeny_button = QToolButton()
         phylogeny_button.setText("PHYLOGENY")
@@ -134,6 +139,16 @@ class YR_MPEA_Widget(QWidget):
         cons_ml_action = QAction("Phenetics - Maximum Likelihood Phylogenies (ML)", phylogeny_button)
         cons_ml_action.setIcon(QIcon(os.path.join(self.plugin_path, "icons/ml.svg")))
 
+        ml_menu = QMenu()
+        cons_ml_action.setMenu(ml_menu)
+        
+        # Add IQ-TREE action
+        iqtree_action = QAction("IQ-Tree 3", phylogeny_button)
+        iqtree_action.setIcon(QIcon(os.path.join(self.plugin_path, "icons/software/iqtree.svg")))
+        iqtree_action.triggered.connect(self.open_iqtree_wrapper)
+
+        ml_menu.addAction(iqtree_action)
+        
         # TODO: ML Programs: IQ-TREE 3 / FastTree
 
         cons_bi_action = QAction("Phenetics - Bayesian Inference Phylogenies (BI)", phylogeny_button)
@@ -269,6 +284,14 @@ class YR_MPEA_Widget(QWidget):
         """将模型选择结果添加到工作区"""
         self.workspace.add_model(model_data)
 
+    def add_distance_matrix_to_workspace(self, distance_matrix):
+        """将距离矩阵添加到工作区"""
+        self.workspace.add_distance(distance_matrix)
+
+    def add_phylogeny_to_workspace(self, phylogeny):
+        """将树形图添加到工作区"""
+        self.workspace.add_phylogeny(phylogeny)
+
     def open_clustal_omega_wrapper(self):
         from .plugins.clustal_omega_plugin import ClustalOmegaPluginEntry
         from PyQt5.QtWidgets import QDialog
@@ -294,14 +317,24 @@ class YR_MPEA_Widget(QWidget):
         dialog.exec_()
     
     def open_mafft_wrapper(self):
-        from YR_MPE.aligners import MAFFT_wrapper
+        from YR_MPE.plugins.mafft_plugin import MAFFTPluginEntry
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
         dialog.setWindowTitle("MAFFT - YR-MPEA")
         dialog.setWindowIcon(QIcon(os.path.join(self.plugin_path, "icons/software/mafft.svg")))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
-        mafft_wrapper = MAFFT_wrapper()
+
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+
+        mafft_wrapper = MAFFTPluginEntry().run(import_from=import_from, import_data=import_data)
+        mafft_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
         dialog.layout().addWidget(mafft_wrapper)
         dialog.exec_()
     
@@ -342,6 +375,54 @@ class YR_MPEA_Widget(QWidget):
         dialog.layout().addWidget(icytree_wrapper)
         dialog.exec_()
 
+    def open_trimal_wrapper(self):
+        from .plugins.trimal_plugin import TrimAlPluginEntry
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle("TrimAl - YR-MPEA")
+        dialog.setWindowIcon(QIcon(os.path.join(self.plugin_path, "icons/software/trimal.svg")))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+        
+        # use QDialog to open the trimal_wrapper
+        trimal_wrapper = TrimAlPluginEntry().run(import_from=import_from, import_data=import_data)
+        trimal_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        dialog.layout().addWidget(trimal_wrapper)
+        dialog.exec_()
+        
+    def open_gblocks_wrapper(self):
+        from .plugins.gblocks_plugin import GBlocksPluginEntry
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle("GBlocks - YR-MPEA")
+        dialog.setWindowIcon(QIcon(os.path.join(self.plugin_path, "icons/software/gblocks.svg")))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+        
+        # use QDialog to open the gblocks_wrapper
+        gblocks_wrapper = GBlocksPluginEntry().run(import_from=import_from, import_data=import_data)
+        gblocks_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        dialog.layout().addWidget(gblocks_wrapper)
+        dialog.exec_()
+    
     def open_sequence_files(self):
         file_dialog = QFileDialog()
 
@@ -381,6 +462,143 @@ class YR_MPEA_Widget(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Error opening file: {e}")
             return
+    
+    def open_ml_distance_wrapper(self):
+        from PyQt5.QtWidgets import QDialog
+        from .plugins.ml_distance_plugin import MLDistancePluginEntry
+        dialog = QDialog()
+        dialog.setWindowTitle(f"Distance Calculator [implemented from IQ-TREE] - YR-MPEA")
+        dialog.setWindowIcon(QIcon(os.path.join(self.plugin_path, f"icons/distance.svg")))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        best_model = ""
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+
+                # 如果工作区中有模型信息，则添加到导入数据中
+                if len(self.workspace.items["models"]) >= 1:
+                    model_data = self.workspace.items["models"][0]
+                    # 处理模型表或单个模型
+                    if isinstance(model_data, dict):
+                        if "type" in model_data and model_data["type"] == "model_table" and model_data["data"]:
+                            # 取模型表中的第一个（最佳）模型
+                            best_model = model_data["data"][0]['Model']
+                        elif "Model" in model_data:
+                            # 直接使用单个模型数据
+                            best_model = model_data
+                    
+                    # # 为导入数据添加模型信息
+                    # if isinstance(import_data, list) and len(import_data) > 0:
+                    #     # 为第一个序列添加matrix_header属性
+                    #     first_seq = import_data[0]
+                    #     if hasattr(first_seq, '__dict__') and best_model:
+                    #         # 构造matrix_header信息
+                    #         header_lines = ["# Sequence identity and model information:"]
+                    #         if "Model" in best_model:
+                    #             header_lines.append(f"Model of evolution: {best_model['Model']}")
+                    #         # Gamma信息可能在顶层或在模型数据内
+                    #         gamma_value = model_data.get("Gamma", best_model.get("Gamma"))
+                    #         if gamma_value:
+                    #             header_lines.append(f"Gamma categories: {gamma_value}")
+                    #         first_seq.matrix_header = "\n".join(header_lines)
+
+        
+        # use QDialog to open the plugin_wrapper
+        plugin_wrapper = MLDistancePluginEntry().run(import_from=import_from, import_data=import_data)
+        plugin_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        plugin_wrapper.export_distance_result_signal.connect(self.add_distance_matrix_to_workspace)
+
+        # parse model
+        model_entries = best_model.split("+")
+        plugin_wrapper.model_combo.setCurrentText(model_entries[0])
+
+        # Invariable sites?
+        if "I" in model_entries:
+            plugin_wrapper.invar_checkbox.setChecked(True)
+        
+        # empirical?
+        if "F" in model_entries:
+            plugin_wrapper.empirical_checkbox.setChecked(True)
+        
+        # FreeRate?
+        if "R" in model_entries:
+            plugin_wrapper.freerate_checkbox.setChecked(True)
+        
+        # Gamma Caterories [identify Gx]
+        for item in model_entries[1:]:
+            if item.startswith("G"):
+                plugin_wrapper.gamma_checkbox.setChecked(True)
+                plugin_wrapper.gamma_spinbox.setValue(int(item[1:]))
+        dialog.layout().addWidget(plugin_wrapper)
+        dialog.exec_()
+        
+    def open_iqtree_wrapper(self):
+        from PyQt5.QtWidgets import QDialog
+        from .plugins.iqtree_plugin import IQTreePluginEntry
+        dialog = QDialog()
+        dialog.setWindowTitle(f"Phylogenetic Inference [implemented from IQ-TREE] - YR-MPEA")
+        dialog.setWindowIcon(QIcon(os.path.join(self.plugin_path, f"icons/software/iqtree.svg")))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        best_model = ""
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+
+                # 如果工作区中有模型信息，则添加到导入数据中
+                if len(self.workspace.items["models"]) >= 1:
+                    model_data = self.workspace.items["models"][0]
+                    # 处理模型表或单个模型
+                    if isinstance(model_data, dict):
+                        if "type" in model_data and model_data["type"] == "model_table" and model_data["data"]:
+                            # 取模型表中的第一个（最佳）模型
+                            best_model = model_data["data"][0]['Model']
+                        elif "Model" in model_data:
+                            # 直接使用单个模型数据
+                            best_model = model_data
+        
+        # use QDialog to open the plugin_wrapper
+        plugin_wrapper = IQTreePluginEntry().run(import_from=import_from, import_data=import_data)
+        plugin_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        plugin_wrapper.export_model_result_signal.connect(self.add_model_to_workspace)
+        plugin_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
+
+        # parse model
+        model_entries = best_model.split("+")
+        plugin_wrapper.model_combo.setCurrentText(model_entries[0])
+
+        # Invariable sites?
+        if "I" in model_entries:
+            plugin_wrapper.invar_checkbox.setChecked(True)
+        
+        # empirical?
+        if "F" in model_entries:
+            plugin_wrapper.empirical_checkbox.setChecked(True)
+        
+        # FreeRate?
+        if "R" in model_entries:
+            plugin_wrapper.freerate_checkbox.setChecked(True)
+        
+        # Gamma Caterories [identify Gx]
+        for item in model_entries[1:]:
+            if item.startswith("G"):
+                plugin_wrapper.gamma_checkbox.setChecked(True)
+                plugin_wrapper.gamma_spinbox.setValue(int(item[1:]))
+        dialog.layout().addWidget(plugin_wrapper)
+        dialog.exec_()
 
 class SingleGeneWorkspace(QWidget):
     def __init__(self):
@@ -453,6 +671,7 @@ class SingleGeneWorkspace(QWidget):
             model_button.setIcon(model_icon)
             model_button.setIconSize(QSize(45, 45))
             model_button.setToolTip(f"Model Table ({len(model['data'])} models)")
+            model_button.clicked.connect(lambda: self.view_model_table(model))
             self.grid_layout.addWidget(model_button, 1, 0)
         else:
             # 处理单个模型（向后兼容）
@@ -472,7 +691,9 @@ class SingleGeneWorkspace(QWidget):
         distance_button = QToolButton()
         distance_button.setIcon(distance_icon)
         distance_button.setIconSize(QSize(45, 45))
-        self.grid_layout.addWidget(distance_button, 0, 0)
+        distance_button.setToolTip(f"Distance Matrix")
+        distance_button.clicked.connect(lambda: self.show_distance_matrix(distance))
+        self.grid_layout.addWidget(distance_button, 2, len(self.items["distances"])-1)
     
     def add_phylogeny(self, phylogeny):
         # add a phylogeny to items["phylogenies"]
@@ -482,10 +703,9 @@ class SingleGeneWorkspace(QWidget):
         phylogeny_button = QToolButton()
         phylogeny_button.setIcon(phylogeny_icon)
         phylogeny_button.setIconSize(QSize(45, 45))
-        self.grid_layout.addWidget(phylogeny_button, 0, 0)
-
-        # if clicked, open the tree by icytree
+        phylogeny_button.setToolTip(f"Phylogenetic Tree")
         phylogeny_button.clicked.connect(self.open_icytree_wrapper)
+        self.grid_layout.addWidget(phylogeny_button, 4, len(self.items["phylogenies"])-1)
     
     def add_model_to_workspace(self, model_data):
         """添加模型结果到工作区"""
@@ -499,6 +719,7 @@ class SingleGeneWorkspace(QWidget):
             model_button.setIcon(model_icon)
             model_button.setIconSize(QSize(45, 45))
             model_button.setToolTip(f"Model Table ({len(model_data['data'])} models)")
+            model_button.clicked.connect(lambda: self.view_model_table(model_data))
             self.grid_layout.addWidget(model_button, 1, 0)
         else:
             # 处理单个模型（向后兼容）
@@ -523,8 +744,42 @@ class SingleGeneWorkspace(QWidget):
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
         icytree_wrapper = IcyTreePlugin()
-        icytree_wrapper.set_newick_string(self.items["phylogenies"][-1])
+        icytree_wrapper.set_newick_string(self.items["phylogenies"][-1]['data'][0]['content'])
         dialog.layout().addWidget(icytree_wrapper)
+        dialog.exec_()
+    def view_model_table(self, model_data):
+        """查看模型表"""
+        from PyQt5.QtWidgets import QDialog, QTableWidget, QTableWidgetItem, QVBoxLayout
+        from PyQt5.QtCore import Qt
+        
+        dialog = QDialog()
+        dialog.setWindowTitle("Model Selection Results")
+        dialog.setMinimumSize(800, 400)
+        layout = QVBoxLayout()
+        dialog.setLayout(layout)
+        
+        # 创建表格
+        table = QTableWidget()
+        table.setColumnCount(8)
+        table.setHorizontalHeaderLabels([
+            "Model", "LogL", "AIC", "w-AIC", "AICc", "w-AICc", "BIC", "w-BIC"
+        ])
+        table.setRowCount(len(model_data['data']))
+        
+        # 填充数据
+        for row, model in enumerate(model_data['data']):
+            for col, (key, value) in enumerate(model.items()):
+                item = QTableWidgetItem(value)
+                if key not in ['Model']:
+                    # 数值列右对齐
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                table.setItem(row, col, item)
+        
+        # 调整列宽
+        table.resizeColumnsToContents()
+        table.setSortingEnabled(True)
+        
+        layout.addWidget(table)
         dialog.exec_()
     
     def view_alignment(self, sequences):
@@ -538,6 +793,107 @@ class SingleGeneWorkspace(QWidget):
         if not hasattr(self, 'viewers'):
             self.viewers = []
         self.viewers.append(viewer)
+
+    def show_phylogeny(self):
+        """显示系统发育树"""
+        if not self.items["phylogenies"]:
+            QMessageBox.information(self, "Info", "No phylogeny data available.")
+            return
+            
+        # 显示系统发育树
+        from .icytree import IcyTreeViewer
+        viewer = IcyTreeViewer()
+        print(self.items["phylogenies"][0])
+        viewer.load_tree(self.items["phylogenies"][0])
+
+    def show_distance_matrix(self, distance_data=None):
+        """显示距离矩阵"""
+        if not distance_data:
+            QMessageBox.information(self, "Info", "No distance matrix data available.")
+            return
+            
+        # 创建对话框显示距离矩阵
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
+        from PyQt5.QtCore import Qt
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Distance Matrix Visualization")
+        dialog.resize(800, 600)
+        layout = QVBoxLayout(dialog)
+        
+        # 创建表格控件
+        table = QTableWidget()
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        
+        # 获取第一个距离矩阵数据
+        content = distance_data['data'][0]['content']
+        
+        # 解析距离矩阵内容
+        lines = content.strip().split('\n')
+        if not lines:
+            QMessageBox.warning(self, "Warning", "Invalid distance matrix format.")
+            return
+            
+        # 第一行是序列数量
+        try:
+            num_sequences = int(lines[0].strip())
+        except ValueError:
+            QMessageBox.warning(self, "Warning", "Invalid distance matrix format: first line should be the number of sequences.")
+            return
+            
+        # 后续行是距离数据
+        if len(lines) < num_sequences + 1:
+            QMessageBox.warning(self, "Warning", "Incomplete distance matrix data.")
+            return
+            
+        # 获取序列名称和距离数据
+        sequence_names = []
+        matrix_values = []
+        
+        for i in range(1, num_sequences + 1):
+            parts = lines[i].split()
+            if len(parts) < 2:
+                QMessageBox.warning(self, "Warning", f"Invalid distance matrix format at line {i+1}.")
+                return
+                
+            sequence_names.append(parts[0])
+            try:
+                # 剩余部分都是距离值
+                row_values = [float(val) for val in parts[1:]]
+                matrix_values.append(row_values)
+            except ValueError:
+                QMessageBox.warning(self, "Warning", f"Invalid numeric value in distance matrix at line {i+1}.")
+                return
+        
+        # 设置表格行列数
+        table.setRowCount(num_sequences)
+        table.setColumnCount(num_sequences)
+        
+        # 设置表头
+        for i in range(num_sequences):
+            table.setHorizontalHeaderItem(i, QTableWidgetItem(sequence_names[i]))
+            table.setVerticalHeaderItem(i, QTableWidgetItem(sequence_names[i]))
+        
+        # 填充数据
+        for i in range(num_sequences):
+            for j in range(num_sequences):
+                if i == j:
+                    item = QTableWidgetItem("0.0000")
+                else:
+                    # 注意矩阵索引，因为第一列是序列名
+                    value = matrix_values[i][j]
+                    item = QTableWidgetItem(f"{value:.4f}")
+                    
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                table.setItem(i, j, item)
+        
+        # 设置表格属性
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.setSizeAdjustPolicy(QTableWidget.AdjustToContents)
+        
+        layout.addWidget(table)
+        dialog.exec_()
 
 class YR_MPEA_entry:
     def run(self):
