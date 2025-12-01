@@ -768,14 +768,23 @@ class SingleGeneWorkspace(QWidget):
         dialog.exec_()
     def view_model_table(self, model_data):
         """查看模型表"""
-        from PyQt5.QtWidgets import QDialog, QTableWidget, QTableWidgetItem, QVBoxLayout
+        from PyQt5.QtWidgets import QDialog, QTableWidget, QTableWidgetItem, QVBoxLayout, QMenuBar, QMenu, QAction, QFileDialog
         from PyQt5.QtCore import Qt
+        import json
         
         dialog = QDialog()
         dialog.setWindowTitle("Model Selection Results")
         dialog.setMinimumSize(800, 400)
         layout = QVBoxLayout()
         dialog.setLayout(layout)
+        
+        # 创建菜单栏
+        menubar = QMenuBar(dialog)
+        layout.setMenuBar(menubar)
+        
+        # 创建Export菜单
+        export_menu = QMenu("&Export", dialog)
+        menubar.addMenu(export_menu)
         
         # 创建表格
         table = QTableWidget()
@@ -798,9 +807,70 @@ class SingleGeneWorkspace(QWidget):
         table.resizeColumnsToContents()
         table.setSortingEnabled(True)
         
+        # 添加导出选项
+        export_csv_action = QAction("&To CSV", dialog)
+        export_csv_action.triggered.connect(lambda: self.export_model_table_to_csv(table, model_data))
+        export_menu.addAction(export_csv_action)
+        
+        export_xlsx_action = QAction("To &XLSX", dialog)
+        export_xlsx_action.triggered.connect(lambda: self.export_model_table_to_xlsx(table, model_data))
+        export_menu.addAction(export_xlsx_action)
+        
         layout.addWidget(table)
         dialog.exec_()
-    
+        
+    def export_model_table_to_csv(self, table, model_data):
+        """导出模型表到CSV文件"""
+        file_path, _ = QFileDialog.getSaveFileName(None, "Save Model Table to CSV", "", "CSV Files (*.csv)")
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    # 写入表头
+                    headers = ["Model", "LogL", "AIC", "w-AIC", "AICc", "w-AICc", "BIC", "w-BIC"]
+                    f.write(",".join(headers) + "\n")
+                    
+                    # 写入数据行
+                    for i in range(table.rowCount()):
+                        row_data = []
+                        for j in range(table.columnCount()):
+                            item = table.item(i, j)
+                            row_data.append(item.text() if item else "")
+                        f.write(",".join(row_data) + "\n")
+                
+                QMessageBox.information(None, "Success", f"Model table exported to {file_path}")
+            except Exception as e:
+                QMessageBox.critical(None, "Error", f"Failed to export model table:\n{str(e)}")
+                
+    def export_model_table_to_xlsx(self, table, model_data):
+        """导出模型表到XLSX文件"""
+        try:
+            import pandas as pd
+            
+            file_path, _ = QFileDialog.getSaveFileName(None, "Save Model Table to Excel", "", "Excel Files (*.xlsx)")
+            if file_path:
+                # 创建数据列表
+                data = []
+                headers = ["Model", "LogL", "AIC", "w-AIC", "AICc", "w-AICc", "BIC", "w-BIC"]
+                
+                for i in range(table.rowCount()):
+                    row_data = {}
+                    for j in range(table.columnCount()):
+                        header = headers[j]
+                        item = table.item(i, j)
+                        row_data[header] = item.text() if item else ""
+                    data.append(row_data)
+                
+                # 创建DataFrame
+                df = pd.DataFrame(data)
+                
+                # 保存到Excel
+                df.to_excel(file_path, index=False)
+                QMessageBox.information(None, "Success", f"Model table exported to {file_path}")
+                
+        except ImportError:
+            QMessageBox.warning(None, "Warning", "pandas library is required for Excel export. Please install pandas to use this feature.")
+        except Exception as e:
+            QMessageBox.critical(None, "Error", f"Failed to export model table:\n{str(e)}")
     def view_alignment(self, sequences):
         """查看序列比对结果"""
         from .sequence_editor import SequenceAlignmentViewer
@@ -832,13 +902,31 @@ class SingleGeneWorkspace(QWidget):
             return
             
         # 创建对话框显示距离矩阵
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QMenuBar, QMenu, QAction, QFileDialog
         from PyQt5.QtCore import Qt
+        from PyQt5.QtGui import QFont
         
         dialog = QDialog(self)
         dialog.setWindowTitle("Distance Matrix Visualization")
         dialog.resize(800, 600)
         layout = QVBoxLayout(dialog)
+        
+        # 创建菜单栏
+        menubar = QMenuBar(dialog)
+        layout.setMenuBar(menubar)
+        
+        # 创建Export菜单
+        export_menu = QMenu("&Export", dialog)
+        menubar.addMenu(export_menu)
+        
+        # 添加导出选项
+        export_csv_action = QAction("&To CSV", dialog)
+        export_csv_action.triggered.connect(lambda: self.export_distance_matrix_to_csv(table, sequence_names))
+        export_menu.addAction(export_csv_action)
+        
+        export_xlsx_action = QAction("To &XLSX", dialog)
+        export_xlsx_action.triggered.connect(lambda: self.export_distance_matrix_to_xlsx(table, sequence_names))
+        export_menu.addAction(export_xlsx_action)
         
         # 创建表格控件
         table = QTableWidget()
@@ -913,6 +1001,56 @@ class SingleGeneWorkspace(QWidget):
         
         layout.addWidget(table)
         dialog.exec_()
+        
+    def export_distance_matrix_to_csv(self, table, sequence_names):
+        """导出距离矩阵到CSV文件"""
+        file_path, _ = QFileDialog.getSaveFileName(None, "Save Distance Matrix to CSV", "", "CSV Files (*.csv)")
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    # 写入表头
+                    f.write("," + ",".join(sequence_names) + "\n")
+                    
+                    # 写入数据行
+                    for i in range(table.rowCount()):
+                        row_data = [sequence_names[i]]
+                        for j in range(table.columnCount()):
+                            item = table.item(i, j)
+                            row_data.append(item.text() if item else "")
+                        f.write(",".join(row_data) + "\n")
+                
+                QMessageBox.information(None, "Success", f"Distance matrix exported to {file_path}")
+            except Exception as e:
+                QMessageBox.critical(None, "Error", f"Failed to export distance matrix:\n{str(e)}")
+                
+    def export_distance_matrix_to_xlsx(self, table, sequence_names):
+        """导出距离矩阵到XLSX文件"""
+        try:
+            import pandas as pd
+            import numpy as np
+            
+            file_path, _ = QFileDialog.getSaveFileName(None, "Save Distance Matrix to Excel", "", "Excel Files (*.xlsx)")
+            if file_path:
+                # 创建数据矩阵
+                data = []
+                for i in range(table.rowCount()):
+                    row_data = []
+                    for j in range(table.columnCount()):
+                        item = table.item(i, j)
+                        row_data.append(item.text() if item else "")
+                    data.append(row_data)
+                
+                # 创建DataFrame
+                df = pd.DataFrame(data, columns=sequence_names, index=sequence_names)
+                
+                # 保存到Excel
+                df.to_excel(file_path)
+                QMessageBox.information(None, "Success", f"Distance matrix exported to {file_path}")
+                
+        except ImportError:
+            QMessageBox.warning(None, "Warning", "pandas library is required for Excel export. Please install pandas to use this feature.")
+        except Exception as e:
+            QMessageBox.critical(None, "Error", f"Failed to export distance matrix:\n{str(e)}")
 
 class YR_MPEA_entry:
     def run(self):
