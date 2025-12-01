@@ -98,7 +98,7 @@ class MAFFTPlugin(BasePlugin):
     def __init__(self, import_from=None, import_data=None):
         """初始化MAFFT插件"""
         super().__init__(import_from, import_data)
-        if import_from == "YR_MPEA" and import_data is not None:
+        if import_from in ["YR_MPEA", "seq_viewer"] and import_data is not None:
             self.handle_import_data(import_data)
         
     def init_plugin_info(self):
@@ -289,7 +289,7 @@ class MAFFTPlugin(BasePlugin):
         QMessageBox.information(self, "Success", "Alignment completed successfully!")
         
         # 显示导入按钮（仅在从平台导入数据时显示）
-        if self.import_from == "YR_MPEA":
+        if self.import_from in ["YR_MPEA", "seq_viewer"]:
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)

@@ -102,7 +102,7 @@ class TrimAlPlugin(BasePlugin):
         self.init_plugin_info()
         
         # 特别处理YR-MPEA导入的数据
-        if import_from == "YR_MPEA" and import_data is not None:
+        if import_from in ["YR_MPEA", "seq_viewer"] and import_data is not None:
             self.handle_import_data(import_data)
         
     def init_plugin_info(self):
@@ -570,7 +570,7 @@ class TrimAlPlugin(BasePlugin):
         self.add_console_message(f"TrimAl completed successfully! Found {len(output_files)} result file(s)", "info")
         
         # 显示导入按钮（仅在从平台导入数据时显示）
-        if self.import_from == "YR_MPEA":
+        if self.import_from in ["YR_MPEA", "seq_viewer"]:
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)
