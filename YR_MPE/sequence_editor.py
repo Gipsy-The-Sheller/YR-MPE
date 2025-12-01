@@ -185,6 +185,7 @@ class SequenceAlignmentViewer(QMainWindow):
         
         # 初始化变量
         self.current_file = None
+        self.highlight_scheme = "nucleotide"
         
     def create_selection_controls(self):
         """创建序列和位置选择控件"""
@@ -340,6 +341,28 @@ class SequenceAlignmentViewer(QMainWindow):
         font_action.setStatusTip('Change font')
         font_action.triggered.connect(self.change_font)
         view_menu.addAction(font_action)
+        
+        # 高亮方案子菜单
+        highlight_menu = view_menu.addMenu('&Highlight Scheme')
+        
+        nucleotide_action = QAction('&Nucleotide', self)
+        nucleotide_action.setStatusTip('Use nucleotide highlighting scheme')
+        nucleotide_action.setCheckable(True)
+        nucleotide_action.setChecked(True)
+        nucleotide_action.triggered.connect(lambda: self.change_highlight_scheme("nucleotide"))
+        highlight_menu.addAction(nucleotide_action)
+        
+        protein_action = QAction('&Protein', self)
+        protein_action.setStatusTip('Use ClustalX protein highlighting scheme')
+        protein_action.setCheckable(True)
+        protein_action.setChecked(False)
+        protein_action.triggered.connect(lambda: self.change_highlight_scheme("protein"))
+        highlight_menu.addAction(protein_action)
+        
+        # 创建动作组以确保互斥选择
+        self.highlight_action_group = QActionGroup(self)
+        self.highlight_action_group.addAction(nucleotide_action)
+        self.highlight_action_group.addAction(protein_action)
         
     def create_toolbar(self):
         toolbar = QToolBar('Main Toolbar')
@@ -543,17 +566,11 @@ class SequenceAlignmentViewer(QMainWindow):
                 item.setTextAlignment(Qt.AlignCenter)
                 item.setFlags(item.flags() ^ Qt.ItemIsEditable)
                 
-                # 根据核苷酸类型着色
-                if nucleotide.upper() == 'A':
-                    item.setBackground(QColor(255, 150, 150))  # 浅红色
-                elif nucleotide.upper() == 'T' or nucleotide.upper() == 'U':
-                    item.setBackground(QColor(150, 150, 255))  # 浅蓝色
-                elif nucleotide.upper() == 'G':
-                    item.setBackground(QColor(150, 255, 150))  # 浅绿色
-                elif nucleotide.upper() == 'C':
-                    item.setBackground(QColor(255, 255, 150))  # 浅黄色
-                elif nucleotide.upper() == '-':
-                    item.setBackground(QColor(200, 200, 200))  # 浅灰色，表示缺口
+                # 根据高亮方案着色
+                if self.highlight_scheme == "nucleotide":
+                    self.apply_nucleotide_coloring(item, nucleotide)
+                else:  # protein
+                    self.apply_protein_coloring(item, nucleotide)
                     
                 self.alignment_table.setItem(row, col, item)
                 
@@ -584,14 +601,60 @@ class SequenceAlignmentViewer(QMainWindow):
         
         # 连接表格点击事件
         self.alignment_table.cellClicked.connect(self.on_alignment_cell_clicked)
-
-        # 设置插入 保存 另存为按钮可用
-        self.insert_action.setEnabled(True)
-        self.save_action.setEnabled(True)
-        self.save_as_action.setEnabled(True)
-        self.insert_action_toolbar.setEnabled(True)
-        self.save_as_action_toolbar.setEnabled(True)
-        self.save_action_toolbar.setEnabled(True)
+        
+    def apply_nucleotide_coloring(self, item, nucleotide):
+        """应用核苷酸着色方案"""
+        if nucleotide.upper() == 'A':
+            item.setBackground(QColor(255, 150, 150))  # 浅红色
+        elif nucleotide.upper() == 'T' or nucleotide.upper() == 'U':
+            item.setBackground(QColor(150, 150, 255))  # 浅蓝色
+        elif nucleotide.upper() == 'G':
+            item.setBackground(QColor(150, 255, 150))  # 浅绿色
+        elif nucleotide.upper() == 'C':
+            item.setBackground(QColor(255, 255, 150))  # 浅黄色
+        elif nucleotide.upper() == '-':
+            item.setBackground(QColor(200, 200, 200))  # 浅灰色，表示缺口
+        else:
+            item.setBackground(QColor(255, 255, 255))  # 白色背景
+            
+    def apply_protein_coloring(self, item, amino_acid):
+        """应用ClustalX蛋白质着色方案"""
+        aa = amino_acid.upper()
+        
+        # Hydrophobic - 蓝色 (A,C,I,L,M,F,W,V)
+        if aa in 'ACILMFWV':
+            item.setBackground(QColor(170, 200, 255))  # 蓝色
+        # Positive charge - 红色 (K,R)
+        elif aa in 'KR':
+            item.setBackground(QColor(255, 170, 170))  # 红色
+        # Negative charge - 洋红色 (E,D)
+        elif aa in 'ED':
+            item.setBackground(QColor(255, 170, 255))  # 洋红色
+        # Polar - 绿色 (N,Q,S,T)
+        elif aa in 'NQST':
+            item.setBackground(QColor(170, 255, 170))  # 绿色
+        # Cysteines - 粉色 (C)
+        elif aa == 'C':
+            item.setBackground(QColor(255, 200, 200))  # 粉色
+        # Glycines - 橙色 (G)
+        elif aa == 'G':
+            item.setBackground(QColor(255, 200, 170))  # 橙色
+        # Prolines - 黄色 (P)
+        elif aa == 'P':
+            item.setBackground(QColor(255, 255, 170))  # 黄色
+        # Aromatic - 青色 (H,Y)
+        elif aa in 'HY':
+            item.setBackground(QColor(170, 255, 255))  # 青色
+        # 其他 - 白色
+        else:
+            item.setBackground(QColor(255, 255, 255))  # 白色
+            
+    def change_highlight_scheme(self, scheme):
+        """更改高亮方案"""
+        self.highlight_scheme = scheme
+        # 重新显示比对以应用新的高亮方案
+        self.display_alignment()
+        self.status_label.setText(f"Highlight scheme changed to {scheme}")
         
     def on_alignment_cell_clicked(self, row, column):
         """处理比对表格单元格点击事件"""
