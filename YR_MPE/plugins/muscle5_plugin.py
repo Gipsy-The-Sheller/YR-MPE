@@ -20,7 +20,7 @@
 from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, 
                              QMessageBox, QGroupBox, QFormLayout, QLineEdit, 
                              QSpinBox, QCheckBox, QLabel, QComboBox, QScrollArea,
-                             QWidget, QFrame, QTextEdit)
+                             QWidget, QFrame, QTextEdit, QRadioButton)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
 import tempfile
@@ -36,8 +36,10 @@ from ..templates.base_process_thread import BaseProcessThread
 class Muscle5Thread(BaseProcessThread):
     """MUSCLE5比对线程类"""
     
-    def __init__(self, tool_path, input_files, parameters, imported_files=None):
+    def __init__(self, tool_path, input_files, parameters, imported_files=None, suffix=None):
         super().__init__(tool_path, input_files, parameters, imported_files)
+        if suffix:
+            self.output_suffix = suffix
     
     def get_tool_name(self):
         """返回工具名称"""
@@ -151,7 +153,12 @@ class Muscle5Thread(BaseProcessThread):
                 self.console_output.emit(f"Processing file {i+1}/{total_files}: {os.path.basename(input_file)}", "info")
                 
                 # 创建输出文件
-                output_file = self.create_temp_file(suffix='.fas')
+                # 如果是从UI传递过来的suffix参数，则使用它来构造输出文件名
+                if self.output_suffix:
+                    # 构造带后缀的输出文件名
+                    output_file = f"{input_file}{self.output_suffix}.fas"
+                else:
+                    output_file = self.create_temp_file(suffix='.fas')
                 # html_file = self.create_temp_file(suffix='.html')
                 
                 # 构建命令
@@ -567,7 +574,7 @@ class Muscle5Plugin(BasePlugin):
         self.input_tab.setLayout(layout)
         
         # Input by file or text
-        input_group = QGroupBox("Input")
+        input_group = QGroupBox("Input / Output")
         input_layout = QFormLayout()
         input_group.setLayout(input_layout)
         layout.addWidget(input_group)
@@ -595,6 +602,29 @@ class Muscle5Plugin(BasePlugin):
         self.sequence_text.setMaximumHeight(200)
         self.sequence_text.textChanged.connect(self.on_text_changed)
         input_layout.addRow("Sequence text:", self.sequence_text)
+
+        # Output settings
+        output_settings_group = QWidget()
+        output_settings_group.setLayout(QVBoxLayout())
+        output_settings_group.layout().setContentsMargins(0, 0, 0, 0)
+        output_settings_group.setContentsMargins(0, 0, 0, 0)
+        output_radio_group = QWidget()
+        output_radio_group.setLayout(QHBoxLayout())
+        self.save_to_cwd = QRadioButton("Current Directory")
+        self.save_to_cwd.setChecked(True)
+        self.save_to_tmp = QRadioButton("Temporary File")
+        output_radio_group.layout().addWidget(self.save_to_cwd)
+        output_radio_group.layout().addWidget(self.save_to_tmp)
+        output_settings_group.layout().addWidget(output_radio_group)
+
+        self.save_to_cwd.toggled.connect(self.on_output_radio_changed)
+        self.save_to_tmp.toggled.connect(self.on_output_radio_changed)
+
+        self.output_suffix_edit = QLineEdit('_m5')
+        self.output_suffix_edit.setPlaceholderText("Output suffix")
+        output_settings_group.layout().addWidget(self.output_suffix_edit)
+        input_layout.addRow("Save to:", output_settings_group)
+
 
         # Check if file is imported
         if self.import_file:
@@ -644,6 +674,15 @@ class Muscle5Plugin(BasePlugin):
         if not hasattr(self, 'file_tags'):
             self.file_tags = []  # List of file tag widgets
 
+
+    def on_output_radio_changed(self):
+        """处理输出选项的切换"""
+        if self.save_to_cwd.isChecked():
+            self.output_suffix_edit.setEnabled(True)
+            self.output_suffix_edit.setVisible(True)
+        elif self.save_to_tmp.isChecked():
+            self.output_suffix_edit.setEnabled(False)
+            self.output_suffix_edit.setVisible(False)
     def browse_files(self):
         """浏览选择文件"""
         file_paths, _ = QFileDialog.getOpenFileNames(
@@ -766,6 +805,9 @@ class Muscle5Plugin(BasePlugin):
             self.file_path_edit.setVisible(False)
             self.file_browse_btn.setVisible(False)
             self.file_tags_container.setVisible(False)
+            self.save_to_tmp.setChecked(True)
+            # self.save_to_tmp.setEnabled(False)
+            self.save_to_cwd.setEnabled(False)
             # Clear imported files
             self.clear_all_file_tags()
         else:
@@ -818,12 +860,18 @@ class Muscle5Plugin(BasePlugin):
             if not sequence_text and not self.import_file:
                 QMessageBox.warning(self, "Warning", "Please input sequence text!")
                 return None
-                
-            # Create temporary file
-            temp_file = self.create_temp_file(suffix='.fas')
-            with open(temp_file, 'w') as f:
-                f.write(sequence_text)
-            return [temp_file]
+            
+            if self.save_to_tmp.isChecked():
+                # Create temporary file
+                temp_file = self.create_temp_file(suffix='.fas')
+                with open(temp_file, 'w') as f:
+                    f.write(sequence_text)
+                return [temp_file]
+            
+            elif self.save_to_cwd.isChecked():
+                # directly use input paths
+                temp_file = self.import_file
+                return [temp_file]
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Prepare input files failed: {e}")
@@ -871,14 +919,19 @@ class Muscle5Plugin(BasePlugin):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
         
+                # 如果需要添加输出文件后缀，则设置suffix属性
+        if self.save_to_cwd.isChecked():
+            suffix = self.output_suffix_edit.text()
+
         # 创建并启动比对线程
         self.alignment_thread = Muscle5Thread(
             self.tool_path, 
             input_files, 
             self.get_parameters(), 
-            self.imported_files
+            self.imported_files,
+            suffix = suffix
         )
-        
+               
         # 连接信号
         self.alignment_thread.progress.connect(self.progress_bar.setFormat)
         self.alignment_thread.finished.connect(self.analysis_finished)
