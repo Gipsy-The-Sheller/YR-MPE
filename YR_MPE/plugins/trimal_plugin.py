@@ -20,7 +20,7 @@
 from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, 
                              QMessageBox, QGroupBox, QFormLayout, QLineEdit, 
                              QSpinBox, QCheckBox, QLabel, QComboBox, QScrollArea,
-                             QWidget, QFrame, QTextEdit, QToolButton, QDialog, QDoubleSpinBox)
+                             QWidget, QFrame, QTextEdit, QToolButton, QDialog, QDoubleSpinBox, QRadioButton)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
 import tempfile
@@ -37,8 +37,10 @@ import subprocess
 class TrimAlThread(BaseProcessThread):
     """TrimAl修剪线程类"""
     
-    def __init__(self, tool_path, input_files, parameters, imported_files=None):
+    def __init__(self, tool_path, input_files, parameters, imported_files=None, suffix=None):
         super().__init__(tool_path, input_files, parameters, imported_files)
+        if suffix:
+            self.output_suffix = suffix
     
     def get_tool_name(self):
         """返回工具名称"""
@@ -60,7 +62,12 @@ class TrimAlThread(BaseProcessThread):
                 self.console_output.emit(f"Processing file {i+1}/{total_files}: {os.path.basename(input_file)}", "info")
                 
                 # 创建输出文件
-                output_file = self.create_temp_file(suffix='.fas')
+                # 如果是从UI传递过来的suffix参数，则使用它来构造输出文件名
+                if self.output_suffix:
+                    # 构造带后缀的输出文件名
+                    output_file = f"{input_file}{self.output_suffix}.fas"
+                else:
+                    output_file = self.create_temp_file(suffix='.fas')
                 
                 # 创建HTML输出文件
                 html_file = self.create_temp_file(suffix='.html')
@@ -146,7 +153,7 @@ class TrimAlPlugin(BasePlugin):
         self.input_tab.setLayout(layout)
         
         # 输入组
-        input_group = QGroupBox("Input")
+        input_group = QGroupBox("Input / Output")
         input_layout = QFormLayout()
         input_group.setLayout(input_layout)
         layout.addWidget(input_group)
@@ -228,6 +235,28 @@ class TrimAlPlugin(BasePlugin):
         advanced_btn = QPushButton("Advanced Parameters...")
         advanced_btn.clicked.connect(self.show_advanced_dialog)
         basic_params_layout.addRow("", advanced_btn)
+        
+        # Output settings
+        output_settings_group = QWidget()
+        output_settings_group.setLayout(QVBoxLayout())
+        output_settings_group.layout().setContentsMargins(0, 0, 0, 0)
+        output_settings_group.setContentsMargins(0, 0, 0, 0)
+        output_radio_group = QWidget()
+        output_radio_group.setLayout(QHBoxLayout())
+        self.save_to_cwd = QRadioButton("Current Directory")
+        self.save_to_cwd.setChecked(True)
+        self.save_to_tmp = QRadioButton("Temporary File")
+        output_radio_group.layout().addWidget(self.save_to_cwd)
+        output_radio_group.layout().addWidget(self.save_to_tmp)
+        output_settings_group.layout().addWidget(output_radio_group)
+
+        self.save_to_cwd.toggled.connect(self.on_output_radio_changed)
+        self.save_to_tmp.toggled.connect(self.on_output_radio_changed)
+
+        self.output_suffix_edit = QLineEdit('_trimal')
+        self.output_suffix_edit.setPlaceholderText("Output suffix")
+        output_settings_group.layout().addWidget(self.output_suffix_edit)
+        input_layout.addRow("Save to:", output_settings_group)
 
         layout.addStretch()
         
@@ -430,12 +459,18 @@ class TrimAlPlugin(BasePlugin):
             if not sequence_text and not self.import_file:
                 QMessageBox.warning(self, "Warning", "Please provide alignment files or sequence text!")
                 return None
-                
-            # Create temporary file
-            temp_file = self.create_temp_file(suffix='.fas')
-            with open(temp_file, 'w') as f:
-                f.write(sequence_text)
-            return [temp_file]
+            
+            if self.save_to_tmp.isChecked():
+                # Create temporary file
+                temp_file = self.create_temp_file(suffix='.fas')
+                with open(temp_file, 'w') as f:
+                    f.write(sequence_text)
+                return [temp_file]
+            
+            elif self.save_to_cwd.isChecked():
+                # directly use input paths
+                temp_file = self.import_file
+                return [temp_file]
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Prepare input files failed: {e}")
@@ -452,41 +487,48 @@ class TrimAlPlugin(BasePlugin):
         """获取命令行参数"""
         params = []
         
-        # 基于模式选择的基本参数
+        # 修剪模式
         mode_text = self.mode_combo.currentText()
-        if "Gappyout" in mode_text:
-            params.append("-gappyout")
-        elif "Strict" in mode_text and "plus" in mode_text.lower():
-            params.append("-strictplus")
-        elif "Strict" in mode_text:
+        if "-strict" in mode_text:
             params.append("-strict")
-        elif "Automated" in mode_text:
+        elif "-strictplus" in mode_text:
+            params.append("-strictplus")
+        elif "-gappyout" in mode_text:
+            params.append("-gappyout")
+        elif "-automated1" in mode_text:
             params.append("-automated1")
-        # Manual模式不需要额外参数
-        
+            
         # 输出格式
         format_text = self.output_format_combo.currentText()
-        if "FASTA" in format_text and "fasta" in format_text.lower():
-            params.append("-fasta")
-        elif "CLUSTAL" in format_text:
+        if "-clustal" in format_text:
             params.append("-clustal")
-        elif "NEXUS" in format_text:
+        elif "-nexus" in format_text:
             params.append("-nexus")
-        elif "PHYLIP" in format_text and "3.2" in format_text:
-            params.append("-phylip3.2")
-        elif "PHYLIP" in format_text:
+        elif "-phylip" in format_text:
             params.append("-phylip")
-        elif "MEGA" in format_text:
+        elif "-phylip3.2" in format_text:
+            params.append("-phylip3.2")
+        elif "-mega" in format_text:
             params.append("-mega")
-        elif "NBRF" in format_text:
+        elif "-nbrf" in format_text:
             params.append("-nbrf")
-        
+        # 默认为fasta格式，无需额外参数
+            
         # 添加高级参数
         if hasattr(self, 'advanced_params'):
             params.extend(self.advanced_params)
-        
+            
         return params
-    
+
+    def on_output_radio_changed(self):
+        """处理输出选项的切换"""
+        if self.save_to_cwd.isChecked():
+            self.output_suffix_edit.setEnabled(True)
+            self.output_suffix_edit.setVisible(True)
+        elif self.save_to_tmp.isChecked():
+            self.output_suffix_edit.setEnabled(False)
+            self.output_suffix_edit.setVisible(False)
+
     def display_results(self, output_files):
         """在输出标签页中显示结果"""
         if not output_files:
@@ -540,9 +582,14 @@ class TrimAlPlugin(BasePlugin):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # 未知进度
         
+        # 如果需要添加输出文件后缀，则设置suffix属性
+        suffix = None
+        if self.save_to_cwd.isChecked():
+            suffix = self.output_suffix_edit.text()
+        
         # 在单独的线程中运行TrimAl
         self.analysis_thread = TrimAlThread(
-            self.tool_path, input_files, self.get_parameters(), self.imported_files
+            self.tool_path, input_files, self.get_parameters(), self.imported_files, suffix=suffix
         )
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
         self.analysis_thread.finished.connect(self.analysis_finished)

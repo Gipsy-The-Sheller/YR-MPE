@@ -20,7 +20,7 @@
 from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, 
                              QMessageBox, QGroupBox, QFormLayout, QLineEdit, 
                              QSpinBox, QCheckBox, QLabel, QComboBox, QScrollArea,
-                             QWidget, QFrame, QTextEdit, QToolButton, QDialog, QDoubleSpinBox)
+                             QWidget, QFrame, QTextEdit, QToolButton, QDialog, QDoubleSpinBox, QRadioButton)
 from PyQt5.QtCore import Qt, pyqtSignal, QUrl
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWebEngineWidgets import QWebEngineView
@@ -38,8 +38,10 @@ import subprocess
 class GBlocksThread(BaseProcessThread):
     """GBlocks修剪线程类"""
     
-    def __init__(self, tool_path, input_files, parameters, imported_files=None):
+    def __init__(self, tool_path, input_files, parameters, imported_files=None, suffix=None):
         super().__init__(tool_path, input_files, parameters, imported_files)
+        if suffix:
+            self.output_suffix = suffix
     
     def get_tool_name(self):
         """返回工具名称"""
@@ -77,8 +79,18 @@ class GBlocksThread(BaseProcessThread):
                     return
                 
                 # GBlocks会自动生成输出文件，通常为原文件名加-gb后缀
-                base_name = os.path.splitext(input_file)[0]
-                output_file = f"{base_name}-gb"
+                # 如果是从UI传递过来的suffix参数，则使用它来构造输出文件名
+                if self.output_suffix:
+                    # 构造带后缀的输出文件名
+                    base_name = os.path.splitext(input_file)[0]
+                    output_file = f"{base_name}{self.output_suffix}.fas"
+                    # 同时需要重命名GBlocks生成的默认输出文件
+                    default_gb_file = f"{base_name}-gb"
+                    if os.path.exists(default_gb_file):
+                        os.rename(default_gb_file, output_file)
+                else:
+                    base_name = os.path.splitext(input_file)[0]
+                    output_file = f"{base_name}-gb"
                 
                 # HTML文件通常为原文件名加-gb.htm后缀
                 gblocks_html_file = f"{base_name}-gb.htm"
@@ -246,6 +258,28 @@ class GBlocksPlugin(BasePlugin):
         self.seq_type_combo = QComboBox()
         self.seq_type_combo.addItems(["Auto", "Protein", "DNA", "Codons"])
         params_form_layout.addRow("Sequence Type:", self.seq_type_combo)
+        
+        # Output settings
+        output_settings_group = QWidget()
+        output_settings_group.setLayout(QVBoxLayout())
+        output_settings_group.layout().setContentsMargins(0, 0, 0, 0)
+        output_settings_group.setContentsMargins(0, 0, 0, 0)
+        output_radio_group = QWidget()
+        output_radio_group.setLayout(QHBoxLayout())
+        self.save_to_cwd = QRadioButton("Current Directory")
+        self.save_to_cwd.setChecked(True)
+        self.save_to_tmp = QRadioButton("Temporary File")
+        output_radio_group.layout().addWidget(self.save_to_cwd)
+        output_radio_group.layout().addWidget(self.save_to_tmp)
+        output_settings_group.layout().addWidget(output_radio_group)
+
+        self.save_to_cwd.toggled.connect(self.on_output_radio_changed)
+        self.save_to_tmp.toggled.connect(self.on_output_radio_changed)
+
+        self.output_suffix_edit = QLineEdit('_gblocks')
+        self.output_suffix_edit.setPlaceholderText("Output suffix")
+        output_settings_group.layout().addWidget(self.output_suffix_edit)
+        params_form_layout.addRow("Save to:", output_settings_group)
         
         # 保守位置最小序列数
         self.b1_spinbox = QSpinBox()
@@ -449,37 +483,84 @@ class GBlocksPlugin(BasePlugin):
             params.append("-t=d")
         elif seq_type_index == 3:  # Codons
             params.append("-t=c")
-        # 0为Auto，不添加参数
             
         # 保守位置最小序列数
-        if self.b1_spinbox.value() > 0:
-            params.append(f"-b1={self.b1_spinbox.value()}")
+        b1_value = self.b1_spinbox.value()
+        if b1_value > 0:
+            params.extend(["-b1", str(b1_value)])
             
-        # 侧翼位置最小序列数
-        if self.b2_spinbox.value() > 0:
-            params.append(f"-b2={self.b2_spinbox.value()}")
+        # 非保守位置最大序列数
+        b2_value = self.b2_spinbox.value()
+        if b2_value > 0:
+            params.extend(["-b2", str(b2_value)])
             
-        # 最大连续非保守位置数
-        if self.b3_spinbox.value() != 8:  # 不是默认值才添加
-            params.append(f"-b3={self.b3_spinbox.value()}")
+        # 保守位置占比
+        b3_value = self.b3_spinbox.value()
+        if b3_value > 0:
+            params.extend(["-b3", str(b3_value)])
             
-        # 区块最小长度
-        if self.b4_spinbox.value() != 10:  # 不是默认值才添加
-            params.append(f"-b4={self.b4_spinbox.value()}")
+        # 非保守位置占比
+        b4_value = self.b4_spinbox.value()
+        if b4_value < 100:
+            params.extend(["-b4", str(b4_value)])
             
-        # 允许的缺口位置
-        gap_index = self.gap_combo.currentIndex()
-        if gap_index == 1:  # With Half
-            params.append("-b5=h")
-        elif gap_index == 2:  # All
-            params.append("-b5=a")
-        # 0为None，是默认值，不添加参数
+        # 半保守位置
+        b5_value = self.b5_spinbox.value()
+        if b5_value != 50:  # 默认值为50
+            params.extend(["-b5", str(b5_value)])
             
-        # 使用相似性矩阵
-        if not self.sim_matrix_checkbox.isChecked():
-            params.append("-b6=n")
-        
+        # 使用小写字母表示非保守位置
+        if self.use_lower_case_checkbox.isChecked():
+            params.append("-u")
+            
         return params
+
+    def on_output_radio_changed(self):
+        """处理输出选项的切换"""
+        if self.save_to_cwd.isChecked():
+            self.output_suffix_edit.setEnabled(True)
+            self.output_suffix_edit.setVisible(True)
+        elif self.save_to_tmp.isChecked():
+            self.output_suffix_edit.setEnabled(False)
+            self.output_suffix_edit.setVisible(False)
+    
+    def prepare_input_files(self):
+        """Prepare input files from multiple sources"""
+        try:
+            input_files = []
+            
+            # If there are imported files, use them individually
+            if self.imported_files:
+                for file_path in self.imported_files:
+                    if os.path.exists(file_path):
+                        input_files.append(file_path)
+                    else:
+                        QMessageBox.warning(self, "Warning", f"File does not exist: {file_path}")
+                return input_files
+            elif self.import_file:
+                return [self.import_file]
+            
+            # Otherwise, use text input to create a temporary file
+            sequence_text = self.sequence_text.toPlainText().strip()
+            if not sequence_text and not self.import_file:
+                QMessageBox.warning(self, "Warning", "Please provide alignment files or sequence text!")
+                return None
+            
+            if self.save_to_tmp.isChecked():
+                # Create temporary file
+                temp_file = self.create_temp_file(suffix='.fas')
+                with open(temp_file, 'w') as f:
+                    f.write(sequence_text)
+                return [temp_file]
+            
+            elif self.save_to_cwd.isChecked():
+                # directly use input paths
+                temp_file = self.import_file
+                return [temp_file]
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Prepare input files failed: {e}")
+            return None
     
     def display_results(self, output_files):
         """在输出标签页中显示结果"""
@@ -533,9 +614,14 @@ class GBlocksPlugin(BasePlugin):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # 未知进度
         
+        # 如果需要添加输出文件后缀，则设置suffix属性
+        suffix = None
+        if self.save_to_cwd.isChecked():
+            suffix = self.output_suffix_edit.text()
+        
         # 在单独的线程中运行GBlocks
         self.analysis_thread = GBlocksThread(
-            self.tool_path, input_files, self.get_parameters(), self.imported_files
+            self.tool_path, input_files, self.get_parameters(), self.imported_files, suffix=suffix
         )
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
         self.analysis_thread.finished.connect(self.analysis_finished)
@@ -543,128 +629,6 @@ class GBlocksPlugin(BasePlugin):
         self.analysis_thread.console_output.connect(self.add_console_message)
         self.analysis_thread.start()
 
-    def run_analysis(self):
-        """运行MAFFT分析"""
-        if self.is_running:
-            return
-            
-        # 检查输入
-        if not self.imported_files and not self.sequence_text.toPlainText().strip() and not self.import_file:
-            QMessageBox.warning(self, "Warning", "Please provide sequence files or sequence text!")
-            return
-            
-        if not self.tool_path or not os.path.exists(self.tool_path):
-            QMessageBox.critical(self, "Error", "MAFFT executable file not found!")
-            return
-            
-        # 添加控制台消息
-        self.add_console_message("Starting MAFFT alignment...", "info")
-        
-        # 准备输入文件
-        input_files = self.prepare_input_files()
-        if not input_files:
-            return
-            
-        # 更新UI状态
-        self.is_running = True
-        self.run_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # 未知进度
-        
-        # 在单独的线程中运行比对
-        self.alignment_thread = GBlocksThread(
-            self.tool_path, input_files, self.get_parameters(), self.imported_files
-        )
-        self.alignment_thread.progress.connect(self.progress_bar.setFormat)
-        self.alignment_thread.finished.connect(self.analysis_finished)
-        self.alignment_thread.error.connect(self.analysis_error)
-        self.alignment_thread.console_output.connect(self.add_console_message)
-        self.alignment_thread.start()
-
-    def analysis_finished(self, output_files, html_files):
-        """分析完成处理"""
-        self.is_running = False
-        self.run_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-        self.progress_bar.setVisible(False)
-        
-        # Save output files and reports
-        self.reports = html_files
-        self.update_report_combo()
-        
-        # Show results
-        if html_files:
-            self.show_current_report()
-            self.tab_widget.setCurrentIndex(1)  # Switch to output preview tab
-        
-        self.add_console_message("Alignment completed successfully!", "info")
-        QMessageBox.information(self, "Success", "Alignment completed successfully!")
-        
-        # 显示导入按钮（仅在从平台导入数据时显示）
-        if self.import_from in ["YR_MPEA", "seq_viewer"]:
-            self.import_to_platform_btn.setVisible(True)
-        else:
-            self.import_to_platform_btn.setVisible(False)
-        
-        # 保存输出文件路径供导入使用
-        self.alignment_output_files = output_files
-
-    def analysis_error(self, error_msg):
-        """分析错误处理"""
-        self.is_running = False
-        self.run_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-        self.progress_bar.setVisible(False)
-        
-        self.add_console_message(error_msg, "error")
-        QMessageBox.critical(self, "Error", f"Alignment failed: {error_msg}")
-        self.tab_widget.setCurrentIndex(2)  # Switch to console tab
-    def stop_analysis(self):
-        """停止分析"""
-        if hasattr(self, 'analysis_thread') and self.analysis_thread.isRunning():
-            self.analysis_thread.terminate()
-            self.analysis_thread.wait()
-            
-        self.is_running = False
-        self.run_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-        self.progress_bar.setVisible(False)
-        
-        QMessageBox.information(self, "Stopped", "GBlocks has been aborted.")
-    
-    def prepare_input_files(self):
-        """Prepare input files from multiple sources"""
-        try:
-            input_files = []
-            
-            # If there are imported files, use them individually
-            if self.imported_files:
-                for file_path in self.imported_files:
-                    if os.path.exists(file_path):
-                        input_files.append(file_path)
-                    else:
-                        QMessageBox.warning(self, "Warning", f"File does not exist: {file_path}")
-                return input_files
-            elif self.import_file:
-                return [self.import_file]
-            
-            # Otherwise, use text input to create a temporary file
-            sequence_text = self.sequence_text.toPlainText().strip()
-            if not sequence_text and not self.import_file:
-                QMessageBox.warning(self, "Warning", "Please provide alignment files or sequence text!")
-                return None
-                
-            # Create temporary file
-            temp_file = self.create_temp_file(suffix='.fas')
-            with open(temp_file, 'w') as f:
-                f.write(sequence_text)
-            return [temp_file]
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Prepare input files failed: {e}")
-            return None
-    
     def analysis_finished(self, output_files, html_files):
         """分析完成处理"""
         self.is_running = False
