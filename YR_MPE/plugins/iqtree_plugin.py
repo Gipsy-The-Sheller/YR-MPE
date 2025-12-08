@@ -213,19 +213,51 @@ class IQTreePlugin(BasePlugin):
         self.model_combo = QComboBox()
         # DNA模型
         dna_models = [
-            "JC", "F81", "K80", "HKY", "TNe", "TN", "K81", "K81u", "TPM2", "TPM2u", 
-            "TPM3", "TPM3u", "TIMe", "TIM", "TIM2e", "TIM2", "TIM3e", "TIM3", 
-            "TVMe", "TVM", "SYM", "GTR"
+            ["JC69", "JC"], ["F81"], ["K2P", "K80"], ["HKY85", "HKY"], ["TNe"], ["TN93", "TN"], ["K3P", "K81"], ["K81u"], ["TPM2"], ["TPM2u"], 
+            ["TPM3"], ["TPM3u"], ["TIM"], ["TIMe"], ["TIM2"], ["TIM2e"], ["TIM3"], ["TIM3e"], 
+            ["TVM"], ["TVMe"], ["SYM"], ["GTR"]
         ]
         # 蛋白质模型
         protein_models = [
-            "Blosum62", "cpREV", "Dayhoff", "DCMut", "FLU", "HIVb", "HIVw", "JTT",
-            "JTTDCMut", "LG", "mtART", "mtMAM", "mtREV", "mtZOA", "PMB", "rtREV",
-            "VT", "WAG", "mtVer", "mtMet", "mtInv"
+            "Blosum62", "cpREV", "Dayhoff", "DCMut", "EAL", "ELM", "FLAVI", "FLU", "GTR20", "HIVb", "HIVw", "JTT",
+            "JTTDCMut", "LG", "mtART", "mtMAM", "mtREV", "mtZOA", "mtMet", "mtVer", "mtInv", 
+            "NQ.bird", "NQ.insect", "NQ.mammal", "NQ.pfam", "NQ.plant", "NQ.yeast",
+            "Poisson", "PMB", 
+            "Q.bird", "Q.insect", "Q.mammal", "Q.pfam", "Q.plant", "Q.yeast",
+            "rtREV", "VT", "WAG"
         ]
         
+        # 创建模型映射字典和显示列表
+        self.model_map = {}  # 用于存储别名到主名称的映射
+        model_display_items = ['auto']
+
+        # # 添加"DNA"分界
+        # NUC_Item = QStandardItemModel("Nucleotides (DNA/RNA)")
+        # NUC_Item.setFlags(Qt.NoItemFlags)
+        # # 设置无法选中
+        # # self.model_combo.setItemData(self.model_combo.count() - 1, Qt.ItemIsSelectable, False)
+        # self.model_combo.addItem(Sepe)
+        
+        # 处理DNA模型
+        for model_entry in dna_models:
+            if isinstance(model_entry, list) and len(model_entry) == 2:
+                main_model, alias = model_entry[0], model_entry[1]
+                model_display_items.append(f"{main_model} ({alias})")  # 添加带别名的显示项
+            elif isinstance(model_entry, list) and len(model_entry) == 1:
+                model_display_items.append(model_entry[0])
+            else:
+                model_display_items.append(model_entry)
+        
+        # # 添加"AA"分界
+        # model_display_items.append("Amino Acids (Protein)")
+        # self.model_combo.setItemData(self.model_combo.count() - 1, Qt.ItemIsSelectable, False)
+
+        # 处理蛋白质模型（暂时没有别名）
+        for model in protein_models:
+            model_display_items.append(model)
+        
         # 添加所有模型到组合框
-        self.model_combo.addItems(['auto'] + dna_models + protein_models)
+        self.model_combo.addItems(model_display_items)
         self.model_combo.currentTextChanged.connect(self.on_model_changed)
         model_layout.addRow("Substitution Model:", self.model_combo)
         
@@ -251,9 +283,14 @@ class IQTreePlugin(BasePlugin):
         self.freerate_checkbox = QCheckBox("+R")
         model_layout.addRow("Free Rate Model:", self.freerate_checkbox)
 
-        # Empirical 参数
-        self.empirical_checkbox = QCheckBox("+F")
-        model_layout.addRow("Empirical Frequencies:", self.empirical_checkbox)
+        # # Empirical 参数
+        # self.empirical_checkbox = QCheckBox("+F")
+        # model_layout.addRow("Empirical Frequencies:", self.empirical_checkbox)
+
+        # state freq selection
+        self.state_freq_combo = QComboBox()
+        self.state_freq_combo.addItems(["Estimated", "Empirical (+F)", "ML-optimized (+FO)", "Equal (+FQ)"])
+        model_layout.addRow("State Freq.:", self.state_freq_combo)
         
         # 分支支持分析组
         bootstrap_group = QGroupBox("Branch Support Analysis")
@@ -263,20 +300,21 @@ class IQTreePlugin(BasePlugin):
         # UFBoot参数
         ufboot_layout = QHBoxLayout()
         self.ufboot_checkbox = QCheckBox("UFBoot")
+        self.ufboot_checkbox.setChecked(True)
         self.ufboot_spinbox = QSpinBox()
         self.ufboot_spinbox.setRange(1000, 100000)
         self.ufboot_spinbox.setValue(10000)
-        self.ufboot_spinbox.setEnabled(False)
+        self.ufboot_spinbox.setEnabled(True)
         self.ufboot_checkbox.stateChanged.connect(
             lambda state: self.ufboot_spinbox.setEnabled(state == Qt.Checked)
         )
         ufboot_layout.addWidget(self.ufboot_checkbox)
         ufboot_layout.addWidget(self.ufboot_spinbox)
-        bootstrap_layout.addRow("Replicates:", ufboot_layout)
+        bootstrap_layout.addRow("Bootstrap:", ufboot_layout)
         
         # aBayes参数
-        self.abayes_checkbox = QCheckBox("aBayes")
-        bootstrap_layout.addRow("Test:", self.abayes_checkbox)
+        self.abayes_checkbox = QCheckBox("Approximate Bayes Test")
+        bootstrap_layout.addRow("aBayes:", self.abayes_checkbox)
         
         # SH-aLRT参数
         sh_alrt_layout = QHBoxLayout()
@@ -290,7 +328,7 @@ class IQTreePlugin(BasePlugin):
         )
         sh_alrt_layout.addWidget(self.sh_alrt_checkbox)
         sh_alrt_layout.addWidget(self.sh_alrt_spinbox)
-        bootstrap_layout.addRow("Replicates:", sh_alrt_layout)
+        bootstrap_layout.addRow("LRT Test:", sh_alrt_layout)
         
         # 将两个组添加到水平布局中
         horizontal_layout.addWidget(model_group)
@@ -433,12 +471,18 @@ class IQTreePlugin(BasePlugin):
             # disable +I +G +F parameters
             self.gamma_checkbox.setEnabled(False)
             self.invar_checkbox.setEnabled(False)
-            self.empirical_checkbox.setEnabled(False)
+            self.state_freq_combo.setEnabled(False)
+            self.freerate_checkbox.setEnabled(False)
+            self.gamma_checkbox.setChecked(False)
+            self.invar_checkbox.setChecked(False)
+            self.freerate_checkbox.setChecked(False)
+            self.state_freq_combo.setCurrentText('Estimated')
         else:
             # enable +I +G +F parameters
             self.gamma_checkbox.setEnabled(True)
             self.invar_checkbox.setEnabled(True)
-            self.empirical_checkbox.setEnabled(True)
+            self.state_freq_combo.setEnabled(True)
+            self.freerate_checkbox.setEnabled(True)
     
     def setup_output_tab(self):
         """设置输出标签页"""
@@ -506,7 +550,15 @@ class IQTreePlugin(BasePlugin):
             params.extend(["-st", seq_type.lower()])
         
         # 模型
-        model = self.model_combo.currentText()
+        model_text = self.model_combo.currentText()
+        model = model_text
+        
+        # 如果选择了带别名的模型显示项，则提取主模型名称
+        if " (" in model_text and ")" in model_text:
+            model = model_text.split(" (")[0]
+        # 如果是别名，则转换为主名称
+        elif model_text in self.model_map:
+            model = self.model_map[model_text]
         
         # 添加模型扩展参数
         if self.gamma_checkbox.isChecked():
@@ -518,12 +570,13 @@ class IQTreePlugin(BasePlugin):
         if self.freerate_checkbox.isChecked():
             model += "+R"
 
-        if self.empirical_checkbox.isChecked():
-            model += "+F"
+        stfreq = self.state_freq_combo.currentText()
+        model += {"Estimated": "", "Empirical (+F)": "+F", "ML-optimized (+FO)": "+FO", "Equal (+FQ)": "+FQ"}[stfreq]
         
-        if model != 'auto':
+        if model.split('+')[0] != 'auto':
             params.extend(["-m", model])
-        
+        else:
+            params.extend(["-m", "MFP"]) # use modelfinder to select best-fit model
         # 分支支持参数
         if self.ufboot_checkbox.isChecked():
             params.extend(["-bb", str(self.ufboot_spinbox.value())])

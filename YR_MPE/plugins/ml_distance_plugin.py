@@ -189,19 +189,44 @@ class MLDistancePlugin(BasePlugin):
         self.model_combo = QComboBox()
         # DNA模型
         dna_models = [
-            "JC", "F81", "K80", "HKY", "TNe", "TN", "K81", "K81u", "TPM2", "TPM2u", 
-            "TPM3", "TPM3u", "TIMe", "TIM", "TIM2e", "TIM2", "TIM3e", "TIM3", 
-            "TVMe", "TVM", "SYM", "GTR"
+            ["JC69", "JC"], ["F81"], ["K2P", "K80"], ["HKY85", "HKY"], ["TNe"], ["TN93", "TN"], ["K3P", "K81"], ["K81u"], ["TPM2"], ["TPM2u"], 
+            ["TPM3"], ["TPM3u"], ["TIM"], ["TIMe"], ["TIM2"], ["TIM2e"], ["TIM3"], ["TIM3e"], 
+            ["TVM"], ["TVMe"], ["SYM"], ["GTR"]
         ]
         # 蛋白质模型
         protein_models = [
-            "Blosum62", "cpREV", "Dayhoff", "DCMut", "FLU", "HIVb", "HIVw", "JTT",
-            "JTTDCMut", "LG", "mtART", "mtMAM", "mtREV", "mtZOA", "PMB", "rtREV",
-            "VT", "WAG", "mtVer", "mtMet", "mtInv"
+            "Blosum62", "cpREV", "Dayhoff", "DCMut", "EAL", "ELM", "FLAVI", "FLU", "GTR20", "HIVb", "HIVw", "JTT",
+            "JTTDCMut", "LG", "mtART", "mtMAM", "mtREV", "mtZOA", "mtMet", "mtVer", "mtInv", 
+            "NQ.bird", "NQ.insect", "NQ.mammal", "NQ.pfam", "NQ.plant", "NQ.yeast",
+            "Poisson", "PMB", 
+            "Q.bird", "Q.insect", "Q.mammal", "Q.pfam", "Q.plant", "Q.yeast",
+            "rtREV", "VT", "WAG"
         ]
         
+        # 创建模型映射字典和显示列表
+        self.model_map = {}  # 用于存储别名到主名称的映射
+        model_display_items = ['auto']
+        
+        # 处理DNA模型
+        for model_entry in dna_models:
+            if isinstance(model_entry, list):
+                main_model = model_entry[0]
+                model_display_items.append(main_model)  # 主名称作为显示项
+                
+                # 为所有别名建立映射关系
+                for alias in model_entry[1:]:
+                    self.model_map[alias] = main_model
+                    model_display_items.append(f"{main_model} ({alias})")  # 添加带别名的显示项
+            else:
+                model_display_items.append(model_entry)
+        
+        # 处理蛋白质模型（暂时没有别名）
+        for model in protein_models:
+            model_display_items.append(model)
+        
         # 添加所有模型到组合框
-        self.model_combo.addItems(['auto'] + dna_models + protein_models)
+        self.model_combo.addItems(model_display_items)
+        self.model_combo.currentTextChanged.connect(self.on_model_changed)
         params_form_layout.addRow("Substitution Model:", self.model_combo)
         
         # Gamma分布参数
@@ -226,9 +251,10 @@ class MLDistancePlugin(BasePlugin):
         self.freerate_checkbox = QCheckBox("+R")
         params_form_layout.addRow("Free Rate Model:", self.freerate_checkbox)
 
-        # Empirical 参数
-        self.empirical_checkbox = QCheckBox("+F")
-        params_form_layout.addRow("Empirical Frequencies:", self.empirical_checkbox)
+        # state freq selection
+        self.state_freq_combo = QComboBox()
+        self.state_freq_combo.addItems(["Estimated", "Empirical (+F)", "ML-optimized (+FO)", "Equal (+FQ)"])
+        params_form_layout.addRow("State Freq.:", self.state_freq_combo)
         
         # 线程数
         self.threads_spinbox = QSpinBox()
@@ -244,6 +270,24 @@ class MLDistancePlugin(BasePlugin):
             self.imported_files = []  # List of imported file paths
         if not hasattr(self, 'file_tags'):
             self.file_tags = []  # List of file tag widgets
+
+    def on_model_changed(self):
+        if self.model_combo.currentText() == "auto":
+            # disable +I +G +F parameters
+            self.gamma_checkbox.setEnabled(False)
+            self.invar_checkbox.setEnabled(False)
+            self.state_freq_combo.setEnabled(False)
+            self.freerate_checkbox.setEnabled(False)
+            self.gamma_checkbox.setChecked(False)
+            self.invar_checkbox.setChecked(False)
+            self.freerate_checkbox.setChecked(False)
+            self.state_freq_combo.setCurrentText('Estimated')
+        else:
+            # enable +I +G +F parameters
+            self.gamma_checkbox.setEnabled(True)
+            self.invar_checkbox.setEnabled(True)
+            self.state_freq_combo.setEnabled(True)
+            self.freerate_checkbox.setEnabled(True)
     
     def reset_to_defaults(self):
         """重置参数为默认值"""
@@ -470,7 +514,15 @@ class MLDistancePlugin(BasePlugin):
             params.extend(["-st", seq_type.lower()])
         
         # 模型
-        model = self.model_combo.currentText()
+        model_text = self.model_combo.currentText()
+        model = model_text
+        
+        # 如果选择了带别名的模型显示项，则提取主模型名称
+        if " (" in model_text and ")" in model_text:
+            model = model_text.split(" (")[0]
+        # 如果是别名，则转换为主名称
+        elif model_text in self.model_map:
+            model = self.model_map[model_text]
         
         # 添加模型扩展参数
         if self.gamma_checkbox.isChecked():
@@ -482,8 +534,8 @@ class MLDistancePlugin(BasePlugin):
         if self.freerate_checkbox.isChecked():
             model += "+R"
 
-        if self.empirical_checkbox.isChecked():
-            model += "+F"
+        stfreq = self.state_freq_combo.currentText()
+        model += {"Estimated": "", "Empirical (+F)": "+F", "ML-optimized (+FO)": "+FO", "Equal (+FQ)": "+FQ"}[stfreq]
         
         if model != 'auto':
             params.extend(["-m", model])
@@ -699,6 +751,21 @@ class MLDistancePlugin(BasePlugin):
             # 更新UI显示导入的文件
             if hasattr(self, 'file_path_edit') and self.file_path_edit:
                 self.file_path_edit.setText(temp_file)
+        elif isinstance(import_data, dict) and 'model' in import_data:
+            # 处理模型导入
+            imported_model = import_data['model']
+            
+            # 检查导入的模型是否为别名，并转换为主模型名
+            model_entries = imported_model.split('+')
+            if hasattr(self, 'model_map'):
+                # 提取模型名（去除可能的参数）
+                base_model = model_entries[0]
+                if base_model in self.model_map:
+                    # 替换为完整模型名
+                    imported_model = imported_model.replace(base_model, self.model_map[base_model], 1)
+            
+            # 设置模型选择框的值
+            self.model_combo.setCurrentText(imported_model)
         else:
             self.import_file = None
             self.imported_files = []
