@@ -534,9 +534,26 @@ class YR_MPEA_Widget(QWidget):
         plugin_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
         plugin_wrapper.export_distance_result_signal.connect(self.add_distance_matrix_to_workspace)
 
-        # parse model
+        # # parse model
         model_entries = best_model.split("+")
-        plugin_wrapper.model_combo.setCurrentText(model_entries[0])
+        # plugin_wrapper.model_combo.setCurrentText(model_entries[0])
+
+        model_noalias = ['JC69 (JC)', 'F81', 'K2P (K80)', 'HKY85 (HKY)', 'TNe', 'TN93 (TN)', 'K3P (K81)', 
+                        'K81u', 'TPM2', 'TPM2u', 'TPM3', 'TPM3u', 'TIM', 'TIMe', 'TIM2', 'TIM2e', 'TIM3', 
+                        'TIM3e', 'TVM', 'TVMe', 'SYM', 'GTR', 'Blosum62', 'cpREV', 
+                        'Dayhoff', 'DCMut', 'EAL', 'ELM', 'FLAVI', 'FLU', 'GTR20', 'HIVb', 'HIVw', 'JTT', 
+                        'JTTDCMut', 'LG', 'mtART', 'mtMAM', 'mtREV', 'mtZOA', 'mtMet', 'mtVer', 'mtInv', 
+                        'NQ.bird', 'NQ.insect', 'NQ.mammal', 'NQ.pfam', 'NQ.plant', 'NQ.yeast', 'Poisson', 
+                        'PMB', 'Q.bird', 'Q.insect', 'Q.mammal', 'Q.pfam', 'Q.plant', 'Q.yeast', 'rtREV', 'VT', 'WAG']
+        model_alias = {'JC': 'JC69 (JC)', 'JC69': 'JC69 (JC)', 'K80': 'K2P (K80)', 'K2P': 'K2P (K80)', 
+                       'TN': 'TN93 (TN)', 'TN93': 'TN93 (TN)', 'K81': 'K3P (K81)', 'K3P': 'K3P (K81)',
+                       'K81u': 'K81u (K3Pu)', 'K3Pu': 'K81u (K3Pu)'}
+        if model_entries[0] in model_noalias:
+            plugin_wrapper.model_combo.setCurrentText(model_entries[0])
+        elif model_entries[0] in model_alias.keys():
+            plugin_wrapper.model_combo.setCurrentText(model_alias[model_entries[0]])
+        else:
+            plugin_wrapper.model_combo.setCurrentText("auto")
 
         # Invariable sites?
         if "I" in model_entries:
@@ -544,7 +561,14 @@ class YR_MPEA_Widget(QWidget):
         
         # empirical?
         if "F" in model_entries:
-            plugin_wrapper.empirical_checkbox.setChecked(True)
+            # plugin_wrapper.empirical_checkbox.setChecked(True)
+            plugin_wrapper.state_freq_combo.setCurrentText("Empirical (+F)")
+        
+        elif "FO" in model_entries:
+            plugin_wrapper.state_freq_combo.setCurrentText("ML-optimized (+FO)")
+
+        elif "FQ" in model_entries:
+            plugin_wrapper.state_freq_combo.setCurrentText("Equal (+FQ)")
         
         # FreeRate?
         if "R" in model_entries:
@@ -562,7 +586,7 @@ class YR_MPEA_Widget(QWidget):
         from PyQt5.QtWidgets import QDialog
         from .plugins.iqtree_plugin import IQTreePluginEntry
         dialog = QDialog()
-        dialog.setWindowTitle(f"Phylogenetic Inference [implemented from IQ-TREE] - YR-MPEA")
+        dialog.setWindowTitle(f"IQ-TREE 3 - YR-MPEA")
         dialog.setWindowIcon(QIcon(os.path.join(self.plugin_path, f"icons/software/iqtree.svg")))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -597,7 +621,23 @@ class YR_MPEA_Widget(QWidget):
 
         # parse model
         model_entries = best_model.split("+")
-        plugin_wrapper.model_combo.setCurrentText(model_entries[0])
+
+        model_noalias = ['JC69 (JC)', 'F81', 'K2P (K80)', 'HKY85 (HKY)', 'TNe', 'TN93 (TN)', 'K3P (K81)', 
+                        'K81u', 'TPM2', 'TPM2u', 'TPM3', 'TPM3u', 'TIM', 'TIMe', 'TIM2', 'TIM2e', 'TIM3', 
+                        'TIM3e', 'TVM', 'TVMe', 'SYM', 'GTR', 'Blosum62', 'cpREV', 
+                        'Dayhoff', 'DCMut', 'EAL', 'ELM', 'FLAVI', 'FLU', 'GTR20', 'HIVb', 'HIVw', 'JTT', 
+                        'JTTDCMut', 'LG', 'mtART', 'mtMAM', 'mtREV', 'mtZOA', 'mtMet', 'mtVer', 'mtInv', 
+                        'NQ.bird', 'NQ.insect', 'NQ.mammal', 'NQ.pfam', 'NQ.plant', 'NQ.yeast', 'Poisson', 
+                        'PMB', 'Q.bird', 'Q.insect', 'Q.mammal', 'Q.pfam', 'Q.plant', 'Q.yeast', 'rtREV', 'VT', 'WAG']
+        model_alias = {'JC': 'JC69 (JC)', 'JC69': 'JC69 (JC)', 'K80': 'K2P (K80)', 'K2P': 'K2P (K80)', 
+                       'TN': 'TN93 (TN)', 'TN93': 'TN93 (TN)', 'K81': 'K3P (K81)', 'K3P': 'K3P (K81)',
+                       'K81u': 'K81u (K3Pu)', 'K3Pu': 'K81u (K3Pu)'}
+        if model_entries[0] in model_noalias:
+            plugin_wrapper.model_combo.setCurrentText(model_entries[0])
+        elif model_entries[0] in model_alias.keys():
+            plugin_wrapper.model_combo.setCurrentText(model_alias[model_entries[0]])
+        else:
+            plugin_wrapper.model_combo.setCurrentText("auto")
 
         # Invariable sites?
         if "I" in model_entries:
@@ -605,7 +645,14 @@ class YR_MPEA_Widget(QWidget):
         
         # empirical?
         if "F" in model_entries:
-            plugin_wrapper.empirical_checkbox.setChecked(True)
+            # plugin_wrapper.empirical_checkbox.setChecked(True)
+            plugin_wrapper.state_freq_combo.setCurrentText("Empirical (+F)")
+        
+        elif "FO" in model_entries:
+            plugin_wrapper.state_freq_combo.setCurrentText("ML-optimized (+FO)")
+
+        elif "FQ" in model_entries:
+            plugin_wrapper.state_freq_combo.setCurrentText("Equal (+FQ)")
         
         # FreeRate?
         if "R" in model_entries:
@@ -768,7 +815,7 @@ class SingleGeneWorkspace(QWidget):
         dialog.exec_()
     def view_model_table(self, model_data):
         """查看模型表"""
-        from PyQt5.QtWidgets import QDialog, QTableWidget, QTableWidgetItem, QVBoxLayout, QMenuBar, QMenu, QAction, QFileDialog
+        from PyQt5.QtWidgets import QDialog, QTableWidget, QTableWidgetItem, QVBoxLayout
         from PyQt5.QtCore import Qt
         import json
         
@@ -818,59 +865,7 @@ class SingleGeneWorkspace(QWidget):
         
         layout.addWidget(table)
         dialog.exec_()
-        
-    def export_model_table_to_csv(self, table, model_data):
-        """导出模型表到CSV文件"""
-        file_path, _ = QFileDialog.getSaveFileName(None, "Save Model Table to CSV", "", "CSV Files (*.csv)")
-        if file_path:
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    # 写入表头
-                    headers = ["Model", "LogL", "AIC", "w-AIC", "AICc", "w-AICc", "BIC", "w-BIC"]
-                    f.write(",".join(headers) + "\n")
-                    
-                    # 写入数据行
-                    for i in range(table.rowCount()):
-                        row_data = []
-                        for j in range(table.columnCount()):
-                            item = table.item(i, j)
-                            row_data.append(item.text() if item else "")
-                        f.write(",".join(row_data) + "\n")
-                
-                QMessageBox.information(None, "Success", f"Model table exported to {file_path}")
-            except Exception as e:
-                QMessageBox.critical(None, "Error", f"Failed to export model table:\n{str(e)}")
-                
-    def export_model_table_to_xlsx(self, table, model_data):
-        """导出模型表到XLSX文件"""
-        try:
-            import pandas as pd
-            
-            file_path, _ = QFileDialog.getSaveFileName(None, "Save Model Table to Excel", "", "Excel Files (*.xlsx)")
-            if file_path:
-                # 创建数据列表
-                data = []
-                headers = ["Model", "LogL", "AIC", "w-AIC", "AICc", "w-AICc", "BIC", "w-BIC"]
-                
-                for i in range(table.rowCount()):
-                    row_data = {}
-                    for j in range(table.columnCount()):
-                        header = headers[j]
-                        item = table.item(i, j)
-                        row_data[header] = item.text() if item else ""
-                    data.append(row_data)
-                
-                # 创建DataFrame
-                df = pd.DataFrame(data)
-                
-                # 保存到Excel
-                df.to_excel(file_path, index=False)
-                QMessageBox.information(None, "Success", f"Model table exported to {file_path}")
-                
-        except ImportError:
-            QMessageBox.warning(None, "Warning", "pandas library is required for Excel export. Please install pandas to use this feature.")
-        except Exception as e:
-            QMessageBox.critical(None, "Error", f"Failed to export model table:\n{str(e)}")
+    
     def view_alignment(self, sequences):
         """查看序列比对结果"""
         from .sequence_editor import SequenceAlignmentViewer
@@ -902,7 +897,7 @@ class SingleGeneWorkspace(QWidget):
             return
             
         # 创建对话框显示距离矩阵
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QMenuBar, QMenu, QAction, QFileDialog
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
         from PyQt5.QtCore import Qt
         from PyQt5.QtGui import QFont
         

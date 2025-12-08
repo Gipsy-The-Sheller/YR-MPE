@@ -213,7 +213,7 @@ class IQTreePlugin(BasePlugin):
         self.model_combo = QComboBox()
         # DNA模型
         dna_models = [
-            ["JC69", "JC"], ["F81"], ["K2P", "K80"], ["HKY85", "HKY"], ["TNe"], ["TN93", "TN"], ["K3P", "K81"], ["K81u"], ["TPM2"], ["TPM2u"], 
+            ["JC69", "JC"], ["F81"], ["K2P", "K80"], ["HKY85", "HKY"], ["TNe"], ["TN93", "TN"], ["K3P", "K81"], ["K81u", "K3Pu"], ["TPM2"], ["TPM2u"], 
             ["TPM3"], ["TPM3u"], ["TIM"], ["TIMe"], ["TIM2"], ["TIM2e"], ["TIM3"], ["TIM3e"], 
             ["TVM"], ["TVMe"], ["SYM"], ["GTR"]
         ]
