@@ -17,12 +17,115 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# Copyright (C) 2025 Zhi-Jie Xu & Yi-Yang Jia
+# 
+# This file is part of YRTools.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+from PyQt5.QtWidgets import QWidget
+from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtGui import QIcon
+import os
+from pathlib import Path
+from PyQt5.QtCore import QTimer
+
+class BasePlugin(QObject):
+    # 定义标准信号
+    status_changed = pyqtSignal(str)  # 状态更新
+    data_ready = pyqtSignal(dict)     # 数据输出
+    
+    def __init__(self, config=None):
+        super().__init__()
+        self.config = config
+        self.widget = None
+        
+    def create_widget(self):
+        """必须由子类实现"""
+        raise NotImplementedError
+        
+    def run(self):
+        """执行插件主逻辑"""
+        if not self.widget:
+            self.widget = self.create_widget()
+        return self.widget 
+
+    @classmethod
+    def get_icon(cls, plugin_path):
+        """获取插件图标，支持多种矢量格式"""
+        formats = ['eps', 'emf', 'svg']  # 按优先级排序
+        icon_dir = Path(plugin_path).parent
+        
+        # 搜索所有支持的图标文件
+        found = {}
+        for f in icon_dir.glob("icon.*"):
+            ext = f.suffix[1:].lower()
+            if ext in formats:
+                found[ext] = f
+        
+        # 按格式优先级选择
+        for fmt in formats:
+            if fmt in found:
+                return cls._load_vector_icon(found[fmt])
+        
+        return QIcon()  # 返回空图标
+
+    @staticmethod
+    def _load_vector_icon(file_path):
+        """加载矢量图标文件"""
+        ext = file_path.suffix.lower()
+        
+        # EPS/EMF需要转换
+        if ext in ('.eps', '.emf'):
+            try:
+                # 使用ghostscript转换EPS/EMF为临时PNG
+                from subprocess import run
+                temp_png = file_path.with_suffix('.png')
+                
+                # 添加错误检查和详细日志
+                result = run(
+                    ['gs', '-dSAFER', '-dBATCH', '-dNOPAUSE', 
+                     '-sDEVICE=png16m', f'-sOutputFile={temp_png}',
+                     '-r300', str(file_path)],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode != 0:
+                    print(f"Ghostscript转换失败 (代码 {result.returncode}):")
+                    print(f"错误输出: {result.stderr}")
+                    return QIcon()
+                
+                icon = QIcon(str(temp_png))
+                temp_png.unlink()  # 删除临时文件
+                return icon
+            except Exception as e:
+                print(f"EPS转换异常: {str(e)}")
+                return QIcon()
+        
+        # 直接加载SVG
+        elif ext == '.svg':
+            return QIcon(str(file_path))
+        
+        return QIcon() 
+
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSizePolicy
 from PyQt5.QtCore import Qt, QUrl, pyqtSignal
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 import os
 import tempfile
-from core.plugin_base import BasePlugin
+# from core.plugin_base import BasePlugin
 
 class IcyTreePlugin(QWidget, BasePlugin):
     """QWebEngine-based IcyTree plugin for phylogenetic tree visualization"""
@@ -37,6 +140,7 @@ class IcyTreePlugin(QWidget, BasePlugin):
         BasePlugin.__init__(self, config)
         self.nwk_string = ""
         self.icytree_path = None
+        self.destroyed_flag = False  # 标记对象是否即将被销毁
         self.init_ui()
         
     def init_ui(self):
@@ -96,11 +200,34 @@ class IcyTreePlugin(QWidget, BasePlugin):
     
     def on_load_finished(self, success):
         """页面加载完成后的回调函数"""
-        if success and self.nwk_string:
-            # 页面加载成功且有Newick字符串，则注入树数据
-            # 添加延时确保JavaScript完全加载
-            from PyQt5.QtCore import QTimer
-            QTimer.singleShot(1000, lambda: self.send_newick_to_icytree(self.nwk_string))
+        try:
+            # 检查对象是否仍然存在或即将被销毁
+            if self.destroyed_flag or not hasattr(self, 'web_view') or not self.web_view:
+                return
+                
+            if success and self.nwk_string:
+                # 页面加载成功且有Newick字符串，则注入树数据
+                # 添加延时确保JavaScript完全加载
+                QTimer.singleShot(1000, self._delayed_tree_injection)
+        except RuntimeError:
+            # 对象已被销毁，忽略
+            pass
+        except Exception as e:
+            print(f"Error in on_load_finished: {e}")
+    
+    def _delayed_tree_injection(self):
+        """延迟树注入，检查对象是否仍然存在"""
+        try:
+            # 检查对象是否仍然存在或即将被销毁
+            if self.destroyed_flag or not hasattr(self, 'nwk_string') or not self.nwk_string:
+                return
+                
+            self.send_newick_to_icytree(self.nwk_string)
+        except RuntimeError:
+            # 对象已被销毁，忽略
+            pass
+        except Exception as e:
+            print(f"Error in delayed tree injection: {e}")
     
     def validate_newick(self, nwk_string):
         """Simple Newick format validation"""
@@ -119,6 +246,10 @@ class IcyTreePlugin(QWidget, BasePlugin):
     def send_newick_to_icytree(self, nwk_string):
         """Send Newick string to IcyTree"""
         try:
+            # 检查对象是否仍然存在或即将被销毁
+            if self.destroyed_flag or not hasattr(self, 'web_view') or not self.web_view:
+                return
+                
             # Escape special characters in JavaScript string
             escaped_nwk = nwk_string.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$').replace('"', '\\"')
             
@@ -142,6 +273,9 @@ class IcyTreePlugin(QWidget, BasePlugin):
             
             self.web_view.page().runJavaScript(js_code)
             
+        except RuntimeError:
+            # 对象已被删除，忽略
+            pass
         except Exception as e:
             print(f"Failed to send Newick to IcyTree: {e}")
             # Fallback: create temporary file
@@ -178,7 +312,13 @@ class IcyTreePlugin(QWidget, BasePlugin):
     
     def show_error_page(self, error_message):
         """Show error page"""
-        error_html = f"""
+        try:
+            # 检查对象是否仍然存在或即将被销毁
+            if self.destroyed_flag or not hasattr(self, 'web_view') or not self.web_view:
+                return
+        except:
+            pass        
+            error_html = f"""
         <!DOCTYPE html>
         <html>
         <head>
@@ -234,7 +374,11 @@ class IcyTreePlugin(QWidget, BasePlugin):
             return False
         
         # Update status
-        self.status_changed.emit("Loading tree to IcyTree...")
+        try:
+            self.status_changed.emit("Loading tree to IcyTree...")
+        except RuntimeError:
+            # 对象已被销毁，忽略
+            return False
         
         # 如果页面已加载，则直接发送Newick字符串
         # 否则，将在on_load_finished中处理
@@ -243,17 +387,45 @@ class IcyTreePlugin(QWidget, BasePlugin):
         # else: 页面尚未加载，将在on_load_finished中处理
 
         # Update status after delay
-        from PyQt5.QtCore import QTimer
-        import logging
         try:
-            QTimer.singleShot(2000, lambda: self.status_changed.emit("Tree loaded to IcyTree"))
+            QTimer.singleShot(2000, self._delayed_status_update)
         except Exception as e:
+            import logging
             logging.error(f"Failed to update status. Check whether the window is still open: {e}")
         
         return True
+    
+    def _delayed_status_update(self):
+        """延迟状态更新，检查对象是否仍然存在"""
+        try:
+            # 检查对象是否仍然存在或即将被销毁
+            if self.destroyed_flag or not hasattr(self, 'web_view') or not self.web_view:
+                return
+                
+            self.status_changed.emit("Tree loaded to IcyTree")
+        except RuntimeError:
+            # 对象已被删除
+            pass
+        except Exception as e:
+            # 其他异常
+            import logging
+            logging.error(f"Error in delayed status update: {e}")
 
 class IcyTreePluginEntry:
     """Plugin entry point"""
     def run(self):
         plugin = IcyTreePlugin()
         return plugin.run()
+
+    def __del__(self):
+        """析构函数，标记对象即将被销毁"""
+        self.destroyed_flag = True
+        
+        # 清理可能存在的定时器引用
+        try:
+            # 清理web_view引用
+            if hasattr(self, 'web_view') and self.web_view:
+                self.web_view.deleteLater()
+                self.web_view = None
+        except:
+            pass
