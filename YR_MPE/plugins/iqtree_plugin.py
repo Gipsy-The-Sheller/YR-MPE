@@ -546,8 +546,9 @@ class IQTreePlugin(BasePlugin):
         
         # 序列类型
         seq_type = self.seq_type_combo.currentText()
+        seq_type_code = {"dna": "DNA", "prot": "AA"}[seq_type.lower()]
         if seq_type != "AUTO":
-            params.extend(["-st", seq_type.lower()])
+            params.extend(["-st", seq_type_code])
         
         # 模型
         model_text = self.model_combo.currentText()
