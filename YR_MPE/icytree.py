@@ -34,12 +34,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from PyQt5.QtWidgets import QWidget
+from PyQt5.QtWidgets import QWidget, QFileDialog, QMessageBox
 from PyQt5.QtCore import QObject, pyqtSignal
 from PyQt5.QtGui import QIcon
 import os
 from pathlib import Path
 from PyQt5.QtCore import QTimer
+from PyQt5.QtWebEngineWidgets import QWebEnginePage
+from PyQt5.QtCore import QUrl
+
 
 class BasePlugin(QObject):
     # 定义标准信号
@@ -120,12 +123,22 @@ class BasePlugin(QObject):
         
         return QIcon() 
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSizePolicy
+
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSizePolicy, QFileDialog
 from PyQt5.QtCore import Qt, QUrl, pyqtSignal
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineProfile
 import os
 import tempfile
 # from core.plugin_base import BasePlugin
+
+class CustomWebEnginePage(QWebEnginePage):
+    """自定义WebEnginePage处理文件下载请求"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+    
+    def acceptNavigationRequest(self, url, navigation_type, is_main_frame):
+        # 此处不需要特殊处理，因为下载请求会通过profile的downloadRequested信号处理
+        return True
 
 class IcyTreePlugin(QWidget, BasePlugin):
     """QWebEngine-based IcyTree plugin for phylogenetic tree visualization"""
@@ -155,6 +168,14 @@ class IcyTreePlugin(QWidget, BasePlugin):
         # Create QWebEngineView
         self.web_view = QWebEngineView()
         self.web_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+        # 设置自定义的WebEnginePage
+        self.custom_page = CustomWebEnginePage(self)
+        self.web_view.setPage(self.custom_page)
+        
+        # 连接下载请求信号 - 从web_view而不是custom_page获取信号
+        self.web_view.page().profile().downloadRequested.connect(self.handle_download_request)
+        
         main_layout.addWidget(self.web_view)
         
         # Initialize IcyTree
@@ -164,6 +185,50 @@ class IcyTreePlugin(QWidget, BasePlugin):
         """Create plugin main interface - now returns self"""
         return self
     
+    def handle_download_request(self, download_item):
+        """处理下载请求，弹出文件保存对话框"""
+        try:
+            # 获取原始URL并解析文件扩展名
+            url = download_item.url().toString()
+            suggested_filename = download_item.suggestedFileName()
+            
+            # 根据URL或建议的文件名确定文件类型
+            if not suggested_filename or suggested_filename == "":
+                if url.endswith('.svg'):
+                    suggested_filename = "tree.svg"
+                elif url.endswith('.png'):
+                    suggested_filename = "tree.png"
+                elif url.endswith('.jpeg') or url.endswith('.jpg'):
+                    suggested_filename = "tree.jpg"
+                elif url.endswith('.newick') or url.endswith('.nwk') or url.endswith('.tre'):
+                    suggested_filename = "tree.newick"
+                elif url.endswith('.nexus') or url.endswith('.nex'):
+                    suggested_filename = "tree.nexus"
+                elif url.endswith('.xml'):
+                    suggested_filename = "tree.xml"
+                else:
+                    suggested_filename = "tree.svg"  # 默认为SVG格式
+
+            # 打开文件保存对话框
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "保存文件",
+                os.path.join(os.path.expanduser("~"), suggested_filename),
+                "SVG Files (*.svg);;PNG Files (*.png);;JPEG Files (*.jpg *.jpeg);;Newick Files (*.nwk *.newick *.tre);;NEXUS Files (*.nex *.nexus);;XML Files (*.xml);;All Files (*)"
+            )
+
+            if file_path:
+                download_item.setPath(file_path)
+                download_item.accept()
+                self.status_changed.emit(f"文件已保存至: {file_path}")
+            else:
+                # 用户取消了保存操作
+                download_item.cancel()
+                self.status_changed.emit("保存操作已取消")
+        except Exception as e:
+            print(f"处理下载请求时发生错误: {e}")
+            self.status_changed.emit(f"处理下载请求时发生错误: {e}")
+
     def init_icytree(self):
         """Initialize IcyTree"""
         try:
