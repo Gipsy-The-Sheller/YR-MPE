@@ -61,7 +61,7 @@ class YRMPEConsolePlugin(QWidget):
         # 启动控制台按钮
         self.start_console_btn = QPushButton("Startup a new shell")
         self.start_console_btn.clicked.connect(self.start_console)
-        self.start_console_btn.setStyleSheet("padding: 10px; font-size: 14px;")
+        # self.start_console_btn.setStyleSheet("padding: 10px; font-size: 14px;")
         layout.addWidget(self.start_console_btn)
         
         # 添加间距
@@ -117,7 +117,7 @@ class YRMPEConsolePlugin(QWidget):
                     # 移除扩展名（如.exe, .bat等）
                     command_name = os.path.splitext(command_name)[0]
                     commands[item["name"]] = command_name
-            
+
             return paths, commands
         except Exception as e:
             print(f"Failed to load config file: {e}")
@@ -150,28 +150,43 @@ class YRMPEConsolePlugin(QWidget):
             new_paths = os.pathsep.join(tool_paths)
             final_path = new_paths + os.pathsep + current_path
             
-            # 构建工具列表字符串（使用原生换行和制表符）
-            tools_list_lines = ["Tool name\t\tCommand", "-" * 30]
+            # 构建工具列表字符串 (使用PowerShell的转义字符)
+            tools_list = "Tool name           Command`n"
+            tools_list += "-" * 30 + "`n"
             for name, cmd in tool_commands.items():
-                tools_list_lines.append(f"{name}\t{cmd}")
-            tools_list = "\n".join(tools_list_lines)
+                tools_list += f"{name if len(name) <= 17 else name[:18]+'...'}{' '*(20-len(name))}{cmd}`n"
             
             if system == "Windows":
-                # 在Windows上启动PowerShell，保持窗口开启
-                ps_script = f'''
-                $env:PATH="{final_path}";
-                Write-Host "YR-MPE Console已启动，工具路径已添加到PATH" -ForegroundColor Green;
-                Write-Host "";
-                Write-Host "Tool name\tCommand" -ForegroundColor Yellow;
-                Write-Host "------------------------------" -ForegroundColor Yellow;
-                Write-Host "";
-                Write-Host "现在可以在命令行中使用YR-MPE的所有工具" -ForegroundColor Green;
-                Write-Host "";
-                Write-Host "输入 exit 退出终端" -ForegroundColor Gray;
-                Write-Host "";
-                '''
-                command = f'start powershell -NoExit -ArgumentList \'{ps_script}\' '
+                # 创建一个临时PowerShell脚本来设置环境变量并启动PowerShell
+                ps_script_content = f'''
+# 设置新的PATH环境变量
+$env:PATH = "{final_path}"
+
+Write-Host "Console for YR-MPE" -ForegroundColor Green
+Write-Host ""
+Write-Host "{tools_list}" -ForegroundColor Yellow
+Write-Host ""
+# 启动一个新的PowerShell会话，保持窗口开启
+powershell
+'''
+                # 将PowerShell脚本写入临时文件
+                # with tempfile.NamedTemporaryFile(mode='w', suffix='.ps1', delete=False, encoding='utf-8') as temp_ps_file:
+                #     temp_ps_file.write(ps_script_content)
+                #     temp_ps_file_path = temp_ps_file.name
+                try:
+                    with open("YR_MPE_powershell_script.ps1", "w", encoding="utf-8") as temp_ps_file:
+                        temp_ps_file.write(ps_script_content)
+                except:
+                    # ps1 is now occupied and does not need to be refreshed.
+                    pass
+                
+                # print(temp_ps_file_path)
+                # 使用PowerShell执行临时脚本文件
+                command = f'start powershell -ExecutionPolicy Bypass -File "YR_MPE_powershell_script.ps1"'
                 os.system(command)
+                
+                # 删除临时文件
+                # os.remove(temp_ps_file_path)
             elif system == "Darwin":  # macOS
                 # 在macOS上启动终端
                 # 创建一个临时脚本来设置环境变量并显示工具列表
@@ -182,11 +197,9 @@ class YRMPEConsolePlugin(QWidget):
                 set toolsList to "{as_tools_list}"
                 tell application "Terminal"
                     do script "export PATH=\\"" & quoted form of newPATH & "\\"; \\
-                    echo \\"YR-MPE Console已启动，工具路径已添加到PATH\\"; \\
+                    echo \\"Console for YR-MPE\\"; \\
                     echo \\"\\\\"; \\
                     echo \\"" & toolsList & "\\"; \\
-                    echo \\"\\\\"; \\
-                    echo \\"现在可以在命令行中使用YR-MPE的所有工具\\"; \\
                     echo \\"\\\\"; \\
                     exec zsh"
                     activate
@@ -196,7 +209,7 @@ class YRMPEConsolePlugin(QWidget):
             else:  # Linux and other Unix-like systems
                 # 在Linux上启动bash终端
                 escaped_tools_list = tools_list.replace('"', '\\"').replace('$', '\\$')
-                command = f'gnome-terminal -- bash -c "export PATH=\\"{final_path}\\":$PATH; echo \'YR-MPE Console已启动，工具路径已添加到PATH\'; echo \\"\\"; echo -e \\"{escaped_tools_list}\\"; echo \\"\\"; echo \'现在可以在命令行中使用YR-MPE的所有工具\'; echo \\"\\"; exec bash" &'
+                command = f'gnome-terminal -- bash -c "export PATH=\\"{final_path}\\":$PATH; echo \'Console for YR-MPE\'; echo \\"\\"; echo -e \\"{escaped_tools_list}\\"; echo \\"\\"; exec bash" &'
                 os.system(command)
             
             QMessageBox.information(self, "提示", "YR-MPE终端已启动！\n工具路径已添加到PATH环境变量中。")
