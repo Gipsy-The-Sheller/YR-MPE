@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QGroupBox,
                              QFrame, QComboBox, QSpinBox,
                              QRadioButton, QLabel, QCheckBox, QTextEdit, 
                              QTabWidget, QApplication, QFileDialog, 
-                             QMessageBox, QDoubleSpinBox, QSizePolicy)
+                             QMessageBox, QDoubleSpinBox, QSizePolicy, QWidget)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 import tempfile
@@ -19,12 +19,84 @@ from ..templates.base_process_thread import BaseProcessThread
 import logging
 
 
+class BpcompThread(BaseProcessThread):
+    """Bpcomp共识分析线程类"""
+    
+    def __init__(self, tool_path, chain_files, parameters, imported_files=None):
+        super().__init__(tool_path, chain_files, parameters, imported_files)
+        self.chain_files = chain_files
+        self.parameters = parameters
+    
+    def get_tool_name(self):
+        """返回工具名称"""
+        return "Bpcomp Consensus Analysis"
+        
+    def execute_commands(self):
+        """执行Bpcomp共识分析命令"""
+        try:
+            output_files = []
+            
+            # 构建bpcomp命令
+            # 替换工具路径中的pb_mpi为bpcomp
+            bpcomp_path = self.tool_path.replace("pb_mpi", "bpcomp")
+            
+            cmd = [bpcomp_path]
+            
+            # 添加参数
+            cutoff = self.parameters.get('cutoff', 0.5)
+            if cutoff != 0.5:  # 默认值是0.5
+                cmd.extend(["-c", str(cutoff)])
+            
+            burnin = self.parameters.get('burnin', 0)
+            every = self.parameters.get('every', 1)
+            until = self.parameters.get('until', 0)
+            
+            if burnin > 0 or every > 1 or until > 0:
+                cmd.append("-x")
+                cmd.append(str(burnin))
+                if every > 1 or until > 0:
+                    cmd.append(str(every))
+                    if until > 0:
+                        cmd.append(str(until))
+            
+            # 添加输出文件参数 - 默认为第一个链名+.con.tre
+            if self.chain_files:
+                first_chain = self.chain_files[0]
+                chain_dir = os.path.dirname(first_chain)
+                chain_name = os.path.basename(first_chain)
+                output_file = os.path.join(chain_dir, f"{chain_name}.con.tre")
+                cmd.extend(["-o", output_file])
+                output_files.append(output_file)
+            
+            # 添加链文件
+            cmd.extend(self.chain_files)
+            
+            self.console_output.emit(f"Running BPCOMP command: {' '.join(cmd)}", "command")
+            
+            # 执行命令
+            result = self.execute_command(cmd)
+            
+            if result.returncode != 0:
+                self.error.emit(f"Bpcomp execution failed: {result.stderr}")
+                return
+            
+            # 发送结果到控制台
+            self.console_output.emit(f"Bpcomp output:\n{result.stdout}", "info")
+            
+            self.progress.emit("Bpcomp consensus analysis completed")
+            self.finished.emit(output_files, [])
+            
+        except Exception as e:
+            self.error.emit(f"Bpcomp analysis exception: {str(e)}")
+
+
 class PhyloBayesThread(BaseProcessThread):
     """PhyloBayes-MPI系统发育推断线程类"""
     
     def __init__(self, tool_path, mpirun_path, input_files, parameters, imported_files=None):
         super().__init__(tool_path, input_files, parameters, imported_files)
         self.mpirun_path = mpirun_path
+        self.chains = []  # 保存链名称
     
     def get_tool_name(self):
         """返回工具名称"""
@@ -34,6 +106,9 @@ class PhyloBayesThread(BaseProcessThread):
         """执行PhyloBayes-MPI系统发育推断命令"""
         try:
             output_files = []
+            
+            # 清空chains列表
+            self.chains = []
             
             # 分别处理每个输入文件
             total_files = len(self.input_files)
@@ -49,7 +124,10 @@ class PhyloBayesThread(BaseProcessThread):
                 
                 # 获取MPI并行数
                 mpi_parallel = params.pop(0)  # 第一个参数是并行数
-                chain_name = os.path.join(os.path.abspath(input_file), os.path.basename(input_file) + "_chain")
+                chain_name = os.path.join(os.path.dirname(os.path.abspath(input_file)), os.path.basename(input_file) + "_chain")
+                
+                # 保存链名称
+                self.chains.append(chain_name)
                 
                 # 构建MPI命令
                 cmd = [
@@ -113,7 +191,7 @@ class PhyloBayesPlugin(BasePlugin):
             """Nicolas Lartillot, Thomas Lepage and Samuel Blanquart. PhyloBayes 3: a Bayesian software package for phylogenetic reconstruction and molecular dating. Bioinformatics 2009 25(17): 2286–2288."""
         ]
         self.input_types = {"PHYLIP": ["phy"], "Chain File": [""]}
-        self.output_types = {"Chain File": [""], "Tree File": [".con.tre"]}
+        self.output_types = {"Chain File": [".chain"], "Tree File": [".con.tre"]}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
 
     def setup_input_tab(self):
@@ -121,11 +199,19 @@ class PhyloBayesPlugin(BasePlugin):
         layout = QVBoxLayout()
         self.input_tab.setLayout(layout)
         
+        # 创建一个选项卡控件来分别显示MCMC参数和比较共识参数
+        self.input_tabs = QTabWidget()
+        
+        # MCMC参数标签页
+        mcmc_widget = QWidget()
+        mcmc_layout = QVBoxLayout()
+        mcmc_widget.setLayout(mcmc_layout)
+        
         input_group = QGroupBox("Input")
         input_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         input_layout = QFormLayout()
         input_group.setLayout(input_layout)
-        layout.addWidget(input_group)
+        mcmc_layout.addWidget(input_group)
 
         file_layout = QHBoxLayout()
         self.file_path_edit = QLineEdit()
@@ -174,7 +260,7 @@ class PhyloBayesPlugin(BasePlugin):
         params_layout = QFormLayout()
         params_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         params_group.setLayout(params_layout)
-        layout.addWidget(params_group)
+        mcmc_layout.addWidget(params_group)
         
         # Site heterogeneity model
         self.use_CAT_model = QCheckBox("Apply")
@@ -220,7 +306,7 @@ class PhyloBayesPlugin(BasePlugin):
         run_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         run_layout = QFormLayout()
         run_group.setLayout(run_layout)
-        layout.addWidget(run_group)
+        mcmc_layout.addWidget(run_group)
 
         # Number of Parallels
         self.n_mpi_parallel = QSpinBox()
@@ -243,8 +329,82 @@ class PhyloBayesPlugin(BasePlugin):
         self.sampling_frequency.setValue(1)
         run_layout.addRow("Sampling Frequency:", self.sampling_frequency)
 
-        # layout.addStretch()
+        mcmc_layout.addStretch()
         
+        # Compare & Consensus标签页
+        consensus_widget = QWidget()
+        consensus_layout = QVBoxLayout()
+        consensus_widget.setLayout(consensus_layout)
+        
+        # bpcomp参数设置
+        bpcomp_params_group = QGroupBox("Bpcomp Parameters")
+        bpcomp_params_layout = QFormLayout()
+        bpcomp_params_group.setLayout(bpcomp_params_layout)
+        
+        # Cutoff参数
+        self.cutoff_spinbox = QDoubleSpinBox()
+        self.cutoff_spinbox.setRange(0.0, 1.0)
+        self.cutoff_spinbox.setValue(0.5)
+        self.cutoff_spinbox.setSingleStep(0.05)
+        bpcomp_params_layout.addRow("Cutoff (max prob threshold):", self.cutoff_spinbox)
+        
+        # Burnin参数
+        self.burnin_spinbox = QSpinBox()
+        self.burnin_spinbox.setRange(0, 1000000)
+        self.burnin_spinbox.setValue(0)
+        bpcomp_params_layout.addRow("Burnin (discarded samples):", self.burnin_spinbox)
+        
+        # Every参数
+        self.every_spinbox = QSpinBox()
+        self.every_spinbox.setRange(1, 1000000)
+        self.every_spinbox.setValue(1)
+        bpcomp_params_layout.addRow("Every (sampling frequency):", self.every_spinbox)
+        
+        # Until参数
+        self.until_spinbox = QSpinBox()
+        self.until_spinbox.setRange(1, 1000000)
+        self.until_spinbox.setValue(0)  # 0 means until the end
+        bpcomp_params_layout.addRow("Until (final sample):", self.until_spinbox)
+        
+        consensus_layout.addWidget(bpcomp_params_group)
+        
+        # 链选择
+        chain_selection_group = QGroupBox("Chain Selection")
+        chain_selection_layout = QVBoxLayout()
+        chain_selection_group.setLayout(chain_selection_layout)
+        
+        self.chain_list = QTextEdit()
+        self.chain_list.setPlaceholderText("Enter chain names (without extensions), one per line")
+        self.chain_list.setMaximumHeight(100)
+        chain_selection_layout.addWidget(QLabel("Chain names to compare (without extensions):"))
+        chain_selection_layout.addWidget(self.chain_list)
+        
+        chain_selection_controls = QHBoxLayout()
+        load_chains_btn = QPushButton("Load Chains from Results")
+        load_chains_btn.clicked.connect(self.load_chains_from_results)
+        chain_selection_controls.addWidget(load_chains_btn)
+        
+        clear_chains_btn = QPushButton("Clear Chains")
+        clear_chains_btn.clicked.connect(lambda: self.chain_list.clear())
+        chain_selection_controls.addWidget(clear_chains_btn)
+        
+        chain_selection_layout.addLayout(chain_selection_controls)
+        
+        consensus_layout.addWidget(chain_selection_group)
+        
+        # bpcomp执行按钮
+        run_bpcomp_btn = QPushButton("Run Bpcomp Consensus Analysis")
+        run_bpcomp_btn.clicked.connect(self.run_bpcomp_analysis)
+        consensus_layout.addWidget(run_bpcomp_btn)
+        
+        consensus_layout.addStretch()
+        
+        # 将标签添加到选项卡
+        self.input_tabs.addTab(mcmc_widget, "MCMC")
+        self.input_tabs.addTab(consensus_widget, "Compare & Consensus")
+        
+        layout.addWidget(self.input_tabs)
+
         # Initialize variables
         if not hasattr(self, 'imported_files'):
             self.imported_files = []  # List of imported file paths
@@ -539,6 +699,11 @@ class PhyloBayesPlugin(BasePlugin):
         # 保存输出文件
         self.current_output_files = output_files
         
+        # 保存链名称（如果有的话）
+        if hasattr(self, 'analysis_thread'):
+            if hasattr(self.analysis_thread, 'chains'):
+                self.current_chains = self.analysis_thread.chains
+        
         # 显示结果
         self.display_results(output_files)
         
@@ -658,6 +823,82 @@ class PhyloBayesPlugin(BasePlugin):
             self.import_file = None
             self.imported_files = []
 
+    def load_chains_from_results(self):
+        """从分析结果中加载链文件"""
+        if hasattr(self, 'current_chains') and self.current_chains:
+            # 直接使用保存的链名称
+            chain_names = self.current_chains
+            
+            if chain_names:
+                # 将链名称设置到文本框
+                self.chain_list.setPlainText('\n'.join(sorted(chain_names)))
+            else:
+                QMessageBox.information(self, "Info", "No chain files found in results.")
+        else:
+            QMessageBox.warning(self, "Warning", "No results available. Run an analysis first.")
+
+    def run_bpcomp_analysis(self):
+        """运行bpcomp分析"""
+        if not self.tool_path or not os.path.exists(self.tool_path):
+            QMessageBox.critical(self, "Error", "PhyloBayes executable file not found!")
+            return
+            
+        # 获取链名称列表
+        chain_texts = self.chain_list.toPlainText().strip().split('\n')
+        chain_names = [f.strip() for f in chain_texts if f.strip()]
+        
+        if not chain_names:
+            QMessageBox.warning(self, "Warning", "Please specify at least one chain name.")
+            return
+        
+        # 准备参数字典
+        params = {
+            'cutoff': self.cutoff_spinbox.value(),
+            'burnin': self.burnin_spinbox.value(),
+            'every': self.every_spinbox.value(),
+            'until': self.until_spinbox.value()
+        }
+        
+        # 在单独的线程中运行Bpcomp
+        self.bpcomp_thread = BpcompThread(
+            self.tool_path, chain_names, params, self.imported_files
+        )
+        self.bpcomp_thread.progress.connect(self.progress_bar.setFormat)
+        self.bpcomp_thread.finished.connect(self.bpcomp_finished)
+        self.bpcomp_thread.error.connect(self.bpcomp_error)
+        self.bpcomp_thread.console_output.connect(self.add_console_message)
+        self.bpcomp_thread.start()
+        
+        # 更新UI状态
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # 未知进度
+
+    def bpcomp_finished(self, output_files, html_files):
+        """bpcomp分析完成处理"""
+        self.progress_bar.setVisible(False)
+        
+        # 保存输出文件
+        self.current_output_files = output_files
+        
+        # 显示结果
+        self.display_results(output_files)
+        
+        # 切换到输出标签页
+        self.tab_widget.setCurrentIndex(1)
+        
+        # 添加控制台消息
+        self.add_console_message(f"Bpcomp consensus analysis completed successfully! Found {len(output_files)} result file(s)", "info")
+        
+        QMessageBox.information(self, "Completed", "Bpcomp consensus analysis completed!")
+
+    def bpcomp_error(self, error_message):
+        """bpcomp分析错误处理"""
+        self.progress_bar.setVisible(False)
+        
+        # 添加控制台消息
+        self.add_console_message(f"Bpcomp consensus analysis failed: {error_message}", "error")
+        
+        QMessageBox.critical(self, "Error", f"Bpcomp consensus analysis failed: {error_message}")
 
 # 插件入口点
 class PhyloBayesPluginEntry:
