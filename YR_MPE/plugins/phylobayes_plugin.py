@@ -2,8 +2,8 @@ from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QGroupBox,
                              QFormLayout, QLineEdit, QPushButton, 
                              QFrame, QComboBox, QSpinBox,
                              QRadioButton, QLabel, QCheckBox, QTextEdit, 
-                             QTabWidget, QApplication, QDoubleSpinBox, QMessageBox, QFileDialog,
-                             QSizePolicy)
+                             QTabWidget, QApplication, QFileDialog, 
+                             QMessageBox, QDoubleSpinBox, QSizePolicy)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 import tempfile
@@ -16,12 +16,15 @@ from Bio import SeqIO
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
 
+import logging
+
 
 class PhyloBayesThread(BaseProcessThread):
     """PhyloBayes-MPI系统发育推断线程类"""
     
-    def __init__(self, tool_path, input_files, parameters, imported_files=None):
+    def __init__(self, tool_path, mpirun_path, input_files, parameters, imported_files=None):
         super().__init__(tool_path, input_files, parameters, imported_files)
+        self.mpirun_path = mpirun_path
     
     def get_tool_name(self):
         """返回工具名称"""
@@ -41,11 +44,21 @@ class PhyloBayesThread(BaseProcessThread):
                 self.progress.emit(f"Processing file {i+1}/{total_files}...")
                 self.console_output.emit(f"Processing file {i+1}/{total_files}: {os.path.basename(input_file)}", "info")
                 
-                # 构建命令
+                # 获取参数
+                params = self.parameters.copy()
+                
+                # 获取MPI并行数
+                mpi_parallel = params.pop(0)  # 第一个参数是并行数
+                chain_name = os.path.join(os.path.abspath(input_file), os.path.basename(input_file) + "_chain")
+                
+                # 构建MPI命令
                 cmd = [
+                    self.mpirun_path,
+                    "-np", str(mpi_parallel),
                     self.tool_path,
                     "-d", input_file,
-                    *self.parameters
+                    *params,  # 其他参数
+                    chain_name  # 链名称作为最后一个参数
                 ]
                 
                 # 执行命令
@@ -56,13 +69,10 @@ class PhyloBayesThread(BaseProcessThread):
                     return
                 
                 # 查找生成的链文件
-                # 根据输入文件名生成对应的输出链文件名
-                base_name = os.path.splitext(os.path.basename(input_file))[0]
-                chain_file_pattern = f"{base_name}_*"
-                
-                # 在同一目录下查找匹配的链文件
+                # 根据链名称模式查找输出文件
                 import glob
-                chain_files = glob.glob(os.path.join(os.path.dirname(input_file), chain_file_pattern))
+                chain_pattern = f"{chain_name}*"
+                chain_files = glob.glob(os.path.join(os.path.dirname(input_file), chain_pattern))
                 
                 if chain_files:
                     output_files.extend(chain_files)
@@ -136,6 +146,7 @@ class PhyloBayesPlugin(BasePlugin):
         # input is a chain file / Phylip alignment file?
         self.is_alignment_file = QRadioButton("Phylip Alignment File")
         self.is_chain_file = QRadioButton("Chain File")
+        self.is_alignment_file.setChecked(True)
         input_types = QHBoxLayout()
         input_types.addWidget(self.is_alignment_file)
         input_types.addWidget(self.is_chain_file)
@@ -168,9 +179,9 @@ class PhyloBayesPlugin(BasePlugin):
         # Site heterogeneity model
         self.use_CAT_model = QCheckBox("Apply")
         self.use_CAT_model.setChecked(True)
-        self.use_inf_CAT = QRadioButton("Infinite mix. (CAT)") # -cat
+        self.use_inf_CAT = QRadioButton("Infinite mixture (CAT)") # -cat
         self.use_inf_CAT.setChecked(True)
-        self.use_finite_CAT = QRadioButton("Finite mix. (nCAT)") # -ncat <mixture number>
+        self.use_finite_CAT = QRadioButton("Finite mixture (nCAT)") # -ncat <mixture number>
         self.mix_number_spinbox = QSpinBox()
         self.mix_number_spinbox.setValue(10)
         site_heterogeneity_layout = QHBoxLayout()
@@ -191,7 +202,7 @@ class PhyloBayesPlugin(BasePlugin):
         gamma_model_layout.addWidget(self.use_Gamma_model)
         gamma_model_layout.addWidget(gamma_categories_label)
         gamma_model_layout.addWidget(self.gamma_categories_spinbox)
-        params_layout.addRow("Gamma Model:", gamma_model_layout)
+        params_layout.addRow("Rate Heterogeneity Model:", gamma_model_layout)
 
         # Substitution model
         self.subst_model_combo = QComboBox()
@@ -254,10 +265,6 @@ class PhyloBayesPlugin(BasePlugin):
                 self.file_path_edit.setText(self.imported_files[0])
             else:
                 self.file_path_edit.setText(f"{len(self.imported_files)} files selected")
-            
-            # 隐藏文本输入框
-            self.sequence_text.setVisible(False)
-            self.sequence_text.setEnabled(True)
     
     def add_file_tag(self, file_path):
         """添加文件标签"""
@@ -421,6 +428,9 @@ class PhyloBayesPlugin(BasePlugin):
         """获取命令行参数"""
         params = []
 
+        # 添加MPI并行数作为第一个参数
+        params.append(str(self.n_mpi_parallel.value()))
+
         # Site heterogeneity model
         if self.use_CAT_model.isChecked():
             if self.use_inf_CAT.isChecked():
@@ -461,8 +471,15 @@ class PhyloBayesPlugin(BasePlugin):
             QMessageBox.warning(self, "Warning", "Please provide alignment files or sequence text!")
             return
             
+        # 检查PhyloBayes可执行文件是否存在
         if not self.tool_path or not os.path.exists(self.tool_path):
-            QMessageBox.critical(self, "Error", "PhyloBayes executable file not found!")
+            QMessageBox.critical(self, "Error", "PhyloBayes executable file not found! Please check config.json.")
+            return
+            
+        # 检查MPI可执行文件是否存在
+        mpirun_path = self.get_mpirun_path()
+        if not mpirun_path or not os.path.exists(mpirun_path):
+            QMessageBox.critical(self, "Error", "MPI executable file not found! Please check config.json for 'MPIRun' entry.")
             return
             
         # 添加控制台消息
@@ -482,13 +499,35 @@ class PhyloBayesPlugin(BasePlugin):
         
         # 在单独的线程中运行PhyloBayes
         self.analysis_thread = PhyloBayesThread(
-            self.tool_path, input_files, self.get_parameters(), self.imported_files
+            self.tool_path, mpirun_path, input_files, self.get_parameters(), self.imported_files
         )
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
         self.analysis_thread.finished.connect(self.analysis_finished)
         self.analysis_thread.error.connect(self.analysis_error)
         self.analysis_thread.console_output.connect(self.add_console_message)
         self.analysis_thread.start()
+
+    def get_mpirun_path(self):
+        """获取MPI运行程序路径"""
+        import json
+        config_path = os.path.join(self.plugin_path, 'config.json')
+        
+        if not os.path.exists(config_path):
+            return None
+            
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            # 查找MPI运行程序路径
+            for tool in config:
+                if tool.get('name', '').lower() in ['mpirun', 'mpiexec', 'mpi']:
+                    return os.path.join(self.plugin_path, './'+tool['path'])
+                    
+        except Exception as e:
+            logging.error(f"Error reading MPI path from config: {e}")
+            
+        return None
 
     def analysis_finished(self, output_files, html_files):
         """分析完成处理"""
