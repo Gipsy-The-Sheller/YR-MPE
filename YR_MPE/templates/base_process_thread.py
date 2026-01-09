@@ -92,40 +92,71 @@ class BaseProcessThread(QThread):
             self._process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # 将stderr合并到stdout，以便实时捕获所有输出
+                stderr=subprocess.PIPE,  # 现在分别处理stdout和stderr
                 universal_newlines=True,
                 bufsize=1,  # 行缓冲
                 cwd=cwd,
                 startupinfo=startupinfo  # Windows隐藏控制台窗口
             )
 
-            # 实时读取输出
+            # 实时读取输出和错误
             stdout_lines = []
-            while True:
-                output = self._process.stdout.readline()
-                
-                if output == '' and self._process.poll() is not None:
-                    # 进程结束且没有更多输出
-                    break
-                
-                if output:
-                    output = output.rstrip()  # 保留右侧空白字符可能会有用
-                    stdout_lines.append(output + '\n')  # 重新加上换行符
-                    # 发送输出到GUI
-                    self.console_output.emit(output, "output")
+            stderr_lines = []
+            
+            # 使用线程来分别读取stdout和stderr，防止阻塞
+            def read_stdout():
+                while True:
+                    output = self._process.stdout.readline()
+                    
+                    if output == '' and self._process.poll() is not None:
+                        # 进程结束且没有更多输出
+                        break
+                    
+                    if output:
+                        output = output.rstrip()
+                        stdout_lines.append(output + '\n')
+                        # 发送输出到GUI
+                        self.console_output.emit(output, "output")
+            
+            def read_stderr():
+                while True:
+                    error = self._process.stderr.readline()
+                    
+                    if error == '' and self._process.poll() is not None:
+                        # 进程结束且没有更多错误输出
+                        break
+                    
+                    if error:
+                        error = error.rstrip()
+                        stderr_lines.append(error + '\n')
+                        # 发送错误到GUI
+                        self.console_output.emit(error, "error")
+            
+            # 启动读取线程
+            stdout_thread = threading.Thread(target=read_stdout)
+            stderr_thread = threading.Thread(target=read_stderr)
+            
+            stdout_thread.start()
+            stderr_thread.start()
+            
+            # 等待进程结束和输出读取完成
+            self._process.wait()
+            stdout_thread.join()
+            stderr_thread.join()
 
             # 获取返回码
             return_code = self._process.poll()
             
             # 重构输出字符串以匹配subprocess.CompletedProcess的行为
             stdout_str = ''.join(stdout_lines)
+            stderr_str = ''.join(stderr_lines)
             
             # 创建一个类似subprocess.CompletedProcess的对象
             result = subprocess.CompletedProcess(
                 args=cmd,
                 returncode=return_code,
                 stdout=stdout_str,
-                stderr=""  # 因为我们把stderr合并到了stdout中
+                stderr=stderr_str
             )
             
             return result
