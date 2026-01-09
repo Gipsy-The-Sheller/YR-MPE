@@ -4,6 +4,10 @@ import os
 import tempfile
 import json
 from typing import List, Dict, Any, Optional
+import threading
+import queue
+import time
+import platform
 
 
 class BaseProcessThread(QThread):
@@ -40,6 +44,7 @@ class BaseProcessThread(QThread):
         self.parameters = parameters
         self.imported_files = imported_files or []
         self.is_running = False
+        self._process = None
         
     def run(self):
         """
@@ -75,32 +80,62 @@ class BaseProcessThread(QThread):
         """
         self.console_output.emit(" ".join(cmd), "command")
         
-        # 执行命令
-        result = subprocess.run(
-            cmd, 
-            capture_output=True, 
-            text=True, 
-            cwd=cwd,
-            timeout=3600  # 1小时超时
-        )
-        
-        # 处理标准输出
-        if result.stdout:
-            for line in result.stdout.strip().split('\n'):
-                if line.strip():
-                    self.console_output.emit(line.strip(), "output")
-                    
-        # 处理错误输出
-        if result.stderr:
-            for line in result.stderr.strip().split('\n'):
-                if line.strip():
-                    self.console_output.emit(
-                        line.strip(), 
-                        "error" if result.returncode != 0 else "output"
-                    )
-        
-        return result
-    
+        # 准备启动参数，解决Windows命令行窗口问题
+        startupinfo = None
+        if platform.system().lower() == "windows":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+
+        try:
+            # 使用Popen而非run，允许实时读取输出
+            self._process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # 将stderr合并到stdout，以便实时捕获所有输出
+                universal_newlines=True,
+                bufsize=1,  # 行缓冲
+                cwd=cwd,
+                startupinfo=startupinfo  # Windows隐藏控制台窗口
+            )
+
+            # 实时读取输出
+            stdout_lines = []
+            while True:
+                output = self._process.stdout.readline()
+                
+                if output == '' and self._process.poll() is not None:
+                    # 进程结束且没有更多输出
+                    break
+                
+                if output:
+                    output = output.rstrip()  # 保留右侧空白字符可能会有用
+                    stdout_lines.append(output + '\n')  # 重新加上换行符
+                    # 发送输出到GUI
+                    self.console_output.emit(output, "output")
+
+            # 获取返回码
+            return_code = self._process.poll()
+            
+            # 重构输出字符串以匹配subprocess.CompletedProcess的行为
+            stdout_str = ''.join(stdout_lines)
+            
+            # 创建一个类似subprocess.CompletedProcess的对象
+            result = subprocess.CompletedProcess(
+                args=cmd,
+                returncode=return_code,
+                stdout=stdout_str,
+                stderr=""  # 因为我们把stderr合并到了stdout中
+            )
+            
+            return result
+
+        except Exception as e:
+            # 发生异常时，发出错误信号并抛出异常
+            error_msg = f"执行命令时发生错误: {str(e)}"
+            self.console_output.emit(error_msg, "error")
+            raise e
+
     def create_temp_file(self, suffix: str = '') -> str:
         """
         创建临时文件
@@ -198,3 +233,21 @@ class BaseProcessThread(QThread):
         停止线程执行
         """
         self.is_running = False
+        # 如果有正在运行的进程，尝试终止它
+        if self._process and self._process.poll() is None:
+            try:
+                # Windows下使用taskkill
+                if platform.system().lower() == "windows":
+                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(self._process.pid)], 
+                                  stdout=subprocess.DEVNULL, 
+                                  stderr=subprocess.DEVNULL)
+                else:
+                    # Unix-like系统下发送SIGTERM信号
+                    import signal
+                    try:
+                        os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
+                    except ProcessLookupError:
+                        # 进程可能已经结束
+                        pass
+            except Exception as e:
+                print(f"终止进程时出错: {e}")
