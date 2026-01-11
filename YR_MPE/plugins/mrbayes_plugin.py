@@ -80,7 +80,7 @@ class MrBayesPlugin(BasePlugin):
         self.rate_params_layout.addWidget(self.datatype_combo)
 
         # for DNA data
-        # lset nst = <dna_rate_num>, statefreq = <fixed(equal) / fixed(empirical)> // <none - estimated>
+        # lset nst = <dna_rate_num>, statefreq = <fixed(equal) / fixed(empirical)> // <none - estimated>;
         self.dnadata_widget = QWidget()
         self.dnadata_widget.setContentsMargins(0, 0, 0, 0)
         self.dnadata_layout = QHBoxLayout()
@@ -103,7 +103,7 @@ class MrBayesPlugin(BasePlugin):
         self.rate_params_layout.addWidget(self.dnadata_widget)
 
         # for Protein data
-        # prset aamodelpr = fixed(...) / mixed
+        # prset aamodelpr = fixed(...) / mixed;
         self.prodata_widget = QWidget()
         self.prodata_widget.setContentsMargins(0, 0, 0, 0)
         self.prodata_widget.setVisible(False)
@@ -131,7 +131,7 @@ class MrBayesPlugin(BasePlugin):
         phy_parameters_layout.addRow("Model Settings:", self.rate_params_layout)
         
         # Rate Heterogenity
-        # lset rates = euqal/gamma/invgamma/propinv/lnorm/adgamma Ngammacat=<gamma categories>
+        # lset rates = euqal/gamma/invgamma/propinv/lnorm/adgamma Ngammacat=<gamma categories>;
         rate_hetero_layout = QHBoxLayout()
         self.rate_hetero_combo = QComboBox()
         self.rate_hetero_combo.addItems(["Equal", "Gamma (+G)", "InvGamma (+G+I)", "PropInv (+I)", "Lognormal", "Adgamma"])
@@ -175,7 +175,7 @@ class MrBayesPlugin(BasePlugin):
         self.beagle_params_layout = QGridLayout()
         # use beagle?
 
-        # set usebeagle=yes/no beagledevice=cpu/gpu beagleprecision=double/single beaglescaling=dynamic/always
+        # set usebeagle=yes/no beagledevice=cpu/gpu beagleprecision=double/single beaglescaling=dynamic/always;
         self.use_beagle = QCheckBox("Use BEAGLE") 
         self.use_beagle.setChecked(True)
 
@@ -206,6 +206,102 @@ class MrBayesPlugin(BasePlugin):
         self.beagle_params_layout.addWidget(self.beagle_scaling_combo, 1, 3)
 
         mpi_beagle_layout.addRow("BEAGLE settings", self.beagle_params_layout)
+
+        mcmc_params_group = QGroupBox("MCMC settings")
+        mcmc_params_layout = QFormLayout()
+        mcmc_params_group.setLayout(mcmc_params_layout)
+
+        layout.addWidget(mcmc_params_group)
+
+        # generation; sampling frequency; run num; chain num;
+        # mcmcp ngen=* samplefreq=* printfreq=<samplefreq> nchains=* nruns=* savebrlens=yes checkpoint=yes checkfreq=5000;
+        self.generation_spinbox = QSpinBox()
+        self.generation_spinbox.setMinimum(1)
+        self.generation_spinbox.setValue(1000000)
+        self.generation_spinbox.setMaximum(100000000000000000)
+
+        self.sampling_frequency_spinbox = QSpinBox()
+        self.sampling_frequency_spinbox.setMinimum(1)
+        self.sampling_frequency_spinbox.setValue(1000)
+        self.sampling_frequency_spinbox.setMaximum(100000000000000000)
+
+        self.run_num_spinbox = QSpinBox()
+        self.run_num_spinbox.setMinimum(1)
+        self.run_num_spinbox.setValue(2)
+
+        self.chain_num_spinbox = QSpinBox()
+        self.chain_num_spinbox.setMinimum(1)
+        self.chain_num_spinbox.setValue(4) # MC^3
+
+        mcmcp_widget = QWidget()
+        mcmcp_layout = QHBoxLayout()
+        mcmcp_widget.setContentsMargins(0, 0, 0, 0)
+        mcmcp_layout.setContentsMargins(0, 0, 0, 0)
+        mcmcp_widget.setLayout(mcmcp_layout)
+
+        mcmcp_layout.addWidget(QLabel("Generations:"))
+        mcmcp_layout.addWidget(self.generation_spinbox)
+        mcmcp_layout.addWidget(QLabel("Sampling Freq.:"))
+        mcmcp_layout.addWidget(self.sampling_frequency_spinbox)
+        mcmcp_layout.addWidget(QLabel("Runs:"))
+        mcmcp_layout.addWidget(self.run_num_spinbox)
+        mcmcp_layout.addWidget(QLabel("Chains:"))
+        mcmcp_layout.addWidget(self.chain_num_spinbox)
+
+        mcmc_params_layout.addRow("MCMC:", mcmcp_widget)
+
+        # summary and consensus
+        # sump <relburnin=yes burninfrac=*> / <burnin=*>;
+        # sumt <relburnin=yes burninfrac=*> / <burnin=*> conformat=<Simple/FigTree> contype=*
+
+        sum_widget = QWidget()
+        sum_layout = QVBoxLayout()
+        sum_widget.setContentsMargins(0, 0, 0, 0)
+        sum_layout.setContentsMargins(0, 0, 0, 0)
+        sum_widget.setLayout(sum_layout)
+
+        self.contree_type = QComboBox()
+        self.contree_type.addItems(["Majority-rule", "Halfcompat", "Allcompat"])
+
+        self.contree_format = QComboBox()
+        self.contree_format.addItems(["FigTree", "Simple"])
+
+        sum_layout.addWidget(QLabel("Method:"))
+        sum_layout.addWidget(self.contree_type)
+        sum_layout.addWidget(QLabel("Output format:"))
+        sum_layout.addWidget(self.contree_format)
+
+        mcmc_params_layout.addRow("Consensus:", sum_layout)
+
+        burnin_widget = QWidget()
+        burnin_layout = QHBoxLayout()
+        burnin_widget.setContentsMargins(0, 0, 0, 0)
+        burnin_layout.setContentsMargins(0, 0, 0, 0)
+        burnin_widget.setLayout(burnin_layout)
+
+        self.burnin_as_fraction = QRadioButton("Fraction:")
+        self.burnin_as_fraction.setChecked(True)
+
+        self.burnin_fraction = QDoubleSpinBox()
+        self.burnin_fraction.setRange(0, 1)
+        self.burnin_fraction.setSingleStep(0.01)
+        self.burnin_fraction.setValue(0.25)
+
+        self.burnin_as_states = QRadioButton("States:")
+        self.burnin_as_states.setChecked(False)
+
+        self.burnin_states = QSpinBox()
+        self.burnin_states.setRange(0, 1000000000000000)
+        self.burnin_states.setValue(1000)
+
+        burnin_layout.addWidget(self.burnin_as_fraction)
+        burnin_layout.addWidget(self.burnin_fraction)
+        burnin_layout.addWidget(self.burnin_as_states)
+        burnin_layout.addWidget(self.burnin_states)
+
+        mcmc_params_layout.addRow("Burn-in:", burnin_layout)
+
+
 
         mb_data_block_widget = QWidget()
         mb_data_block_widget.setContentsMargins(0,0,0,0)
