@@ -20,7 +20,7 @@
 from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, 
                              QMessageBox, QGroupBox, QFormLayout, QLineEdit, 
                              QSpinBox, QCheckBox, QLabel, QComboBox, QScrollArea,
-                             QWidget, QFrame, QTextEdit, QToolButton, QDialog, QDoubleSpinBox, QRadioButton)
+                             QWidget, QFrame, QTextEdit, QToolButton, QDialog, QDoubleSpinBox, QRadioButton, QSizePolicy)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
 import tempfile
@@ -420,6 +420,7 @@ class TrimAlPlugin(BasePlugin):
         # 结果展示区域 - 使用WebEngineView显示HTML
         from PyQt5.QtWebEngineWidgets import QWebEngineView
         self.result_view = QWebEngineView()
+        self.result_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.result_view)
         
         # 输出文件信息
