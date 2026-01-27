@@ -129,6 +129,7 @@ class MDMRCA(QWidget):
         selected_taxa_layout.addWidget(self.taxon_set_name)
 
         self.selected_taxa_list = QListWidget()
+        self.selected_taxa_list.setSelectionMode(QListWidget.ExtendedSelection)
         selected_taxa_layout.addWidget(self.selected_taxa_list)
         
     def init_tmrca_set(self):
