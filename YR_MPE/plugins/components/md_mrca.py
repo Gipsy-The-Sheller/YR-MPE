@@ -1,15 +1,27 @@
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel, QLineEdit,
                              QListWidget, QListWidgetItem, QPushButton, QComboBox,
                              QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
-                             QSizePolicy)
+                             QSizePolicy, QMessageBox)
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from mpl_treeview import MplTreeView
 from mpl_distribution import MplDistribution
 import sys
 
 class MDMRCA(QWidget):
-    def __init__(self, example=False):
-        super().__init__()
+    def __init__(self, parent=None, example=False):
+        super().__init__(parent)
+        self.setWindowTitle("MRCA Annotation")
+        self.resize(800, 600)
+        
+        # 初始化Newick字符串（示例数据）
+        if example:
+            self.newick_string = "((A:0.1,B:0.2):0.3,(C:0.4,D:0.5):0.6);"
+        else:
+            self.newick_string = ""
+            
+        # 新增：用于存储带MRCA注释的Newick字符串
+        self.annotated_newick_str = self.newick_string
+        
         self.param_widgets = {}  # 初始化param_widgets属性
         self.init_ui()
 
@@ -32,13 +44,196 @@ class MDMRCA(QWidget):
         self.init_tmrca_set()
         self.init_tree_view()
     
+    def extract_all_taxa_from_newick(self, newick_string):
+        """
+        从Newick字符串中提取所有OTU名称
+        """
+        if not newick_string:
+            return []
+            
+        taxa = []
+        current_otu = ""
+        in_quotes = False
+        quote_char = None
+        current_depth = 0
+        
+        i = 0
+        n = len(newick_string)
+        
+        while i < n:
+            char = newick_string[i]
+            
+            if char == "'" or char == '"':
+                if not in_quotes:
+                    in_quotes = True
+                    quote_char = char
+                    current_otu += char
+                elif char == quote_char:
+                    in_quotes = False
+                    quote_char = None
+                    current_otu += char
+                else:
+                    current_otu += char
+            elif in_quotes:
+                current_otu += char
+            elif char == ':':
+                # 遇到冒号，说明后面是分支长度，当前OTU结束
+                if current_otu:
+                    otu_name = current_otu.strip()
+                    if otu_name:
+                        taxa.append(otu_name)
+                    current_otu = ""
+                # 跳过分支长度部分（直到遇到分隔符）
+                i += 1
+                while i < n and newick_string[i] not in '(),;':
+                    i += 1
+                continue
+            elif char == '(':
+                current_depth += 1
+                if current_otu:
+                    otu_name = current_otu.strip()
+                    if otu_name:
+                        taxa.append(otu_name)
+                    current_otu = ""
+            elif char == ')' or char == ',' or char == ';':
+                if current_otu:
+                    otu_name = current_otu.strip()
+                    if otu_name:
+                        taxa.append(otu_name)
+                    current_otu = ""
+                if char == ')':
+                    current_depth -= 1
+                elif char == ';':
+                    break
+            else:
+                current_otu += char
+                
+            i += 1
+        
+        return taxa
+    
+    def find_mrca_position(self, newick_string, target_taxa_set):
+        """
+        O(L)时间复杂度的单次遍历MRCA定位算法
+        
+        算法步骤：
+        1. 新建一个整形作为栈，并建一个整形（lower）做记录器
+        2. 从newick字符串的一端开始遍历，遇到左括号时将栈+1，遇到右括号时将栈-1
+        3. 在匹配到taxon set中的第一个元素时，将lower都记录为这个元素的栈深度
+        4. 此后，开始更新lower：每当遇到更浅的栈深度时，将lower更新为这个值，直到taxon set中的元素被完全遍历
+        5. 此时，这个lower就代表MRCA节点分出的所有主要分支的栈深度
+        6. 继续遍历newick字符串，直到遇到某个右括号使栈深度小于lower时，在右括号右侧追加[taxon set名称]
+        
+        注意：此算法假设目标taxa位于同一个clade中，对于分散的目标taxa可能返回近似结果。
+        """
+        if not newick_string or not target_taxa_set:
+            return None
+            
+        target_taxa_set = set(target_taxa_set)
+        remaining_targets = set(target_taxa_set)
+        n = len(newick_string)
+        
+        current_stack = 0
+        current_otu = ""
+        in_quotes = False
+        quote_char = None
+        lower = float('inf')
+        i = 0
+        
+        while i < n:
+            char = newick_string[i]
+            
+            if char == "'" or char == '"':
+                if not in_quotes:
+                    in_quotes = True
+                    quote_char = char
+                    current_otu += char
+                elif char == quote_char:
+                    in_quotes = False
+                    quote_char = None
+                    current_otu += char
+                else:
+                    current_otu += char
+            elif in_quotes:
+                current_otu += char
+            elif char == ':':
+                if current_otu:
+                    otu_name = current_otu.strip()
+                    if otu_name and otu_name in remaining_targets:
+                        remaining_targets.remove(otu_name)
+                        if current_stack < lower:
+                            lower = current_stack
+                    current_otu = ""
+                # 跳过分支长度
+                i += 1
+                while i < n and newick_string[i] not in '(),;':
+                    i += 1
+                continue
+            elif char == '(':
+                current_stack += 1
+                if current_otu:
+                    otu_name = current_otu.strip()
+                    if otu_name and otu_name in remaining_targets:
+                        remaining_targets.remove(otu_name)
+                        if current_stack - 1 < lower:
+                            lower = current_stack - 1
+                    current_otu = ""
+            elif char == ')' or char == ',' or char == ';':
+                if current_otu:
+                    otu_name = current_otu.strip()
+                    if otu_name and otu_name in remaining_targets:
+                        remaining_targets.remove(otu_name)
+                        if current_stack < lower:
+                            lower = current_stack
+                    current_otu = ""
+                if char == ')':
+                    # 如果所有目标都已遇到，并且当前右括号满足条件，立即返回
+                    if not remaining_targets and current_stack - 1 < lower:
+                        return (i, i, current_stack - 1)
+                    current_stack -= 1
+                elif char == ';':
+                    break
+            else:
+                current_otu += char
+                
+            i += 1
+        
+        return None
+
+    def insert_mrca_label(self, newick_string, target_taxa_set, label_name):
+        """
+        在Newick字符串中插入MRCA标签
+        """
+        result = self.find_mrca_position(newick_string, target_taxa_set)
+        if not result:
+            return newick_string
+            
+        start_pos, end_pos, depth = result
+        
+        # 在MRCA节点后插入标签
+        if end_pos < len(newick_string) and newick_string[end_pos] == ')':
+            # 在右括号后插入
+            labeled_newick = (newick_string[:end_pos + 1] + 
+                            f"[&name={label_name}]" + 
+                            newick_string[end_pos + 1:])
+        else:
+            # 单个taxa的情况
+            labeled_newick = (newick_string[:end_pos] + 
+                            f"[&name={label_name}]" + 
+                            newick_string[end_pos:])
+        
+        return labeled_newick
+    
     def load_example_data(self):
         """加载示例数据：一棵系统发育树和对应的分类单元"""
         # 示例Newick格式的树
-        example_newick = "((Human:0.1,Chimpanzee:0.1):0.2,(Gorilla:0.3,Orangutan:0.4):0.1,(Mouse:0.8,Rat:0.7):0.2);"
+        example_newick = "(((A:0.1,B:0.1):0.1,C:0.2):0.1, (D:0.1,E:0.1):0.2);"
+        
+        # 存储原始Newick字符串
+        self.newick_string = example_newick
         
         # 从树中提取所有叶子节点（分类单元）
-        example_taxa = ["Human", "Chimpanzee", "Gorilla", "Orangutan", "Mouse", "Rat"]
+        example_taxa = self.extract_all_taxa_from_newick(example_newick)
         
         # 存储所有可用的分类单元
         self.all_taxa = set(example_taxa)
@@ -52,8 +247,7 @@ class MDMRCA(QWidget):
         # 绘制示例树
         self.tree_figure_canvas.draw_dendrogram(newick_str=example_newick)
         
-        # 可选：预选择一些分类单元作为示例
-        # 例如选择前两个作为示例分类单元集
+        # 预选择一些分类单元作为示例
         self.taxon_set_name.setText("Primates")
         self.selected_taxa_list.clear()
         for i in range(2):  # 选择前两个（Human, Chimpanzee）
@@ -322,6 +516,9 @@ class MDMRCA(QWidget):
         
         # 清除选择
         self.taxon_list.clearSelection()
+        
+        # 更新树视图高亮
+        self.update_tree_highlight()
     
     def remove_taxa(self):
         """从选中列表中移除选中的分类单元"""
@@ -338,28 +535,113 @@ class MDMRCA(QWidget):
         
         # 清除选择
         self.selected_taxa_list.clearSelection()
+        
+        # 更新树视图高亮
+        self.update_tree_highlight()
     
     def clear_taxa(self):
         """清空所有选中的分类单元"""
         self.selected_taxa_list.clear()
         # 重新显示所有分类单元
         self._update_available_taxa_display()
+        
+        # 更新树视图高亮
+        self.update_tree_highlight()
+    
+    def update_tree_highlight(self):
+        """更新树的高亮显示"""
+        # 获取当前选中的分类单元
+        selected_taxa = [self.selected_taxa_list.item(i).text() 
+                        for i in range(self.selected_taxa_list.count())]
+        
+        # 获取MRCA名称 - 优先使用输入框中的名称，如果有的话
+        mrca_name = self.taxon_set_name.text().strip()
+        if not mrca_name:
+            # 如果输入框为空，尝试从Newick字符串中提取
+            mrca_name = self.get_current_mrca_name()
+        
+        # 构建args字典
+        args = {}
+        if selected_taxa:
+            args['taxon_set'] = selected_taxa
+        if mrca_name:
+            args['mrca_name'] = mrca_name
+            
+        # 如果有MRCA名称和选中的分类单元，更新带注释的Newick字符串
+        if mrca_name and selected_taxa:
+            self.annotated_newick_str = self.insert_mrca_label(self.newick_string, selected_taxa, mrca_name)
+        else:
+            # 如果没有MRCA信息，使用原始Newick字符串
+            self.annotated_newick_str = self.newick_string
+            
+        # 更新树视图
+        self.tree_figure_canvas.draw_dendrogram(newick_str=self.annotated_newick_str, args=args)
 
+    def get_current_mrca_name(self):
+        """获取当前的MRCA标注名称"""
+        if not self.annotated_newick_str:
+            return None
+            
+        # 首先尝试从输入框获取（保持向后兼容）
+        taxon_set_name = self.taxon_set_name.text().strip()
+        if taxon_set_name and f"[&name={taxon_set_name}]" in self.annotated_newick_str:
+            return taxon_set_name
+            
+        # 如果输入框为空或不匹配，直接从带注释的Newick字符串中提取MRCA名称
+        import re
+        # 匹配 [&name=...] 格式的注释
+        match = re.search(r'\[&name=([^\]]+)\]', self.annotated_newick_str)
+        if match:
+            extracted_name = match.group(1)
+            # 验证提取的名称是否有效（非空且不包含特殊字符）
+            if extracted_name.strip():
+                return extracted_name.strip()
+                
+        return None
+    
+    def apply_mrca_annotation(self):
+        """应用MRCA标注并更新树视图"""
+        selected_taxa = [self.selected_taxa_list.item(i).text() 
+                        for i in range(self.selected_taxa_list.count())]
+        
+        if not selected_taxa:
+            QMessageBox.warning(self, "Warning", "Please select at least one taxon.")
+            return
+            
+        taxon_set_name = self.taxon_set_name.text().strip()
+        if not taxon_set_name:
+            QMessageBox.warning(self, "Warning", "Please enter a taxon set name.")
+            return
+        
+        # 检查是否已经存在相同的MRCA注释（在annotated_newick_str中）
+        if taxon_set_name and f"[&name={taxon_set_name}]" in self.annotated_newick_str:
+            reply = QMessageBox.question(
+                self, "Confirm Overwrite", 
+                f"MRCA annotation '{taxon_set_name}' already exists. Overwrite?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+        
+        # 应用MRCA标注到annotated_newick_str
+        self.annotated_newick_str = self.insert_mrca_label(self.newick_string, selected_taxa, taxon_set_name)
+        
+        # 更新树视图（包含高亮）
+        args = {
+            'taxon_set': selected_taxa,
+            'mrca_name': taxon_set_name
+        }
+        self.tree_figure_canvas.draw_dendrogram(newick_str=self.annotated_newick_str, args=args)
+        
+        QMessageBox.information(self, "Success", f"MRCA annotation '{taxon_set_name}' applied successfully!")
+        
 def main():
-    app = QApplication(sys.argv)  # 使用sys.argv
+    from PyQt5.QtWidgets import QApplication
+    import sys
     
-    # 创建主窗口
-    main_window = QMainWindow()
-    main_window.setWindowTitle("MD-MRCA Application")
-    
-    # 创建MDMRCA部件并设置为中央部件，启用示例数据
+    app = QApplication(sys.argv)
     md_mrca_widget = MDMRCA(example=True)
-    # 已经在__init__中调用了init_ui()，不需要再次调用
-    main_window.setCentralWidget(md_mrca_widget)
-    
-    # 显示窗口
-    main_window.show()
-    
+    md_mrca_widget.show()
     sys.exit(app.exec_())
 
 if __name__ == "__main__":

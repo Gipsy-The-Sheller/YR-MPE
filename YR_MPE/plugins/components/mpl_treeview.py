@@ -30,7 +30,7 @@ class NewickParser:
             self.pos += 1
             
     def parse_label(self):
-        """解析标签（节点名和分支长度）"""
+        """解析标签（节点名、分支长度和注释）"""
         self.skip_whitespace()
         start = self.pos
         
@@ -42,19 +42,49 @@ class NewickParser:
         if self.pos > start:
             label = self.newick_str[start:self.pos].strip()
             
-            # 检查是否有分支长度
-            if ':' in label:
-                parts = label.split(':', 1)
-                name = parts[0].strip() if parts[0].strip() else ""
-                try:
-                    branch_length = float(parts[1].strip())
-                except ValueError:
-                    branch_length = 0.0
+            # 初始化节点名称
+            node_name = ""
+            branch_length = 0.0
+            
+            # 检查是否有注释 [&name=...]
+            if '[' in label and ']' in label:
+                # 提取注释部分
+                comment_start = label.find('[')
+                comment_end = label.find(']', comment_start)
+                if comment_start != -1 and comment_end != -1:
+                    comment = label[comment_start:comment_end+1]
+                    # 提取name属性
+                    if '[&name=' in comment:
+                        name_start = comment.find('[&name=') + 7
+                        name_end = comment.find(']', name_start)
+                        if name_end != -1:
+                            node_name = comment[name_start:name_end]
+                    # 主标签部分（去掉注释）
+                    main_label = (label[:comment_start] + label[comment_end+1:]).strip()
+                else:
+                    main_label = label
             else:
-                name = label
-                branch_length = 0.0
+                main_label = label
                 
-            return name, branch_length
+            # 处理主标签（可能包含分支长度）
+            if main_label:
+                if ':' in main_label:
+                    parts = main_label.split(':', 1)
+                    base_name = parts[0].strip() if parts[0].strip() else ""
+                    try:
+                        branch_length = float(parts[1].strip())
+                    except ValueError:
+                        branch_length = 0.0
+                else:
+                    base_name = main_label
+                    
+                # 如果已经有从注释中提取的name，则使用它，否则使用基础名称
+                if not node_name:
+                    node_name = base_name
+            else:
+                node_name = node_name  # 保持从注释中提取的name
+                
+            return node_name, branch_length
             
         return "", 0.0
         
@@ -168,8 +198,15 @@ class MplTreeView(FigureCanvas):
         self.ax = self.fig.add_subplot(111)
         self.ax.axis('off')
         
-    def draw_dendrogram(self, newick_str=None, root=None):
-        """绘制树状图，可以传入Newick字符串或已解析的根节点"""
+    def draw_dendrogram(self, newick_str=None, root=None, args=None):
+        """绘制树状图，可以传入Newick字符串或已解析的根节点
+        Args:
+            newick_str: Newick格式字符串
+            root: 已解析的根节点
+            args: 配置字典，可包含：
+                - taxon_set: 要高亮的分类单元集合
+                - mrca_name: MRCA节点名称（用于高亮内部节点）
+        """
         start_time = time.time()  # 添加开始时间记录
         
         # 清除之前的图形
@@ -189,6 +226,15 @@ class MplTreeView(FigureCanvas):
             print("没有节点可绘制")
             return
             
+        # 解析args参数
+        taxon_set = set()
+        mrca_name = None
+        if args:
+            if 'taxon_set' in args and args['taxon_set']:
+                taxon_set = set(args['taxon_set'])
+            if 'mrca_name' in args and args['mrca_name']:
+                mrca_name = args['mrca_name']
+        
         nodes = collect_nodes(self.root)
         
         if not nodes:
@@ -202,22 +248,48 @@ class MplTreeView(FigureCanvas):
         
         # 绘制节点和连线
         for node in nodes:
-            # 绘制节点
-            self.ax.plot(node.age, node.order, 'o', markersize=6, color='black')
+            # 确定节点的绘制样式
+            if node.is_leaf and node.name in taxon_set:
+                # 叶节点且在taxon_set中：高亮显示
+                marker_color = 'red'
+                marker_size = 10
+                marker_style = 'o'
+            elif not node.is_leaf and node.name == mrca_name:
+                # 内部节点且名称匹配MRCA名称：红色+放大圆形
+                marker_color = 'red'
+                marker_size = 15
+                marker_style = 'o'
+            else:
+                # 普通节点
+                marker_color = 'black'
+                marker_size = 6
+                marker_style = 'o'
             
-            # 如果节点有名称且为叶节点，添加标签
-            if node.name and node.is_leaf:
+            # 绘制节点
+            self.ax.plot(node.age, node.order, marker_style, 
+                        markersize=marker_size, color=marker_color)
+            
+            # 添加标签（包括叶节点和内部节点）
+            if node.name:
+                # 对于高亮的节点，使用红色标签
+                if (node.is_leaf and node.name in taxon_set) or (not node.is_leaf and node.name == mrca_name):
+                    label_color = 'red'
+                else:
+                    label_color = 'black'
                 self.ax.text(node.age, node.order, f" {node.name}", 
-                           verticalalignment='center', fontsize=10)
+                           verticalalignment='center', fontsize=10, color=label_color)
             
             # 绘制到子节点的连线
             for child in node.children:
                 # 先画垂直线：从父节点向下到子节点的水平位置
+                line_color = 'red' if (node.name == mrca_name or 
+                                     (node.is_leaf and node.name in taxon_set) or
+                                     (child.is_leaf and child.name in taxon_set)) else 'black'
                 self.ax.plot([node.age, node.age], [node.order, child.order], 
-                           '-', color='black', linewidth=1)
+                           '-', color=line_color, linewidth=1)
                 # 再画水平线：从父节点的水平位置向右到子节点
                 self.ax.plot([node.age, child.age], [child.order, child.order], 
-                           '-', color='black', linewidth=1)
+                           '-', color=line_color, linewidth=1)
         
         # 设置图形属性
         self.ax.set_xlim(-0.1, max_age * 1.2 if max_age > 0 else 1.0)
