@@ -8,11 +8,15 @@ from mpl_distribution import MplDistribution
 import sys
 
 class MDMRCA(QWidget):
-    def __init__(self):
+    def __init__(self, example=False):
         super().__init__()
+        self.param_widgets = {}  # 初始化param_widgets属性
         self.init_ui()
+
+        if example:
+            self.load_example_data()
     
-    def init_ui(self, example=False):
+    def init_ui(self):
         self.setWindowTitle("MD-MRCA")
         # self.setGeometry(100, 100, 800, 600)
 
@@ -27,9 +31,58 @@ class MDMRCA(QWidget):
         self.init_taxon_set()
         self.init_tmrca_set()
         self.init_tree_view()
-
-        if example:
-            pass
+    
+    def load_example_data(self):
+        """加载示例数据：一棵系统发育树和对应的分类单元"""
+        # 示例Newick格式的树
+        example_newick = "((Human:0.1,Chimpanzee:0.1):0.2,(Gorilla:0.3,Orangutan:0.4):0.1,(Mouse:0.8,Rat:0.7):0.2);"
+        
+        # 从树中提取所有叶子节点（分类单元）
+        example_taxa = ["Human", "Chimpanzee", "Gorilla", "Orangutan", "Mouse", "Rat"]
+        
+        # 存储所有可用的分类单元
+        self.all_taxa = set(example_taxa)
+        
+        # 填充OTU浏览器中的分类单元列表（初始时显示所有）
+        self.taxon_list.clear()
+        for taxon in example_taxa:
+            item = QListWidgetItem(taxon)
+            self.taxon_list.addItem(item)
+        
+        # 绘制示例树
+        self.tree_figure_canvas.draw_dendrogram(newick_str=example_newick)
+        
+        # 可选：预选择一些分类单元作为示例
+        # 例如选择前两个作为示例分类单元集
+        self.taxon_set_name.setText("Primates")
+        self.selected_taxa_list.clear()
+        for i in range(2):  # 选择前两个（Human, Chimpanzee）
+            item = QListWidgetItem(example_taxa[i])
+            self.selected_taxa_list.addItem(item)
+        
+        # 更新左侧显示，移除已选中的分类单元
+        self._update_available_taxa_display()
+    
+    def _update_available_taxa_display(self):
+        """更新左侧可用分类单元的显示，排除已选中的"""
+        # 获取当前选中的分类单元
+        selected_names = {self.selected_taxa_list.item(i).text() 
+                         for i in range(self.selected_taxa_list.count())}
+        
+        # 获取应该显示的分类单元（所有 - 已选中）
+        available_names = self.all_taxa - selected_names
+        
+        # 应用过滤器
+        filter_text = self.otu_filter.text().lower()
+        if filter_text:
+            available_names = {name for name in available_names if filter_text in name.lower()}
+        
+        # 更新显示
+        self.taxon_list.clear()
+        for name in sorted(available_names):
+            item = QListWidgetItem(name)
+            self.taxon_list.addItem(item)
+    
     def init_taxon_set(self):
         taxon_set_layout = QHBoxLayout()
         self.left_layout.addLayout(taxon_set_layout)
@@ -95,9 +148,10 @@ class MDMRCA(QWidget):
         tmrca_type_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
         tmrca_type_layout.addWidget(tmrca_type_label)
 
-        tmrca_type_combo = QComboBox()
-        tmrca_type_combo.addItems(['Point', 'Uniform', 'Upper Boundary', 'Lower Boundary', 'Normal', 'Lognormal'])
-        tmrca_type_layout.addWidget(tmrca_type_combo)
+        self.tmrca_type_combo = QComboBox()
+        self.tmrca_type_combo.addItems(['Point', 'Uniform', 'Upper Boundary', 'Lower Boundary', 'Normal', 'Lognormal'])
+        self.tmrca_type_combo.currentTextChanged.connect(self.on_tmrca_type_changed)
+        tmrca_type_layout.addWidget(self.tmrca_type_combo)
 
         tmrca_setting_group = QGroupBox("tMRCA parameters")
         self.tmrca_setting_group_layout = QFormLayout()
@@ -109,9 +163,13 @@ class MDMRCA(QWidget):
         self.tmrca_figure_canvas = MplDistribution()
         tmrca_set_layout.addWidget(self.tmrca_figure_canvas)
 
+        # 初始化参数输入字段
+        self.init_tmrca_parameters()
+        
     def init_tree_view(self):
         # 使用封装的MplTreeView组件来绘制树状图
         self.tree_figure_canvas = MplTreeView()
+        self.tree_figure_canvas.draw_dendrogram("(((1:0.1, 2:0.1):0.1,3:0.3):0.5,4:0.9);")
         self.main_layout.addWidget(self.tree_figure_canvas)
 
         # 示例：绘制一个默认的树
@@ -125,40 +183,49 @@ class MDMRCA(QWidget):
         # Point distribution parameters
         self.point_value = QLineEdit()
         self.point_value.setText("1.0")
-        self.param_widgets['Point'] = [('Point value:', self.point_value)]
+        self.point_value.setPlaceholderText("e.g., 1.5")
+        self.param_widgets['Point'] = [('Age (time units):', self.point_value)]
         
         # Uniform distribution parameters
         self.uniform_lower = QLineEdit()
         self.uniform_lower.setText("0.5")
+        self.uniform_lower.setPlaceholderText("e.g., 0.8")
         self.uniform_upper = QLineEdit()
         self.uniform_upper.setText("1.5")
-        self.param_widgets['Uniform'] = [('Lower bound:', self.uniform_lower), 
-                                        ('Upper bound:', self.uniform_upper)]
+        self.uniform_upper.setPlaceholderText("e.g., 2.0")
+        self.param_widgets['Uniform'] = [('Minimum age:', self.uniform_lower), 
+                                        ('Maximum age:', self.uniform_upper)]
         
         # Upper Boundary parameters
         self.upper_boundary = QLineEdit()
         self.upper_boundary.setText("2.0")
-        self.param_widgets['Upper Boundary'] = [('Upper boundary:', self.upper_boundary)]
+        self.upper_boundary.setPlaceholderText("e.g., 3.0")
+        self.param_widgets['Upper Boundary'] = [('Maximum age:', self.upper_boundary)]
         
         # Lower Boundary parameters
         self.lower_boundary = QLineEdit()
         self.lower_boundary.setText("0.5")
-        self.param_widgets['Lower Boundary'] = [('Lower boundary:', self.lower_boundary)]
+        self.lower_boundary.setPlaceholderText("e.g., 0.2")
+        self.param_widgets['Lower Boundary'] = [('Minimum age:', self.lower_boundary)]
         
         # Normal distribution parameters
         self.normal_mean = QLineEdit()
         self.normal_mean.setText("1.0")
+        self.normal_mean.setPlaceholderText("e.g., 1.2")
         self.normal_std = QLineEdit()
         self.normal_std.setText("0.2")
-        self.param_widgets['Normal'] = [('Mean:', self.normal_mean), 
+        self.normal_std.setPlaceholderText("e.g., 0.3")
+        self.param_widgets['Normal'] = [('Mean age:', self.normal_mean), 
                                        ('Standard deviation:', self.normal_std)]
         
         # Lognormal distribution parameters
         self.lognormal_mean = QLineEdit()
         self.lognormal_mean.setText("1.0")
+        self.lognormal_mean.setPlaceholderText("e.g., 1.5")
         self.lognormal_std = QLineEdit()
         self.lognormal_std.setText("0.2")
-        self.param_widgets['Lognormal'] = [('Mean:', self.lognormal_mean), 
+        self.lognormal_std.setPlaceholderText("e.g., 0.4")
+        self.param_widgets['Lognormal'] = [('Mean age:', self.lognormal_mean), 
                                           ('Standard deviation:', self.lognormal_std)]
         
         # 设置初始参数显示
@@ -229,15 +296,53 @@ class MDMRCA(QWidget):
             self.tmrca_figure_canvas.clear_plot()
     
     def filter_taxa(self):
-        pass
+        """根据过滤文本筛选OTU列表"""
+        # 过滤逻辑已整合到 _update_available_taxa_display 中
+        self._update_available_taxa_display()
+    
     def add_taxa(self):
-        pass    
+        """将选中的分类单元从OTU列表添加到选中列表"""
+        selected_items = self.taxon_list.selectedItems()
+        if not selected_items:
+            return
+            
+        current_selected_names = {self.selected_taxa_list.item(i).text() 
+                                for i in range(self.selected_taxa_list.count())}
+        
+        for item in selected_items:
+            taxon_name = item.text()
+            if taxon_name not in current_selected_names:
+                new_item = QListWidgetItem(taxon_name)
+                self.selected_taxa_list.addItem(new_item)
+                current_selected_names.add(taxon_name)
+        
+        # 更新左侧显示
+        self._update_available_taxa_display()
+        
+        # 清除选择
+        self.taxon_list.clearSelection()
+    
     def remove_taxa(self):
-        pass
+        """从选中列表中移除选中的分类单元"""
+        selected_items = self.selected_taxa_list.selectedItems()
+        if not selected_items:
+            return
+            
+        for item in selected_items:
+            row = self.selected_taxa_list.row(item)
+            self.selected_taxa_list.takeItem(row)
+        
+        # 更新左侧显示，重新显示被移除的分类单元
+        self._update_available_taxa_display()
+        
+        # 清除选择
+        self.selected_taxa_list.clearSelection()
+    
     def clear_taxa(self):
-        pass
-
-
+        """清空所有选中的分类单元"""
+        self.selected_taxa_list.clear()
+        # 重新显示所有分类单元
+        self._update_available_taxa_display()
 
 def main():
     app = QApplication(sys.argv)  # 使用sys.argv
@@ -246,8 +351,9 @@ def main():
     main_window = QMainWindow()
     main_window.setWindowTitle("MD-MRCA Application")
     
-    # 创建MDMRCA部件并设置为中央部件
-    md_mrca_widget = MDMRCA()
+    # 创建MDMRCA部件并设置为中央部件，启用示例数据
+    md_mrca_widget = MDMRCA(example=True)
+    # 已经在__init__中调用了init_ui()，不需要再次调用
     main_window.setCentralWidget(md_mrca_widget)
     
     # 显示窗口
