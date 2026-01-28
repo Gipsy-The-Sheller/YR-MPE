@@ -46,6 +46,7 @@ class MiniTracerPlugin(QWidget):
         # Upper section: File table and buttons
         upper_section = QWidget()
         upper_layout = QVBoxLayout()
+        upper_layout.setContentsMargins(0, 0, 0, 0)
         upper_section.setLayout(upper_layout)
         
         # File table widget
@@ -79,6 +80,7 @@ class MiniTracerPlugin(QWidget):
         # Lower section: Statistics table
         lower_section = QWidget()
         lower_layout = QVBoxLayout()
+        lower_layout.setContentsMargins(0, 0, 0, 0)
         lower_section.setLayout(lower_layout)
         
         # Statistics table widget
@@ -102,8 +104,11 @@ class MiniTracerPlugin(QWidget):
         right_layout = QVBoxLayout()
         right_panel.setLayout(right_layout)
         
-        # Tab widget for different analysis modes
+        # Create the tab widget for analysis
         self.tab_widget = QTabWidget()
+        # self.tab_widget.setStyleSheet("background-color: blue;")
+        # 创建分析用的标签页
+        # Create tabs
         self.single_chain_tab = QWidget()
         self.compare_chains_tab = QWidget()
         
@@ -116,13 +121,20 @@ class MiniTracerPlugin(QWidget):
         self.trace_plot_container = QWidget()
         self.trace_plot_layout = QVBoxLayout()
         self.trace_plot_container.setLayout(self.trace_plot_layout)
-        single_layout.addWidget(self.trace_plot_container)
+        # 设置容器的大小策略，确保能正确拉伸
+        self.trace_plot_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # 设置布局的拉伸因子
+        self.trace_plot_layout.setStretch(0, 1)
+        single_layout.addWidget(self.trace_plot_container, 1)  # 添加拉伸因子
         
         # Initialize compare chains analysis tab
         compare_layout = QVBoxLayout()
         self.compare_chains_tab.setLayout(compare_layout)
         self.trace_comp = TraceComp(burnin_fraction=0.1)
         compare_layout.addWidget(self.trace_comp)
+        
+        # Connect tab change signal to update plot when switching tabs
+        self.tab_widget.currentChanged.connect(self.on_tab_changed)
         
         # Add the tab widget to the right panel layout
         right_layout.addWidget(self.tab_widget)
@@ -497,6 +509,8 @@ class MiniTracerPlugin(QWidget):
             
             # Ensure the trace plot stretches to fill the container
             self.current_trace_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            # 设置布局的拉伸因子
+            self.trace_plot_layout.setStretch(0, 1)
             
             # Update burn-in fraction for this trace plot
             burnin_item = self.file_table.item(file_row, 2)
@@ -581,15 +595,10 @@ class MiniTracerPlugin(QWidget):
         # Prepare data for tracecomp
         chain1_data = filtered_data1[param_name].values
         chain2_data = filtered_data2[param_name].values
+        chain1_iterations = filtered_data1.iloc[:, 0].values  # 第一列是迭代数
+        chain2_iterations = filtered_data2.iloc[:, 0].values  # 第一列是迭代数
         
-        # Create a simple dict structure that tracecomp can understand
-        trace_data = {
-            'chain1': chain1_data,
-            'chain2': chain2_data,
-            'param_name': param_name
-        }
-        
-        self.trace_comp.set_data(trace_data)
+        self.trace_comp.set_data(chain1_data, chain1_iterations, chain2_data, chain2_iterations)
         
     def update_analysis_tabs(self):
         """Update analysis tabs based on current selection."""
@@ -615,6 +624,17 @@ class MiniTracerPlugin(QWidget):
     def get_output_format(self):
         """Return output format."""
         return []
+
+    def on_tab_changed(self, index):
+        """Handle tab change events to ensure proper layout updates."""
+        if index == 0:  # Analyze Single Chain tab
+            if hasattr(self, 'current_trace_plot') and self.current_trace_plot:
+                # Force update the trace plot layout
+                self.current_trace_plot.update_plot()
+        elif index == 1:  # Compare 2 Chains tab  
+            if hasattr(self, 'trace_comp') and self.trace_comp:
+                # Force update the trace comparison layout
+                self.trace_comp.update_plot_and_table()
 
 class MiniTracerPluginEntry:
     def run(self):

@@ -19,6 +19,9 @@ class TracePlot(QWidget):
         
         # 设置大小策略，使组件能自动拉伸填充父容器
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # 设置布局间距为0
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         # 创建迹线图（占80%宽度）
         self.trace_figure = plt.figure(figsize=(8, 6))
