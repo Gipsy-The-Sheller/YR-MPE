@@ -66,7 +66,8 @@ class MiniTracerPlugin(QWidget):
         self.file_table.horizontalHeader().setFont(font)
         self.file_table.verticalHeader().setFont(font)
         self.file_table.verticalHeader().setVisible(False)
-        self.file_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        # Allow editing only for burn-in column (column 2)
+        self.file_table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.SelectedClicked)
         
         # Set column widths
         self.file_table.setColumnWidth(1, 120)
@@ -183,6 +184,9 @@ class MiniTracerPlugin(QWidget):
         # Connect file table selection change
         self.file_table.itemSelectionChanged.connect(self.on_file_selection_changed)
         
+        # Connect file table item changes for burn-in editing
+        self.file_table.itemChanged.connect(self.on_file_table_item_changed)
+        
         # Connect stats table selection change
         self.stats_table.itemSelectionChanged.connect(self.on_stats_selection_changed)
         
@@ -215,10 +219,31 @@ class MiniTracerPlugin(QWidget):
             
             # Burn-in fraction (editable) - default to 0.1
             burnin_item = QTableWidgetItem("0.100")
+            # Make sure burn-in column is editable
+            burnin_item.setFlags(burnin_item.flags() | Qt.ItemIsEditable)
             self.file_table.setItem(row, 2, burnin_item)
             
             # Set row height for compact layout (mimic TraceComp behavior)
             self.file_table.setRowHeight(row, 25)
+
+    def on_file_table_item_changed(self, item):
+        """Handle changes to file table items, specifically burn-in values."""
+        if item.column() == 2:  # Burn-in column
+            row = item.row()
+            if row < len(self.mcmc_files):
+                try:
+                    # Parse and validate the burn-in value
+                    burnin_value = float(item.text())
+                    # Clamp between 0.0 and 0.999
+                    burnin_value = max(0.0, min(0.999, burnin_value))
+                    # Update the display with formatted value
+                    item.setText(f"{burnin_value:.3f}")
+                    # Trigger stats table update to reflect new burn-in value
+                    self.update_stats_table()
+                except ValueError:
+                    # If invalid input, reset to default 0.100
+                    item.setText("0.100")
+                    self.update_stats_table()
     
     def update_stats_table(self):
         """Update statistics table based on selected trace file(s) and current burn-in fraction."""
