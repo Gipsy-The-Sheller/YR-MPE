@@ -6,9 +6,11 @@ from PyQt5.QtWidgets import (QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
                              QTabWidget, QFileDialog, QMessageBox, QHeaderView,
                              QSizePolicy)
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QColor
 from .components.traceplot import TracePlot
 from .components.tracecomp import TraceComp
+from .components.summary_table import SummaryTable
+from .components.methods.mcmc_utils import calculate_ESS
 
 
 class MiniTracerPlugin(QWidget):
@@ -51,13 +53,25 @@ class MiniTracerPlugin(QWidget):
         
         # File table widget
         self.file_table = QTableWidget()
+        self.file_table.setStyleSheet("QTableWidgetItem { padding: 0px;}")
         self.file_table.setColumnCount(3)
-        self.file_table.setHorizontalHeaderLabels(['Trace File', 'Generations', 'Burnin Fraction'])
+        self.file_table.setHorizontalHeaderLabels(['File', 'Generations', 'Burn-in'])
         self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.file_table.setSelectionMode(QTableWidget.MultiSelection)
-        self.file_table.itemChanged.connect(self.on_burnin_fraction_changed)
         
-        # Set column widths and properties
+        # Apply compact styling similar to TraceComp
+        font = QFont()
+        font.setPointSize(9)
+        self.file_table.setFont(font)
+        self.file_table.horizontalHeader().setFont(font)
+        self.file_table.verticalHeader().setFont(font)
+        self.file_table.verticalHeader().setVisible(False)
+        self.file_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        
+        # Set column widths
+        self.file_table.setColumnWidth(1, 120)
+        self.file_table.setColumnWidth(2, 120)
+        
         self.file_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.file_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
@@ -85,12 +99,28 @@ class MiniTracerPlugin(QWidget):
         
         # Statistics table widget
         self.stats_table = QTableWidget()
-        self.stats_table.setColumnCount(2)
-        self.stats_table.setHorizontalHeaderLabels(['Parameter', 'Mean'])
+        self.stats_table.setStyleSheet("QTableWidgetItem { padding: 0px;}")
+        self.stats_table.setColumnCount(3)
+        self.stats_table.setHorizontalHeaderLabels(['Parameter', 'Mean', 'ESS'])
         self.stats_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.stats_table.setSelectionMode(QTableWidget.SingleSelection)
+        
+        # Apply compact styling similar to TraceComp
+        self.stats_table.setFont(font)
+        self.stats_table.horizontalHeader().setFont(font)
+        self.stats_table.verticalHeader().setFont(font)
+        self.stats_table.verticalHeader().setVisible(False)
+        self.stats_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        
+        # Set column widths
+        self.stats_table.setColumnWidth(1, 120)
+        self.stats_table.setColumnWidth(2, 120)
+        
+        self.stats_table.setStyleSheet("QTableWidget { gridline-color: lightgray; }")
+        
         self.stats_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.stats_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.stats_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         
         lower_layout.addWidget(self.stats_table)
         
@@ -118,6 +148,12 @@ class MiniTracerPlugin(QWidget):
         # Initialize single chain analysis tab with a container widget
         single_layout = QVBoxLayout()
         self.single_chain_tab.setLayout(single_layout)
+        
+        # Create summary table for statistics
+        self.summary_table = SummaryTable()
+        single_layout.addWidget(self.summary_table, 1)  # Add with stretch factor
+        
+        # Create trace plot container
         self.trace_plot_container = QWidget()
         self.trace_plot_layout = QVBoxLayout()
         self.trace_plot_container.setLayout(self.trace_plot_layout)
@@ -125,7 +161,7 @@ class MiniTracerPlugin(QWidget):
         self.trace_plot_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # 设置布局的拉伸因子
         self.trace_plot_layout.setStretch(0, 1)
-        single_layout.addWidget(self.trace_plot_container, 1)  # 添加拉伸因子
+        single_layout.addWidget(self.trace_plot_container, 3)  # Add with larger stretch factor
         
         # Initialize compare chains analysis tab
         compare_layout = QVBoxLayout()
@@ -177,11 +213,288 @@ class MiniTracerPlugin(QWidget):
             gen_item.setFlags(gen_item.flags() & ~Qt.ItemIsEditable)
             self.file_table.setItem(row, 1, gen_item)
             
-            # Burnin fraction column (editable)
-            burnin_item = QTableWidgetItem("0.1")
-            burnin_item.setData(Qt.UserRole, 0.1)  # Store actual value
+            # Burn-in fraction (editable) - default to 0.1
+            burnin_item = QTableWidgetItem("0.100")
             self.file_table.setItem(row, 2, burnin_item)
             
+            # Set row height for compact layout (mimic TraceComp behavior)
+            self.file_table.setRowHeight(row, 25)
+    
+    def update_stats_table(self):
+        """Update statistics table based on selected trace file(s) and current burn-in fraction."""
+        selected_items = self.file_table.selectedItems()
+        if not selected_items:
+            # Clear stats table
+            self.stats_table.setRowCount(0)
+            return
+        
+        selected_rows = sorted(set(item.row() for item in selected_items))
+        
+        # Handle single file selection (original behavior)
+        if len(selected_rows) == 1:
+            row = selected_rows[0]
+            if row >= len(self.mcmc_files):
+                self.stats_table.setRowCount(0)
+                return
+                
+            file_path = self.mcmc_files[row]
+            if file_path not in self.mcmc_data:
+                self.stats_table.setRowCount(0)
+                return
+                
+            data = self.mcmc_data[file_path]
+            if data is None or data.empty:
+                self.stats_table.setRowCount(0)
+                return
+            
+            # Get burn-in fraction for this file
+            burnin_frac = 0.1
+            burnin_item = self.file_table.item(row, 2)
+            if burnin_item:
+                try:
+                    burnin_frac = float(burnin_item.text())
+                    burnin_frac = max(0.0, min(0.999, burnin_frac))
+                except ValueError:
+                    burnin_frac = 0.1
+            
+            # Apply burn-in to get post-burn-in data
+            total_samples = len(data)
+            burnin_samples = int(total_samples * burnin_frac)
+            if burnin_samples >= total_samples:
+                burnin_samples = total_samples - 1
+            filtered_data = data.iloc[burnin_samples:]
+            
+            if filtered_data.empty:
+                self.stats_table.setRowCount(0)
+                return
+            
+            # Get all parameters (excluding 'iterations' column)
+            params = [col for col in filtered_data.columns if col != 'iterations']
+            self.stats_table.setRowCount(len(params))
+            
+            for i, param in enumerate(params):
+                # Parameter name (non-editable)
+                param_item = QTableWidgetItem(param)
+                param_item.setFlags(param_item.flags() & ~Qt.ItemIsEditable)
+                self.stats_table.setItem(i, 0, param_item)
+                
+                # Mean value calculated from post-burn-in data (non-editable)
+                try:
+                    numeric_data = pd.to_numeric(filtered_data[param], errors='coerce')
+                    numeric_data = numeric_data.dropna()
+                    if len(numeric_data) > 0:
+                        mean_val = np.mean(numeric_data)
+                        mean_str = f"{mean_val:.6f}"
+                    else:
+                        mean_str = "N/A"
+                except Exception:
+                    mean_str = "N/A"
+                    
+                mean_item = QTableWidgetItem(mean_str)
+                mean_item.setFlags(mean_item.flags() & ~Qt.ItemIsEditable)
+                self.stats_table.setItem(i, 1, mean_item)
+                
+                # Calculate ESS value
+                try:
+                    if len(numeric_data) > 0:
+                        ess_value = calculate_ESS(numeric_data.values)
+                        ess_str = f"{ess_value:.1f}"
+                    else:
+                        ess_str = "N/A"
+                        ess_value = None
+                except Exception:
+                    ess_str = "N/A"
+                    ess_value = None
+                    
+                ess_item = QTableWidgetItem(ess_str)
+                ess_item.setFlags(ess_item.flags() & ~Qt.ItemIsEditable)
+                self.stats_table.setItem(i, 2, ess_item)
+                
+                # Apply color coding based on ESS value
+                if ess_value is not None:
+                    if ess_value >= 200:
+                        # Green: #90ee90
+                        bg_color = QColor("#90ee90")
+                    elif ess_value >= 100:
+                        # Yellow: #eede91
+                        bg_color = QColor("#eede91")
+                    else:
+                        # Red: #ee9191
+                        bg_color = QColor("#ee9191")
+                        
+                    # Apply background color to all cells in the row
+                    param_item.setBackground(bg_color)
+                    mean_item.setBackground(bg_color)
+                    ess_item.setBackground(bg_color)
+                
+                # Set row height for compact layout (mimic TraceComp behavior)
+                self.stats_table.setRowHeight(i, 25)
+                
+        # Handle two file selection (show common parameters)
+        elif len(selected_rows) == 2:
+            row1, row2 = selected_rows
+            if row1 >= len(self.mcmc_files) or row2 >= len(self.mcmc_files):
+                self.stats_table.setRowCount(0)
+                return
+                
+            file_path1 = self.mcmc_files[row1]
+            file_path2 = self.mcmc_files[row2]
+            
+            if file_path1 not in self.mcmc_data or file_path2 not in self.mcmc_data:
+                self.stats_table.setRowCount(0)
+                return
+                
+            data1 = self.mcmc_data[file_path1]
+            data2 = self.mcmc_data[file_path2]
+            
+            if data1 is None or data1.empty or data2 is None or data2.empty:
+                self.stats_table.setRowCount(0)
+                return
+            
+            # Get burn-in fractions for both files
+            burnin_frac1 = 0.1
+            burnin_item1 = self.file_table.item(row1, 2)
+            if burnin_item1:
+                try:
+                    burnin_frac1 = float(burnin_item1.text())
+                    burnin_frac1 = max(0.0, min(0.999, burnin_frac1))
+                except ValueError:
+                    burnin_frac1 = 0.1
+                    
+            burnin_frac2 = 0.1
+            burnin_item2 = self.file_table.item(row2, 2)
+            if burnin_item2:
+                try:
+                    burnin_frac2 = float(burnin_item2.text())
+                    burnin_frac2 = max(0.0, min(0.999, burnin_frac2))
+                except ValueError:
+                    burnin_frac2 = 0.1
+            
+            # Apply burn-in to get post-burn-in data for both files
+            total_samples1 = len(data1)
+            burnin_samples1 = int(total_samples1 * burnin_frac1)
+            if burnin_samples1 >= total_samples1:
+                burnin_samples1 = total_samples1 - 1
+            filtered_data1 = data1.iloc[burnin_samples1:]
+            
+            total_samples2 = len(data2)
+            burnin_samples2 = int(total_samples2 * burnin_frac2)
+            if burnin_samples2 >= total_samples2:
+                burnin_samples2 = total_samples2 - 1
+            filtered_data2 = data2.iloc[burnin_samples2:]
+            
+            if filtered_data1.empty or filtered_data2.empty:
+                self.stats_table.setRowCount(0)
+                return
+            
+            # Get common parameters (excluding 'iterations' column)
+            params1 = set(col for col in filtered_data1.columns if col != 'iterations')
+            params2 = set(col for col in filtered_data2.columns if col != 'iterations')
+            common_params = sorted(list(params1 & params2))
+            
+            if not common_params:
+                self.stats_table.setRowCount(0)
+                return
+                
+            self.stats_table.setRowCount(len(common_params))
+            
+            for i, param in enumerate(common_params):
+                # Parameter name (non-editable)
+                param_item = QTableWidgetItem(param)
+                param_item.setFlags(param_item.flags() & ~Qt.ItemIsEditable)
+                self.stats_table.setItem(i, 0, param_item)
+                
+                # Mean values for both files
+                try:
+                    # File 1 mean
+                    numeric_data1 = pd.to_numeric(filtered_data1[param], errors='coerce')
+                    numeric_data1 = numeric_data1.dropna()
+                    if len(numeric_data1) > 0:
+                        mean_val1 = np.mean(numeric_data1)
+                        mean_str1 = f"{mean_val1:.6f}"
+                    else:
+                        mean_str1 = "N/A"
+                except Exception:
+                    mean_str1 = "N/A"
+                    
+                try:
+                    # File 2 mean  
+                    numeric_data2 = pd.to_numeric(filtered_data2[param], errors='coerce')
+                    numeric_data2 = numeric_data2.dropna()
+                    if len(numeric_data2) > 0:
+                        mean_val2 = np.mean(numeric_data2)
+                        mean_str2 = f"{mean_val2:.6f}"
+                    else:
+                        mean_str2 = "N/A"
+                except Exception:
+                    mean_str2 = "N/A"
+                
+                # Combine means for display
+                if mean_str1 != "N/A" and mean_str2 != "N/A":
+                    mean_str = f"{mean_str1} / {mean_str2}"
+                else:
+                    mean_str = "N/A"
+                    
+                mean_item = QTableWidgetItem(mean_str)
+                mean_item.setFlags(mean_item.flags() & ~Qt.ItemIsEditable)
+                self.stats_table.setItem(i, 1, mean_item)
+                
+                # Calculate ESS values for both files
+                ess_value1 = None
+                ess_value2 = None
+                
+                try:
+                    if len(numeric_data1) > 0:
+                        ess_value1 = calculate_ESS(numeric_data1.values)
+                        ess_str1 = f"{ess_value1:.1f}"
+                    else:
+                        ess_str1 = "N/A"
+                except Exception:
+                    ess_str1 = "N/A"
+                    
+                try:
+                    if len(numeric_data2) > 0:
+                        ess_value2 = calculate_ESS(numeric_data2.values)
+                        ess_str2 = f"{ess_value2:.1f}"
+                    else:
+                        ess_str2 = "N/A"
+                except Exception:
+                    ess_str2 = "N/A"
+                
+                # Combine ESS values for display
+                if ess_str1 != "N/A" and ess_str2 != "N/A":
+                    ess_str = f"{ess_str1} / {ess_str2}"
+                else:
+                    ess_str = "N/A"
+                    
+                ess_item = QTableWidgetItem(ess_str)
+                ess_item.setFlags(ess_item.flags() & ~Qt.ItemIsEditable)
+                self.stats_table.setItem(i, 2, ess_item)
+                
+                # Apply color coding based on minimum ESS value
+                if ess_value1 is not None and ess_value2 is not None:
+                    min_ess = min(ess_value1, ess_value2)
+                    if min_ess >= 200:
+                        # Green: #90ee90
+                        bg_color = QColor("#90ee90")
+                    elif min_ess >= 100:
+                        # Yellow: #eede91
+                        bg_color = QColor("#eede91")
+                    else:
+                        # Red: #ee9191
+                        bg_color = QColor("#ee9191")
+                        
+                    # Apply background color to all cells in the row
+                    param_item.setBackground(bg_color)
+                    mean_item.setBackground(bg_color)
+                    ess_item.setBackground(bg_color)
+                
+                # Set row height for compact layout (mimic TraceComp behavior)
+                self.stats_table.setRowHeight(i, 25)
+        else:
+            # More than 2 files selected - clear stats table
+            self.stats_table.setRowCount(0)
+    
     def add_files(self):
         """Add MCMC trace files."""
         file_paths, _ = QFileDialog.getOpenFileNames(
@@ -312,76 +625,6 @@ class MiniTracerPlugin(QWidget):
                 'data': pd.DataFrame()
             }
     
-    def update_stats_table(self):
-        """Update statistics table based on selected trace file and current burn-in fraction."""
-        selected_items = self.file_table.selectedItems()
-        if not selected_items:
-            # Clear stats table
-            self.stats_table.setRowCount(0)
-            return
-        
-        # Get the row of the first selected item
-        row = selected_items[0].row()
-        if row >= len(self.mcmc_files):
-            return
-            
-        file_path = self.mcmc_files[row]
-        if file_path not in self.mcmc_data:
-            self.stats_table.setRowCount(0)
-            return
-            
-        data = self.mcmc_data[file_path]
-        if data is None or data.empty:
-            self.stats_table.setRowCount(0)
-            return
-        
-        # Get burn-in fraction for this file
-        burnin_frac = 0.1
-        burnin_item = self.file_table.item(row, 2)
-        if burnin_item:
-            try:
-                burnin_frac = float(burnin_item.text())
-                burnin_frac = max(0.0, min(0.999, burnin_frac))
-            except ValueError:
-                burnin_frac = 0.1
-        
-        # Apply burn-in to get post-burn-in data
-        total_samples = len(data)
-        burnin_samples = int(total_samples * burnin_frac)
-        if burnin_samples >= total_samples:
-            burnin_samples = total_samples - 1
-        filtered_data = data.iloc[burnin_samples:]
-        
-        if filtered_data.empty:
-            self.stats_table.setRowCount(0)
-            return
-        
-        # Get all parameters (excluding 'iterations' column)
-        params = [col for col in filtered_data.columns if col != 'iterations']
-        self.stats_table.setRowCount(len(params))
-        
-        for i, param in enumerate(params):
-            # Parameter name (non-editable)
-            param_item = QTableWidgetItem(param)
-            param_item.setFlags(param_item.flags() & ~Qt.ItemIsEditable)
-            self.stats_table.setItem(i, 0, param_item)
-            
-            # Mean value calculated from post-burn-in data (non-editable)
-            try:
-                numeric_data = pd.to_numeric(filtered_data[param], errors='coerce')
-                numeric_data = numeric_data.dropna()
-                if len(numeric_data) > 0:
-                    mean_val = np.mean(numeric_data)
-                    mean_str = f"{mean_val:.6f}"
-                else:
-                    mean_str = "N/A"
-            except Exception:
-                mean_str = "N/A"
-                
-            mean_item = QTableWidgetItem(mean_str)
-            mean_item.setFlags(mean_item.flags() & ~Qt.ItemIsEditable)
-            self.stats_table.setItem(i, 1, mean_item)
-    
     def on_burnin_fraction_changed(self, item):
         """Handle burnin fraction changes."""
         if item.column() == 2:  # Burnin fraction column
@@ -426,12 +669,17 @@ class MiniTracerPlugin(QWidget):
     def on_stats_selection_changed(self):
         """Handle statistics table selection changes."""
         selected_rows = set(item.row() for item in self.stats_table.selectedItems())
+        file_selected_rows = set(item.row() for item in self.file_table.selectedItems())
+        
         if len(selected_rows) == 1:
-            file_selected_rows = set(item.row() for item in self.file_table.selectedItems())
             if len(file_selected_rows) == 1:
+                # Single file selection - show trace plot
                 file_row = next(iter(file_selected_rows))
                 stats_row = next(iter(selected_rows))
                 self.show_trace_plot_for_selection(file_row, stats_row)
+            elif len(file_selected_rows) == 2:
+                # Two files selected - update chain comparison
+                self.update_analysis_tabs()
     
     def show_trace_plot_for_selection(self, file_row, param_row):
         """Show the TracePlot component for the selected file and parameter, creating it if necessary."""
@@ -457,41 +705,47 @@ class MiniTracerPlugin(QWidget):
         if file_path not in self.trace_plots:
             self.trace_plots[file_path] = {}
             
-        # Create TracePlot component if it doesn't exist
-        if param_name not in self.trace_plots[file_path]:
-            # Get current burn-in fraction
-            burnin_frac = 0.1
-            burnin_item = self.file_table.item(file_row, 2)
-            if burnin_item:
-                try:
-                    burnin_frac = float(burnin_item.text())
-                    burnin_frac = max(0.0, min(0.999, burnin_frac))
-                except ValueError:
-                    burnin_frac = 0.1
-            
-            # Apply burn-in to get post-burn-in data
-            total_samples = len(data)
-            burnin_samples = int(total_samples * burnin_frac)
-            if burnin_samples >= total_samples:
-                burnin_samples = total_samples - 1
-            filtered_data = data.iloc[burnin_samples:]
-            
-            if not filtered_data.empty:
-                try:
-                    # Get parameter values and iterations
-                    param_series = filtered_data[param_name]
-                    numeric_mask = pd.to_numeric(param_series, errors='coerce').notna()
-                    valid_data = filtered_data[numeric_mask]
+        # Get current burn-in fraction
+        burnin_frac = 0.1
+        burnin_item = self.file_table.item(file_row, 2)
+        if burnin_item:
+            try:
+                burnin_frac = float(burnin_item.text())
+                burnin_frac = max(0.0, min(0.999, burnin_frac))
+            except ValueError:
+                burnin_frac = 0.1
+        
+        # DO NOT apply burn-in here - pass complete original data to TracePlot
+        # TracePlot will handle burn-in display logic internally
+        
+        if not data.empty:
+            try:
+                # Get parameter values and iterations from complete data
+                param_series = data[param_name]
+                numeric_mask = pd.to_numeric(param_series, errors='coerce').notna()
+                valid_data = data[numeric_mask]
+                
+                if len(valid_data) > 0:
+                    param_values = np.asarray(valid_data[param_name].values, dtype=float)
+                    iterations = np.asarray(valid_data['iterations'].values, dtype=int)
                     
-                    if len(valid_data) > 0:
-                        param_values = np.asarray(valid_data[param_name].values, dtype=float)
-                        iterations = np.asarray(valid_data['iterations'].values, dtype=int)
-                        
-                        # Create and initialize the TracePlot component
+                    # Create TracePlot component if it doesn't exist
+                    if param_name not in self.trace_plots[file_path]:
                         self.trace_plots[file_path][param_name] = TracePlot(burnin_fraction=burnin_frac)
-                        self.trace_plots[file_path][param_name].set_data(param_values, iterations)
-                except Exception:
-                    return
+                    
+                    # ALWAYS update the data with complete original data
+                    self.trace_plots[file_path][param_name].set_data(param_values, iterations)
+                    self.trace_plots[file_path][param_name].update_burnin_fraction(burnin_frac)
+                    
+                    # Update SummaryTable with statistics for the selected parameter
+                    if hasattr(self, 'summary_table'):
+                        # Apply burn-in to get the actual displayed samples
+                        burnin_samples = int(len(param_values) * burnin_frac)
+                        displayed_samples = param_values[burnin_samples:]
+                        self.summary_table.set_data(displayed_samples)
+                    
+            except Exception:
+                return
         
         # Remove current trace plot if exists
         if self.current_trace_plot:
@@ -512,16 +766,6 @@ class MiniTracerPlugin(QWidget):
             # 设置布局的拉伸因子
             self.trace_plot_layout.setStretch(0, 1)
             
-            # Update burn-in fraction for this trace plot
-            burnin_item = self.file_table.item(file_row, 2)
-            if burnin_item:
-                try:
-                    burnin_frac = float(burnin_item.text())
-                    burnin_frac = max(0.0, min(0.999, burnin_frac))
-                    self.current_trace_plot.burnin_fraction = burnin_frac
-                except ValueError:
-                    pass
-    
     def update_single_chain_analysis(self, file_row, param_row=None):
         """Update single chain analysis tab - now handled by show_trace_plot_for_selection."""
         # This method is now primarily used for compatibility, but the actual display logic
@@ -529,24 +773,26 @@ class MiniTracerPlugin(QWidget):
         pass
         
     def update_compare_chains_analysis(self, file_row1, file_row2):
-        """Update compare chains analysis tab."""
+        """Update the comparison analysis for two selected files."""
+        if not hasattr(self, 'trace_comp') or self.trace_comp is None:
+            return
+            
+        # Get the selected files - use mcmc_files list instead of file table text
+        # because mcmc_data dictionary uses full file paths as keys
         if file_row1 >= len(self.mcmc_files) or file_row2 >= len(self.mcmc_files):
+            print(f"Debug: Invalid file row indices {file_row1}, {file_row2}")
+            self.trace_comp.set_data(None, None, None, None)
             return
             
         file1 = self.mcmc_files[file_row1]
         file2 = self.mcmc_files[file_row2]
         
-        if file1 not in self.mcmc_data or file2 not in self.mcmc_data:
-            return
-            
-        data1 = self.mcmc_data[file1]
-        data2 = self.mcmc_data[file2]
+        data1 = self.mcmc_data.get(file1)
+        data2 = self.mcmc_data.get(file2)
         
         if data1 is None or data2 is None or data1.empty or data2.empty:
-            return
-            
-        # Check if both have same number of generations
-        if len(data1) != len(data2):
+            print(f"Debug: Data is None or empty for files {file1} or {file2}")
+            self.trace_comp.set_data(None, None, None, None)
             return
             
         # Get burnin fractions
@@ -569,16 +815,15 @@ class MiniTracerPlugin(QWidget):
             except ValueError:
                 burnin2 = 0.1
                 
-        # Only compare if burnin fractions are the same
-        if abs(burnin1 - burnin2) > 1e-6:
-            return
-            
-        # Apply burnin
-        burnin_samples = int(len(data1) * burnin1)
-        filtered_data1 = data1.iloc[burnin_samples:]
-        filtered_data2 = data2.iloc[burnin_samples:]
+        # Apply burnin separately for each chain (don't require them to be equal)
+        burnin_samples1 = int(len(data1) * burnin1)
+        burnin_samples2 = int(len(data2) * burnin2)
+        filtered_data1 = data1.iloc[burnin_samples1:]
+        filtered_data2 = data2.iloc[burnin_samples2:]
         
         if filtered_data1.empty or filtered_data2.empty:
+            print(f"Debug: Filtered data is empty after burnin")
+            self.trace_comp.set_data(None, None, None, None)
             return
             
         # Get common parameters (excluding 'iterations')
@@ -587,18 +832,59 @@ class MiniTracerPlugin(QWidget):
         common_params = list(params1 & params2)
         
         if not common_params:
+            print(f"Debug: No common parameters found between files")
+            self.trace_comp.set_data(None, None, None, None)
             return
             
-        # Use the first common parameter
-        param_name = common_params[0]
+        # Check if a parameter is selected in stats table
+        stats_selected_rows = set(item.row() for item in self.stats_table.selectedItems())
+        param_name = None
         
-        # Prepare data for tracecomp
-        chain1_data = filtered_data1[param_name].values
-        chain2_data = filtered_data2[param_name].values
-        chain1_iterations = filtered_data1.iloc[:, 0].values  # 第一列是迭代数
-        chain2_iterations = filtered_data2.iloc[:, 0].values  # 第一列是迭代数
+        if len(stats_selected_rows) == 1:
+            stats_row = next(iter(stats_selected_rows))
+            param_item = self.stats_table.item(stats_row, 0)
+            if param_item:
+                selected_param = param_item.text()
+                # Check if the selected parameter is common to both files
+                if selected_param in common_params:
+                    param_name = selected_param
+                    print(f"Debug: Using selected parameter {param_name} for comparison")
         
-        self.trace_comp.set_data(chain1_data, chain1_iterations, chain2_data, chain2_iterations)
+        # If no valid parameter selected from stats table, use the first common parameter
+        if param_name is None:
+            param_name = common_params[0]
+            print(f"Debug: Using first common parameter {param_name} for comparison")
+        
+        # Prepare data for tracecomp with proper numeric conversion
+        try:
+            # Convert parameter data to numeric, coercing errors to NaN
+            param_data1 = pd.to_numeric(filtered_data1[param_name], errors='coerce')
+            param_data2 = pd.to_numeric(filtered_data2[param_name], errors='coerce')
+            
+            # Drop NaN values and get valid data
+            valid_mask1 = ~param_data1.isna()
+            valid_mask2 = ~param_data2.isna()
+            
+            # Get valid data points
+            chain1_data_valid = param_data1[valid_mask1].values
+            chain2_data_valid = param_data2[valid_mask2].values
+            chain1_iterations_valid = filtered_data1[valid_mask1]['iterations'].values
+            chain2_iterations_valid = filtered_data2[valid_mask2]['iterations'].values
+            
+            # Ensure we have data to plot
+            if len(chain1_data_valid) == 0 or len(chain2_data_valid) == 0:
+                print(f"Debug: No valid numeric data after filtering")
+                self.trace_comp.set_data(None, None, None, None)
+                return
+                
+            print(f"Debug: Setting data with {len(chain1_data_valid)} and {len(chain2_data_valid)} points")
+            self.trace_comp.set_data(chain1_data_valid, chain1_iterations_valid, chain2_data_valid, chain2_iterations_valid)
+            
+        except Exception as e:
+            # Handle any errors during data preparation
+            print(f"Error preparing comparison data: {e}")
+            self.trace_comp.set_data(None, None, None, None)
+            return
         
     def update_analysis_tabs(self):
         """Update analysis tabs based on current selection."""
@@ -612,6 +898,9 @@ class MiniTracerPlugin(QWidget):
             if len(selected_rows) == 2:
                 rows = sorted(list(selected_rows))
                 self.update_compare_chains_analysis(rows[0], rows[1])
+            else:
+                # Clear the comparison display when not exactly 2 files are selected
+                self.trace_comp.set_data(None, None, None, None)
         
     def get_tool_name(self):
         """Return the tool name for plugin registration."""

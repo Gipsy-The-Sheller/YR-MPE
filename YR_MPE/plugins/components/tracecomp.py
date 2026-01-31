@@ -86,11 +86,27 @@ class TraceComp(QWidget):
         chain2_data: array-like, data values for chain 2  
         chain2_iterations: array-like, iteration numbers for chain 2
         """
+        if chain1_data is None or chain2_data is None:
+            self.chain1_data = None
+            self.chain2_data = None
+            self.clear_plot_and_table()
+            return
+            
         self.chain1_data = np.array(chain1_data)
         self.chain1_iterations = np.array(chain1_iterations)
         self.chain2_data = np.array(chain2_data)
         self.chain2_iterations = np.array(chain2_iterations)
         self.update_plot_and_table()
+    
+    def clear_plot_and_table(self):
+        """Clear the plot and table when no data is available."""
+        self.ax.clear()
+        self.ax.set_title('Chain Comparison (No Data)')
+        self.canvas.draw()
+        
+        # Clear table values
+        for i in range(5):
+            self.table.setItem(i, 1, QTableWidgetItem(""))
     
     def update_burnin_fraction(self, burnin_fraction):
         """Update the burn-in fraction and refresh the plot and table."""
@@ -103,66 +119,56 @@ class TraceComp(QWidget):
         if self.chain1_data is None or self.chain2_data is None:
             return
         
-        # Calculate burn-in indices
-        burnin1_idx = int(len(self.chain1_data) * self.burnin_fraction)
-        burnin2_idx = int(len(self.chain2_data) * self.burnin_fraction)
-        
-        # Get post-burnin data
-        post_burnin1 = self.chain1_data[burnin1_idx:]
-        post_burnin2 = self.chain2_data[burnin2_idx:]
-        
-        # Get pre-burnin data
-        pre_burnin1 = self.chain1_data[:burnin1_idx]
-        pre_burnin2 = self.chain2_data[:burnin2_idx]
+        # Use all data directly (data is already post-burnin from MiniTracerPlugin)
+        post_burnin1 = self.chain1_data
+        post_burnin2 = self.chain2_data
         
         # Clear the plot
         self.ax.clear()
         
-        # Plot pre-burnin points (transparent gray)
-        if len(pre_burnin1) > 0 and len(pre_burnin2) > 0:
-            # For pre-burnin, we need to match lengths by taking the minimum
-            min_pre_len = min(len(pre_burnin1), len(pre_burnin2))
-            if min_pre_len > 0:
-                self.ax.scatter(pre_burnin1[:min_pre_len], pre_burnin2[:min_pre_len], 
-                              alpha=0.3, color='gray', s=20, label='Pre-burnin')
-        
-        # Plot post-burnin points (opaque blue)
-        min_post_len = min(len(post_burnin1), len(post_burnin2))
-        if min_post_len > 0:
-            self.ax.scatter(post_burnin1[:min_post_len], post_burnin2[:min_post_len], 
-                          alpha=1.0, color='blue', s=20, label='Post-burnin')
+        # Plot all points (opaque blue) - no pre-burnin since data is already filtered
+        min_len = min(len(post_burnin1), len(post_burnin2))
+        if min_len > 0:
+            self.ax.scatter(post_burnin1[:min_len], post_burnin2[:min_len], 
+                          alpha=1.0, color='#4e699a', s=20)
             
             # Calculate correlation coefficient
-            if min_post_len > 1:
-                correlation_matrix = np.corrcoef(post_burnin1[:min_post_len], post_burnin2[:min_post_len])
+            if min_len > 1:
+                correlation_matrix = np.corrcoef(post_burnin1[:min_len], post_burnin2[:min_len])
                 r_value = correlation_matrix[0, 1]
             else:
                 r_value = 0.0
                 
-            # Set axis limits based only on post-burnin data
-            x_min, x_max = post_burnin1[:min_post_len].min(), post_burnin1[:min_post_len].max()
-            y_min, y_max = post_burnin2[:min_post_len].min(), post_burnin2[:min_post_len].max()
+            # Set axis limits based on all data
+            x_min, x_max = post_burnin1[:min_len].min(), post_burnin1[:min_len].max()
+            y_min, y_max = post_burnin2[:min_len].min(), post_burnin2[:min_len].max()
             
             # Add some padding
             x_padding = (x_max - x_min) * 0.05
             y_padding = (y_max - y_min) * 0.05
             self.ax.set_xlim(x_min - x_padding, x_max + x_padding)
             self.ax.set_ylim(y_min - y_padding, y_max + y_padding)
+            
+            # Add y=x reference line for convergence assessment
+            line_min = min(x_min - x_padding, y_min - y_padding)
+            line_max = max(x_max + x_padding, y_max + y_padding)
+            self.ax.plot([line_min, line_max], [line_min, line_max], 
+                        color='#ba3e45', linestyle='--', linewidth=1, alpha=0.8)
         else:
             r_value = 0.0
         
         self.ax.set_xlabel('Chain 1')
         self.ax.set_ylabel('Chain 2')
-        self.ax.set_title('Chain Comparison (Post-burnin vs Post-burnin)')
-        self.ax.legend()
+        self.ax.set_title('Chain Comparison')
         self.ax.grid(True, alpha=0.3)
         
-        # Update the table
-        self.update_statistics_table(
-            len(post_burnin1), np.mean(post_burnin1) if len(post_burnin1) > 0 else 0,
-            len(post_burnin2), np.mean(post_burnin2) if len(post_burnin2) > 0 else 0,
-            r_value
-        )
+        # Update the table with actual data counts and statistics
+        count1 = len(post_burnin1)
+        count2 = len(post_burnin2)
+        mean1 = np.mean(post_burnin1) if count1 > 0 else 0
+        mean2 = np.mean(post_burnin2) if count2 > 0 else 0
+        
+        self.update_statistics_table(count1, mean1, count2, mean2, r_value)
         
         self.canvas.draw()
     

@@ -11,6 +11,7 @@ class TracePlot(QWidget):
         self.burnin_fraction = burnin_fraction
         self.data = None
         self.iterations = None
+        self.param_name = "Value"  # Default parameter name
         self.init_ui()
 
     def init_ui(self):
@@ -36,18 +37,23 @@ class TracePlot(QWidget):
         self.trace_ax = self.trace_figure.add_subplot(111)
         self.density_ax = self.density_figure.add_subplot(111)
 
-    def set_data(self, data, iterations=None):
+    def set_data(self, data, iterations=None, param_name=None):
         """设置要显示的数据
         
         Args:
             data: 时间（time）数据
             iterations: 迭代次数（iter）数据，如果为None则自动生成
+            param_name: 参数名称，用于设置y轴标签
         """
         self.data = np.asarray(data, dtype=float)
         if iterations is not None:
             self.iterations = np.asarray(iterations, dtype=int)
         else:
             self.iterations = np.arange(len(data))
+        if param_name is not None:
+            self.param_name = param_name
+        else:
+            self.param_name = "Value"
         self.update_plot()
 
     def update_burnin_fraction(self, burnin_fraction):
@@ -100,7 +106,7 @@ class TracePlot(QWidget):
         # 设置y轴范围仅基于post-burnin数据
         self.trace_ax.set_ylim(y_lim)
         self.trace_ax.set_xlabel('Iteration')
-        self.trace_ax.set_ylabel('LnL')
+        self.trace_ax.set_ylabel(self.param_name)
         self.trace_ax.set_title('MCMC Trace')
         self.trace_ax.grid(True, alpha=0.3)
         
@@ -132,7 +138,7 @@ class TracePlot(QWidget):
         # 设置密度图的y轴范围与迹线图一致
         self.density_ax.set_ylim(y_lim)
         self.density_ax.set_xlabel('Density')
-        self.density_ax.set_ylabel('LnL')
+        self.density_ax.set_ylabel(self.param_name)
         self.density_ax.set_title('Post-burnin Distribution')
         self.density_ax.grid(True, alpha=0.3)
         
