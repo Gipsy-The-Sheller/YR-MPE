@@ -1,10 +1,13 @@
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel, QLineEdit,
                              QListWidget, QListWidgetItem, QPushButton, QComboBox,
                              QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
-                             QSizePolicy, QMessageBox)
+                             QSizePolicy, QMessageBox, QSplitter)
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from mpl_treeview import MplTreeView
-from mpl_distribution import MplDistribution
+# 修复相对导入
+from .mpl_treeview import MplTreeView
+from .mpl_distribution import MplDistribution
+# 导入streamlined_ete模块
+from .methods.streamlined_ete import build_tree_block, find_mrca_position, inspect_newick_string
 import sys
 
 class MDMRCA(QWidget):
@@ -32,17 +35,25 @@ class MDMRCA(QWidget):
         self.setWindowTitle("MD-MRCA")
         # self.setGeometry(100, 100, 800, 600)
 
-        self.main_layout = QHBoxLayout()
-        self.setLayout(self.main_layout)
+        # 使用QSplitter替代HLayout
+        self.splitter = QSplitter()
+        self.setLayout(QHBoxLayout())
+        self.layout().addWidget(self.splitter)
 
+        # 创建左侧控件容器
+        self.left_widget = QWidget()
         self.left_layout = QVBoxLayout()
         self.left_layout.setContentsMargins(0,0,0,0)
+        self.left_widget.setLayout(self.left_layout)
 
-        self.main_layout.addLayout(self.left_layout)
+        self.splitter.addWidget(self.left_widget)
 
         self.init_taxon_set()
         self.init_tmrca_set()
         self.init_tree_view()
+        
+        # 设置分割器比例 6:4 (左侧60%，右侧40%)
+        self.splitter.setSizes([600, 400])  # 初始大小比例
     
     def extract_all_taxa_from_newick(self, newick_string):
         """
@@ -114,95 +125,70 @@ class MDMRCA(QWidget):
     
     def find_mrca_position(self, newick_string, target_taxa_set):
         """
-        O(L)时间复杂度的单次遍历MRCA定位算法
+        使用streamlined_ete中的鲁棒MRCA定位算法
         
         算法步骤：
-        1. 新建一个整形作为栈，并建一个整形（lower）做记录器
-        2. 从newick字符串的一端开始遍历，遇到左括号时将栈+1，遇到右括号时将栈-1
-        3. 在匹配到taxon set中的第一个元素时，将lower都记录为这个元素的栈深度
-        4. 此后，开始更新lower：每当遇到更浅的栈深度时，将lower更新为这个值，直到taxon set中的元素被完全遍历
-        5. 此时，这个lower就代表MRCA节点分出的所有主要分支的栈深度
-        6. 继续遍历newick字符串，直到遇到某个右括号使栈深度小于lower时，在右括号右侧追加[taxon set名称]
-        
-        注意：此算法假设目标taxa位于同一个clade中，对于分散的目标taxa可能返回近似结果。
+        1. 将Newick字符串分割成块
+        2. 使用基于栈深度的算法找到MRCA位置
+        3. 返回MRCA在块列表中的索引位置
         """
         if not newick_string or not target_taxa_set:
             return None
             
-        target_taxa_set = set(target_taxa_set)
-        remaining_targets = set(target_taxa_set)
-        n = len(newick_string)
-        
-        current_stack = 0
-        current_otu = ""
-        in_quotes = False
-        quote_char = None
-        lower = float('inf')
-        i = 0
-        
-        while i < n:
-            char = newick_string[i]
+        try:
+            # 构建树块
+            tree_blocks = build_tree_block(newick_string)
             
-            if char == "'" or char == '"':
-                if not in_quotes:
-                    in_quotes = True
-                    quote_char = char
-                    current_otu += char
-                elif char == quote_char:
-                    in_quotes = False
-                    quote_char = None
-                    current_otu += char
-                else:
-                    current_otu += char
-            elif in_quotes:
-                current_otu += char
-            elif char == ':':
-                if current_otu:
-                    otu_name = current_otu.strip()
-                    if otu_name and otu_name in remaining_targets:
-                        remaining_targets.remove(otu_name)
-                        if current_stack < lower:
-                            lower = current_stack
-                    current_otu = ""
-                # 跳过分支长度
-                i += 1
-                while i < n and newick_string[i] not in '(),;':
-                    i += 1
-                continue
-            elif char == '(':
-                current_stack += 1
-                if current_otu:
-                    otu_name = current_otu.strip()
-                    if otu_name and otu_name in remaining_targets:
-                        remaining_targets.remove(otu_name)
-                        if current_stack - 1 < lower:
-                            lower = current_stack - 1
-                    current_otu = ""
-            elif char == ')' or char == ',' or char == ';':
-                if current_otu:
-                    otu_name = current_otu.strip()
-                    if otu_name and otu_name in remaining_targets:
-                        remaining_targets.remove(otu_name)
-                        if current_stack < lower:
-                            lower = current_stack
-                    current_otu = ""
-                if char == ')':
-                    # 如果所有目标都已遇到，并且当前右括号满足条件，立即返回
-                    if not remaining_targets and current_stack - 1 < lower:
-                        return (i, i, current_stack - 1)
-                    current_stack -= 1
-                elif char == ';':
-                    break
-            else:
-                current_otu += char
+            # 创建目标taxa集合的副本，因为find_mrca_position会修改它
+            target_taxa_list = list(target_taxa_set)
+            
+            # 查找MRCA位置
+            mrca_index = find_mrca_position(tree_blocks, target_taxa_list)
+            
+            if mrca_index is None:
+                return None
                 
-            i += 1
-        
-        return None
+            # 验证是否所有目标taxa都被找到
+            if len(target_taxa_list) > 0:
+                return None
+                
+            # 返回MRCA位置信息
+            # 注意：streamlined_ete返回的是块索引，我们需要转换为字符串位置
+            # 为了兼容现有代码，我们返回一个元组 (start_pos, end_pos, depth)
+            # 这里我们计算实际的字符串位置
+            mrca_block = tree_blocks[mrca_index]
+            if mrca_block.startswith(')'):
+                # MRCA是一个右括号，找到它在原字符串中的位置
+                # 重建newick字符串来定位
+                reconstructed = inspect_newick_string(tree_blocks)
+                # 找到对应的右括号位置
+                pos = -1
+                block_count = 0
+                for i, char in enumerate(reconstructed):
+                    if char in '()':
+                        if block_count == mrca_index:
+                            pos = i
+                            break
+                        block_count += 1
+                    elif char == ',' or char == ';':
+                        if block_count == mrca_index:
+                            pos = i
+                            break
+                        block_count += 1
+                
+                if pos >= 0:
+                    return (pos, pos, 0)  # depth信息暂时设为0，因为新算法不直接提供
+                    
+            return None
+            
+        except Exception as e:
+            # 如果新算法失败，可以考虑回退到旧算法或返回None
+            print(f"MRCA定位算法错误: {e}")
+            return None
 
     def insert_mrca_label(self, newick_string, target_taxa_set, label_name):
         """
-        在Newick字符串中插入MRCA标签
+        在Newick字符串中插入MRCA标签 - 使用新的鲁棒算法
         """
         result = self.find_mrca_position(newick_string, target_taxa_set)
         if not result:
@@ -217,7 +203,7 @@ class MDMRCA(QWidget):
                             f"[&name={label_name}]" + 
                             newick_string[end_pos + 1:])
         else:
-            # 单个taxa的情况
+            # 单个taxa的情况或其他情况
             labeled_newick = (newick_string[:end_pos] + 
                             f"[&name={label_name}]" + 
                             newick_string[end_pos:])
@@ -365,83 +351,106 @@ class MDMRCA(QWidget):
         # 使用封装的MplTreeView组件来绘制树状图
         self.tree_figure_canvas = MplTreeView()
         self.tree_figure_canvas.draw_dendrogram("(((1:0.1, 2:0.1):0.1,3:0.3):0.5,4:0.9);")
-        self.main_layout.addWidget(self.tree_figure_canvas)
+        # 将树视图添加到splitter而不是main_layout
+        self.splitter.addWidget(self.tree_figure_canvas)
 
         # 示例：绘制一个默认的树
         # newick_str = "((A:1.0,B:1.0):1.0,(C:1.0,D:1.0,E:1.0):1.0);"
         # self.tree_figure_canvas.draw_dendrogram(newick_str=newick_str)
         
     def init_tmrca_parameters(self):
-        """初始化tMRCA参数输入字段"""
-        self.param_widgets = {}
-        
+        """初始化tMRCA参数输入字段 - 预创建所有控件"""
         # Point distribution parameters
         self.point_value = QLineEdit()
         self.point_value.setText("1.0")
         self.point_value.setPlaceholderText("e.g., 1.5")
-        self.param_widgets['Point'] = [('Age (time units):', self.point_value)]
+        self.point_value.textChanged.connect(self.on_tmrca_params_changed)
         
         # Uniform distribution parameters
         self.uniform_lower = QLineEdit()
         self.uniform_lower.setText("0.5")
         self.uniform_lower.setPlaceholderText("e.g., 0.8")
+        self.uniform_lower.textChanged.connect(self.on_tmrca_params_changed)
         self.uniform_upper = QLineEdit()
         self.uniform_upper.setText("1.5")
         self.uniform_upper.setPlaceholderText("e.g., 2.0")
-        self.param_widgets['Uniform'] = [('Minimum age:', self.uniform_lower), 
-                                        ('Maximum age:', self.uniform_upper)]
+        self.uniform_upper.textChanged.connect(self.on_tmrca_params_changed)
         
         # Upper Boundary parameters
         self.upper_boundary = QLineEdit()
         self.upper_boundary.setText("2.0")
         self.upper_boundary.setPlaceholderText("e.g., 3.0")
-        self.param_widgets['Upper Boundary'] = [('Maximum age:', self.upper_boundary)]
+        self.upper_boundary.textChanged.connect(self.on_tmrca_params_changed)
         
         # Lower Boundary parameters
         self.lower_boundary = QLineEdit()
         self.lower_boundary.setText("0.5")
         self.lower_boundary.setPlaceholderText("e.g., 0.2")
-        self.param_widgets['Lower Boundary'] = [('Minimum age:', self.lower_boundary)]
+        self.lower_boundary.textChanged.connect(self.on_tmrca_params_changed)
         
         # Normal distribution parameters
         self.normal_mean = QLineEdit()
         self.normal_mean.setText("1.0")
         self.normal_mean.setPlaceholderText("e.g., 1.2")
+        self.normal_mean.textChanged.connect(self.on_tmrca_params_changed)
         self.normal_std = QLineEdit()
         self.normal_std.setText("0.2")
         self.normal_std.setPlaceholderText("e.g., 0.3")
-        self.param_widgets['Normal'] = [('Mean age:', self.normal_mean), 
-                                       ('Standard deviation:', self.normal_std)]
+        self.normal_std.textChanged.connect(self.on_tmrca_params_changed)
         
         # Lognormal distribution parameters
         self.lognormal_mean = QLineEdit()
         self.lognormal_mean.setText("1.0")
         self.lognormal_mean.setPlaceholderText("e.g., 1.5")
+        self.lognormal_mean.textChanged.connect(self.on_tmrca_params_changed)
         self.lognormal_std = QLineEdit()
         self.lognormal_std.setText("0.2")
         self.lognormal_std.setPlaceholderText("e.g., 0.4")
-        self.param_widgets['Lognormal'] = [('Mean age:', self.lognormal_mean), 
-                                          ('Standard deviation:', self.lognormal_std)]
+        self.lognormal_std.textChanged.connect(self.on_tmrca_params_changed)
+        
+        # 添加所有控件到布局中，但初始时只显示Point类型的
+        self.tmrca_setting_group_layout.addRow("Age (time units):", self.point_value)
+        self.tmrca_setting_group_layout.addRow("Minimum age:", self.uniform_lower)
+        self.tmrca_setting_group_layout.addRow("Maximum age:", self.uniform_upper)
+        self.tmrca_setting_group_layout.addRow("Maximum age:", self.upper_boundary)
+        self.tmrca_setting_group_layout.addRow("Minimum age:", self.lower_boundary)
+        self.tmrca_setting_group_layout.addRow("Mean age:", self.normal_mean)
+        self.tmrca_setting_group_layout.addRow("Standard deviation:", self.normal_std)
+        self.tmrca_setting_group_layout.addRow("Mean age:", self.lognormal_mean)
+        self.tmrca_setting_group_layout.addRow("Standard deviation:", self.lognormal_std)
+        
+        # 存储所有控件的引用
+        self.all_param_widgets = {
+            'Point': [self.point_value],
+            'Uniform': [self.uniform_lower, self.uniform_upper],
+            'Upper Boundary': [self.upper_boundary],
+            'Lower Boundary': [self.lower_boundary],
+            'Normal': [self.normal_mean, self.normal_std],
+            'Lognormal': [self.lognormal_mean, self.lognormal_std]
+        }
         
         # 设置初始参数显示
         self.update_tmrca_parameters('Point')
         
     def update_tmrca_parameters(self, distribution_type):
-        """根据分布类型更新参数输入字段"""
-        # 清除现有参数
-        while self.tmrca_setting_group_layout.count():
-            child = self.tmrca_setting_group_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
+        """根据分布类型更新参数输入字段的可见性"""
+        # 隐藏所有控件
+        for widget_list in self.all_param_widgets.values():
+            for widget in widget_list:
+                widget.hide()
+                # 隐藏对应的标签
+                label = self.tmrca_setting_group_layout.labelForField(widget)
+                if label:
+                    label.hide()
         
-        # 添加新参数
-        if distribution_type in self.param_widgets:
-            for label_text, widget in self.param_widgets[distribution_type]:
-                label = QLabel(label_text)
-                self.tmrca_setting_group_layout.addRow(label, widget)
-                # 连接参数变化信号
-                if hasattr(widget, 'textChanged'):
-                    widget.textChanged.connect(self.on_tmrca_params_changed)
+        # 显示当前分布类型的控件
+        if distribution_type in self.all_param_widgets:
+            for widget in self.all_param_widgets[distribution_type]:
+                widget.show()
+                # 显示对应的标签
+                label = self.tmrca_setting_group_layout.labelForField(widget)
+                if label:
+                    label.show()
         
         # 更新分布图
         self.update_tmrca_distribution()

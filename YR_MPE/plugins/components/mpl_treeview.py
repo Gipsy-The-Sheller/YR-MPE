@@ -246,6 +246,24 @@ class MplTreeView(FigureCanvas):
         max_order = max(node.order for node in nodes)
         min_order = min(node.order for node in nodes)
         
+        # 找到MRCA节点（如果存在）
+        mrca_node = None
+        if mrca_name:
+            for node in nodes:
+                if not node.is_leaf and node.name == mrca_name:
+                    mrca_node = node
+                    break
+        
+        # 创建一个集合来存储需要高亮的clade中的所有节点
+        clade_highlight_nodes = set()
+        if mrca_node:
+            # 递归收集MRCA节点下的所有后代节点
+            def collect_descendants(node):
+                clade_highlight_nodes.add(node)
+                for child in node.children:
+                    collect_descendants(child)
+            collect_descendants(mrca_node)
+        
         # 绘制节点和连线
         for node in nodes:
             # 确定节点的绘制样式
@@ -281,10 +299,21 @@ class MplTreeView(FigureCanvas):
             
             # 绘制到子节点的连线
             for child in node.children:
+                # 判断连线是否需要高亮
+                # 高亮条件：连线属于MRCA clade 或 连接到高亮的taxon
+                line_color = 'black'
+                
+                # 如果整条连线属于MRCA clade，则高亮
+                if mrca_node and node in clade_highlight_nodes and child in clade_highlight_nodes:
+                    line_color = 'red'
+                # 如果连接到高亮的taxon节点，也高亮
+                elif (node.is_leaf and node.name in taxon_set) or (child.is_leaf and child.name in taxon_set):
+                    line_color = 'red'
+                # 如果父节点是MRCA节点，也高亮（确保MRCA节点本身被正确连接）
+                elif not node.is_leaf and node.name == mrca_name:
+                    line_color = 'red'
+                
                 # 先画垂直线：从父节点向下到子节点的水平位置
-                line_color = 'red' if (node.name == mrca_name or 
-                                     (node.is_leaf and node.name in taxon_set) or
-                                     (child.is_leaf and child.name in taxon_set)) else 'black'
                 self.ax.plot([node.age, node.age], [node.order, child.order], 
                            '-', color=line_color, linewidth=1)
                 # 再画水平线：从父节点的水平位置向右到子节点
