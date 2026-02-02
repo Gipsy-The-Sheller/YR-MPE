@@ -511,7 +511,7 @@ class MLDistancePlugin(BasePlugin):
         # 序列类型
         seq_type = self.seq_type_combo.currentText()
         if seq_type != "AUTO":
-            params.extend(["-st", seq_type.lower()])
+            params.extend(["-st", seq_type.upper()])
         
         # 模型
         model_text = self.model_combo.currentText()
