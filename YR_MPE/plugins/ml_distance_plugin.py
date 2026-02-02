@@ -209,16 +209,21 @@ class MLDistancePlugin(BasePlugin):
         
         # 处理DNA模型
         for model_entry in dna_models:
-            if isinstance(model_entry, list):
-                main_model = model_entry[0]
-                model_display_items.append(main_model)  # 主名称作为显示项
+            # if isinstance(model_entry, list):
+            #     main_model = model_entry[0]
+            #     model_display_items.append(main_model)  # 主名称作为显示项
                 
-                # 为所有别名建立映射关系
-                for alias in model_entry[1:]:
-                    self.model_map[alias] = main_model
-                    model_display_items.append(f"{main_model} ({alias})")  # 添加带别名的显示项
+            #     # 为所有别名建立映射关系
+            #     for alias in model_entry[1:]:
+            #         self.model_map[alias] = main_model
+            #         model_display_items.append(f"{main_model} ({alias})")  # 添加带别名的显示项
+            # else:
+            #     model_display_items.append(model_entry)
+            if len(model_entry) > 1:
+                self.model_map[model_entry[1]] = model_entry[0]
+                model_display_items.append(f"{model_entry[0]} ({model_entry[1]})")
             else:
-                model_display_items.append(model_entry)
+                model_display_items.append(model_entry[0])
         
         # 处理蛋白质模型（暂时没有别名）
         for model in protein_models:
@@ -250,6 +255,10 @@ class MLDistancePlugin(BasePlugin):
         # FreeRate参数
         self.freerate_checkbox = QCheckBox("+R")
         params_form_layout.addRow("Free Rate Model:", self.freerate_checkbox)
+
+        # Ascertain Bias
+        self.ascertain_checkbox = QCheckBox("+ASC (for non-continuous data)")
+        params_form_layout.addRow("Ascertain Bias:", self.ascertain_checkbox)
 
         # state freq selection
         self.state_freq_combo = QComboBox()
@@ -534,11 +543,14 @@ class MLDistancePlugin(BasePlugin):
         if self.freerate_checkbox.isChecked():
             model += "+R"
 
+        if self.ascertain_checkbox.isChecked():
+            model += "+ASC"
+
         stfreq = self.state_freq_combo.currentText()
         model += {"Estimated": "", "Empirical (+F)": "+F", "ML-optimized (+FO)": "+FO", "Equal (+FQ)": "+FQ"}[stfreq]
         
         if model != 'auto':
-            params.extend(["-m", model])
+            params.extend(["-m", model.split(" (")[0]])
         
         params.extend(["-redo"])
         
@@ -755,14 +767,17 @@ class MLDistancePlugin(BasePlugin):
             # 处理模型导入
             imported_model = import_data['model']
             
+            
             # 检查导入的模型是否为别名，并转换为主模型名
             model_entries = imported_model.split('+')
+            substmodelname = model_entries[0]
             if hasattr(self, 'model_map'):
                 # 提取模型名（去除可能的参数）
                 base_model = model_entries[0]
                 if base_model in self.model_map:
                     # 替换为完整模型名
-                    imported_model = imported_model.replace(base_model, self.model_map[base_model], 1)
+                    # imported_model = imported_model.replace(base_model, self.model_map[base_model], 1)
+                    substmodelname = f'{self.model_map[base_model]} ({base_model})'
             
             # 设置模型选择框的值
             self.model_combo.setCurrentText(imported_model)

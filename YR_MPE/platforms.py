@@ -122,8 +122,6 @@ class YR_MPEA_Widget(QWidget):
         models_menu.addAction(find_best_model_action)
         model_button.setMenu(models_menu)
 
-        # TODO: Model Selection Algorithms: ModelFinder / ModelTest-NG
-
         distance_button = QToolButton()
         distance_button.setText("DISTANCE")
         distance_button.setIcon(QIcon(os.path.join(self.plugin_path, "icons/distance.svg")))
@@ -238,7 +236,13 @@ class YR_MPEA_Widget(QWidget):
         coalescent_button.setMenu(coalescent_button_menu)
         main_toolbar.addWidget(coalescent_button)
 
-        # TODO: Astral-III and CASTER
+        # 添加CASTER-site功能到COALESCENT菜单
+        caster_site_action = QAction("CASTER-site", coalescent_button)
+        caster_site_action.setIcon(QIcon(os.path.join(self.plugin_path, "icons/software/caster.svg")))
+        caster_site_action.triggered.connect(self.open_caster_site_wrapper)
+        coalescent_button_menu.addAction(caster_site_action)
+
+        # TODO: Astral-III and other coalescent methods
 
         clock_button = QToolButton()
         clock_button.setText("CLOCK")
@@ -251,6 +255,11 @@ class YR_MPEA_Widget(QWidget):
 
         # TODO: Molecular Clock: LSD2 (IQ-TREE 3) / Bayesian Inference (MrBayes / PAML-mcmctree) / Penalized Likelihood (r8s)
 
+        # Add PD-Guide action
+        pdguide_action = QAction("PD-Guide", clock_button)
+        pdguide_action.setIcon(QIcon(os.path.join(self.plugin_path, "icons/software/pdguide.svg")))
+        pdguide_action.triggered.connect(self.open_pdguide_wrapper)
+        clock_button_menu.addAction(pdguide_action)
 
         # mainworkspace_group = QGroupBox("Workspace")
         # # mainworkspace_layout = QGridLayout(10,4)
@@ -310,6 +319,32 @@ class YR_MPEA_Widget(QWidget):
     def add_phylogeny_to_workspace(self, phylogeny):
         """将树形图添加到工作区"""
         self.workspace.add_phylogeny(phylogeny)
+
+    def open_caster_site_wrapper(self):
+        """打开CASTER-site插件"""
+        from PyQt5.QtWidgets import QDialog
+        from .plugins.caster_site_plugin import CasterSitePluginEntry
+        dialog = QDialog()
+        dialog.setWindowTitle("CASTER-site - YR-MPEA")
+        dialog.setWindowIcon(QIcon(os.path.join(self.plugin_path, "icons/software/caster.svg")))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+        
+        # use QDialog to open the caster_site_wrapper
+        caster_site_wrapper = CasterSitePluginEntry().run(import_from=import_from, import_data=import_data)
+        # 连接信号，如果插件发出新序列或结果，添加到工作区
+        # 注意：根据插件实际情况决定是否需要连接信号
+        dialog.layout().addWidget(caster_site_wrapper)
+        dialog.exec_()
 
     def open_clustal_omega_wrapper(self):
         from .plugins.clustal_omega_plugin import ClustalOmegaPluginEntry
@@ -547,7 +582,7 @@ class YR_MPEA_Widget(QWidget):
                         'PMB', 'Q.bird', 'Q.insect', 'Q.mammal', 'Q.pfam', 'Q.plant', 'Q.yeast', 'rtREV', 'VT', 'WAG']
         model_alias = {'JC': 'JC69 (JC)', 'JC69': 'JC69 (JC)', 'K80': 'K2P (K80)', 'K2P': 'K2P (K80)', 
                        'TN': 'TN93 (TN)', 'TN93': 'TN93 (TN)', 'K81': 'K3P (K81)', 'K3P': 'K3P (K81)',
-                       'K81u': 'K81u (K3Pu)', 'K3Pu': 'K81u (K3Pu)'}
+                       'K81u': 'K81u (K3Pu)', 'K3Pu': 'K81u (K3Pu)', 'HKY': 'HKY85 (HKY)', 'HKY85': 'HKY85 (HKY)'}
         if model_entries[0] in model_noalias:
             plugin_wrapper.model_combo.setCurrentText(model_entries[0])
         elif model_entries[0] in model_alias.keys():
@@ -573,6 +608,9 @@ class YR_MPEA_Widget(QWidget):
         # FreeRate?
         if "R" in model_entries:
             plugin_wrapper.freerate_checkbox.setChecked(True)
+        
+        if "ASC" in model_entries:
+            plugin_wrapper.ascertain_checkbox.setChecked(True)
         
         # Gamma Caterories [identify Gx]
         for item in model_entries[1:]:
@@ -631,7 +669,7 @@ class YR_MPEA_Widget(QWidget):
                         'PMB', 'Q.bird', 'Q.insect', 'Q.mammal', 'Q.pfam', 'Q.plant', 'Q.yeast', 'rtREV', 'VT', 'WAG']
         model_alias = {'JC': 'JC69 (JC)', 'JC69': 'JC69 (JC)', 'K80': 'K2P (K80)', 'K2P': 'K2P (K80)', 
                        'TN': 'TN93 (TN)', 'TN93': 'TN93 (TN)', 'K81': 'K3P (K81)', 'K3P': 'K3P (K81)',
-                       'K81u': 'K81u (K3Pu)', 'K3Pu': 'K81u (K3Pu)'}
+                       'K81u': 'K81u (K3Pu)', 'K3Pu': 'K81u (K3Pu)', 'HKY': 'HKY85 (HKY)', 'HKY85': 'HKY85 (HKY)'}
         if model_entries[0] in model_noalias:
             plugin_wrapper.model_combo.setCurrentText(model_entries[0])
         elif model_entries[0] in model_alias.keys():
@@ -663,6 +701,38 @@ class YR_MPEA_Widget(QWidget):
             if item.startswith("G"):
                 plugin_wrapper.gamma_checkbox.setChecked(True)
                 plugin_wrapper.gamma_spinbox.setValue(int(item[1:]))
+        dialog.layout().addWidget(plugin_wrapper)
+        dialog.exec_()
+
+    def open_pdguide_wrapper(self):
+        from PyQt5.QtWidgets import QDialog
+        from .plugins.pdguide_plugin import PdGuidePluginEntry
+        dialog = QDialog()
+        dialog.setWindowTitle(f"PD-Guide - YR-MPEA")
+        dialog.setWindowIcon(QIcon(os.path.join(self.plugin_path, f"icons/software/pdguide.svg")))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            # Check for phylogenies first (for tree-based analysis)
+            if len(self.workspace.items["phylogenies"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["phylogenies"][0]
+            # If no phylogenies, check for alignments (for sequence-based analysis)
+            elif len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+
+        # use QDialog to open the plugin_wrapper
+        plugin_wrapper = PdGuidePluginEntry().run(import_from=import_from, import_data=import_data)
+        plugin_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        plugin_wrapper.export_model_result_signal.connect(self.add_model_to_workspace)
+        plugin_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
+
         dialog.layout().addWidget(plugin_wrapper)
         dialog.exec_()
 

@@ -283,6 +283,9 @@ class IQTreePlugin(BasePlugin):
         self.freerate_checkbox = QCheckBox("+R")
         model_layout.addRow("Free Rate Model:", self.freerate_checkbox)
 
+        self.ascertain_bias_checkbox = QCheckBox("+ASC")
+        model_layout.addRow("Aecertain Bias:", self.ascertain_bias_checkbox)
+
         # # Empirical 参数
         # self.empirical_checkbox = QCheckBox("+F")
         # model_layout.addRow("Empirical Frequencies:", self.empirical_checkbox)
@@ -546,8 +549,9 @@ class IQTreePlugin(BasePlugin):
         
         # 序列类型
         seq_type = self.seq_type_combo.currentText()
-        seq_type_code = {"dna": "DNA", "prot": "AA"}[seq_type.lower()]
+        
         if seq_type != "AUTO":
+            seq_type_code = {"dna": "DNA", "prot": "AA"}[seq_type.lower()]
             params.extend(["-st", seq_type_code])
         
         # 模型
@@ -570,6 +574,9 @@ class IQTreePlugin(BasePlugin):
             
         if self.freerate_checkbox.isChecked():
             model += "+R"
+
+        if self.ascertain_bias_checkbox.isChecked():
+            model += "+ASC"
 
         stfreq = self.state_freq_combo.currentText()
         model += {"Estimated": "", "Empirical (+F)": "+F", "ML-optimized (+FO)": "+FO", "Equal (+FQ)": "+FQ"}[stfreq]
@@ -686,8 +693,9 @@ class IQTreePlugin(BasePlugin):
         QMessageBox.information(self, "Stopped", "Phylogenetic inference has been aborted.")
     
     def display_results(self, output_files):
-        """显示结果"""
+        """显示结果，使用IcyTree展示系统发育树"""
         if not output_files:
+            QMessageBox.information(self, "error","No output files generated")
             return
             
         # 查找.treefile文件并显示
@@ -699,11 +707,51 @@ class IQTreePlugin(BasePlugin):
                 
         if treefile:
             try:
+                # 读取树文件内容
                 with open(treefile, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    self.output_preview.setPlainText(content)
+                    tree_content = f.read().strip()
+                
+                # 确保树内容不为空
+                if not tree_content:
+                    QMessageBox.information(self, "error","Tree file is empty")
+                    return
+                
+                # 导入IcyTree插件
+                from .icytree import IcyTreePlugin
+                import os
+                
+                # 创建IcyTree插件实例
+                plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
+                icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
+                
+                # 设置Newick字符串并显示
+                icytree_plugin.set_newick_string(tree_content)
+                
+                # 在输出标签页中显示IcyTree
+                output_layout = self.output_tab.layout()
+                if output_layout:
+                    # 清除现有部件
+                    for i in reversed(range(output_layout.count())):
+                        widget = output_layout.itemAt(i).widget()
+                        if widget and widget != self.output_info:
+                            widget.setParent(None)
+                
+                # 添加IcyTree插件到输出标签页
+                output_layout.addWidget(icytree_plugin)
+                
+                QMessageBox.information(self, "error",f"Phylogenetic tree visualization ready: {os.path.basename(treefile)}")
+                
+            except ImportError:
+                # 如果无法导入IcyTree插件，显示错误信息
+                QMessageBox.information(self, "error","Error: IcyTree plugin not available")
+                
             except Exception as e:
-                self.add_console_message(f"Error displaying results: {str(e)}", "error")
+                error_msg = f"Error processing tree file: {str(e)}"
+                QMessageBox.information(self, "error",error_msg)
+                self.add_console_message(error_msg, "error")
+        else:
+            # 没有找到树文件，显示信息
+            QMessageBox.information(self, "error",f"No treefile found. Generated {len(output_files)} file(s).")
     
     def import_to_platform(self):
         """将结果导入到当前平台"""
