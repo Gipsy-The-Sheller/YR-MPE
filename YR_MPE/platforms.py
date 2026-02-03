@@ -34,7 +34,23 @@ class YR_MPEA_Widget(QWidget):
         self.mode = "single_gene"
         self.init_ui()
         
-
+    def select_workspace_folder(self):
+        """选择工作区文件夹"""
+        folder_path = QFileDialog.getExistingDirectory(
+            self, 
+            "Select Workspace Folder", 
+            os.path.expanduser("~")  # 默认打开用户主目录
+        )
+        if folder_path:
+            # 这里可以添加后续处理逻辑，比如保存工作区路径或更新UI
+            # 目前先简单显示一个消息框确认选择
+            QMessageBox.information(
+                self, 
+                "Workspace Selected", 
+                f"Workspace folder selected:\n{folder_path}"
+            )
+            # TODO: 可以在这里添加实际的工作区处理逻辑
+            
     def init_ui(self):
         self.setWindowTitle("YR_MPEA")
         
@@ -51,6 +67,19 @@ class YR_MPEA_Widget(QWidget):
         # vertically compact
         main_toolbar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         # main_toolbar.layout.setSpacing(20)
+
+        # 添加Workspace按钮（在所有其他按钮之前）
+        workspace_button = QToolButton()
+        workspace_button.setText("WORKSPACE")
+        workspace_button.setIcon(QIcon(os.path.join(self.plugin_path, "icons/workspace.svg")))
+        workspace_button.setPopupMode(QToolButton.InstantPopup)
+        workspace_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        main_toolbar.addWidget(workspace_button)
+
+        # 添加Select workspace folder选项
+        select_workspace_action = QAction("Select workspace folder", workspace_button)
+        select_workspace_action.triggered.connect(self.select_workspace_folder)
+        workspace_button.addAction(select_workspace_action)
 
         align_button = QToolButton()
         align_button.setText("ALIGN")
@@ -228,7 +257,7 @@ class YR_MPEA_Widget(QWidget):
         main_toolbar.addWidget(variants_button)
 
         coalescent_button = QToolButton()
-        coalescent_button.setText("COALESCENT")
+        coalescent_button.setText("COALESCENCE")
         coalescent_button.setIcon(QIcon(os.path.join(self.plugin_path, "icons/coalescent.svg")))
         coalescent_button.setPopupMode(QToolButton.InstantPopup)
         coalescent_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
