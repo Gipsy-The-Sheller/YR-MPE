@@ -478,16 +478,16 @@ class DatasetManager(QDialog):
                 self, "Error", f"Failed to export summary: {str(e)}"
             )
             
-    def batch_align_clustal_omega(self):
-        """批量执行Clustal Omega比对"""
-        self._batch_align_with_tool("clustal_omega")
-        
     def batch_align_mafft(self):
         """批量执行MAFFT比对"""
         self._batch_align_with_tool("mafft")
-        
+    
+    def batch_align_clustal_omega(self):
+        """批量执行Clustal Omega比对"""
+        self._batch_align_with_tool("clustal_omega")
+    
     def batch_align_muscle5(self):
-        """批量执行Muscle 5比对"""
+        """批量执行MUSCLE5比对"""
         self._batch_align_with_tool("muscle5")
         
     def batch_align_macse2(self):
@@ -504,35 +504,107 @@ class DatasetManager(QDialog):
         
     def _batch_align_with_tool(self, tool_name: str):
         """使用指定工具批量执行比对"""
-        # 获取选中的且未比对的数据集
+        # 获取选中的数据集（不限制是否已比对，由用户决定）
         selected_items = [item for item in self.dataset_items if item.selected]
-        # if not selected_items:
-        #     QMessageBox.warning(self, "Warning", f"No unaligned datasets selected for {tool_name} alignment.")
-        #     return
+        if not selected_items:
+            QMessageBox.warning(self, "Warning", f"No datasets selected for {tool_name} alignment.")
+            return
             
         try:
-            # 获取插件管理器
-            from ..methods import PluginManager, WorkspaceManager
-            workspace_manager = WorkspaceManager()
-            plugin_manager = PluginManager(workspace_manager)
-            plugin_manager.register_all_plugins()
-            
-            # 创建插件实例
-            plugin_instance = plugin_manager.create_plugin_instance(tool_name)
-            if not plugin_instance:
+            # 准备批量输入数据：[[SeqRecord, ...], [SeqRecord, ...]]
+            batch_input_data = []
+            for item in selected_items:
+                batch_input_data.append(item.sequences)
+                
+            # 使用PluginFactory获取插件实例
+            if tool_name == "mafft":
+                plugin_instance = self.plugin_factory.get_mafft_plugin()
+            elif tool_name == "clustal_omega":
+                plugin_instance = self.plugin_factory.get_clustal_omega_plugin()
+            elif tool_name == "muscle5":
+                plugin_instance = self.plugin_factory.get_muscle5_plugin()
+            elif tool_name == "trimal":
+                plugin_instance = self.plugin_factory.get_trimal_plugin()
+            elif tool_name == "gblocks":
+                plugin_instance = self.plugin_factory.get_gblocks_plugin()
+            else:
                 QMessageBox.critical(self, "Error", f"Plugin {tool_name} not available.")
                 return
                 
-            # TODO: 实现批量比对逻辑
-            # 这里需要调用插件的执行方法，传入所有选中的序列数据
-            QMessageBox.information(
-                self, "Batch Alignment", 
-                f"Starting batch alignment with {tool_name} for {len(selected_items)} datasets.\n"
-                "Note: Full implementation requires integration with PluginExecutor."
+            # 创建插件对话框并传递批量数据
+            dialog = QDialog()
+            dialog.setWindowTitle(f"Batch {tool_name.upper()} Alignment")
+            dialog.setMinimumSize(800, 600)
+            dialog.setLayout(QVBoxLayout())
+            
+            # 运行插件（关键：传递批量数据，来源标识为DATASET_MANAGER）
+            plugin_widget = plugin_instance.run(
+                import_from="DATASET_MANAGER", 
+                import_data=batch_input_data
             )
+            
+            # 连接批量信号（关键：连接到Dataset Manager自身的方法）
+            if hasattr(plugin_widget, 'batch_import_alignment_signal'):
+                plugin_widget.batch_import_alignment_signal.connect(
+                    self.handle_batch_alignment_results
+                )
+                
+            # 连接单文件信号（向后兼容，但批量场景不会触发）
+            plugin_widget.import_alignment_signal.connect(
+                self.handle_single_alignment_result
+            )
+            
+            dialog.layout().addWidget(plugin_widget)
+            dialog.exec_()
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to start batch alignment: {str(e)}")
+    
+    def handle_batch_alignment_results(self, batch_results):
+        """处理批量比对结果（在Dataset Manager内部完成）"""
+        if not batch_results or not isinstance(batch_results, list):
+            return
+            
+        try:
+            # 更新Dataset Items的状态
+            selected_items = [item for item in self.dataset_items if item.selected]
+            if len(batch_results) != len(selected_items):
+                QMessageBox.warning(self, "Warning", "Result count mismatch!")
+                return
+                
+            for i, (item, result_sequences) in enumerate(zip(selected_items, batch_results)):
+                # 更新序列数据
+                item.sequences = result_sequences
+                item.is_aligned = True
+                item.length = len(result_sequences[0].seq) if result_sequences else 0
+                item.sequence_count = len(result_sequences)
+                
+            # 刷新表格显示
+            self.refresh_table_display()
+            
+            # 注意：这里不再发送信号到主平台！
+            # 用户需要手动选择"Export to Platform"来导出数据
+            
+            QMessageBox.information(
+                self, "Success", 
+                f"Successfully completed batch alignment for {len(batch_results)} datasets!"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to process batch results: {str(e)}")
+
+    def handle_single_alignment_result(self, single_result):
+        """处理单文件比对结果（向后兼容，但批量场景不会调用）"""
+        pass
+    
+    def refresh_table_display(self):
+        """刷新表格显示"""
+        # 清空现有行
+        self.table.setRowCount(0)
+        
+        # 重新填充数据
+        for item in self.dataset_items:
+            self.add_dataset_to_table(item)
             
     def _batch_trim_with_tool(self, tool_name: str):
         """使用指定工具批量执行修剪"""

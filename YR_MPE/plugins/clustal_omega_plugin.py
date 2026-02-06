@@ -95,14 +95,15 @@ class ClustalOmegaThread(BaseProcessThread):
 
 
 class ClustalOmegaPlugin(BasePlugin):
-
-    import_alignment_signal = pyqtSignal(list)
     """Clustal Omega插件类"""
+    import_alignment_signal = pyqtSignal(list)
+    batch_import_alignment_signal = pyqtSignal(list)
     
     def __init__(self, import_from=None, import_data=None):
         """初始化Clustal Omega插件"""
         super().__init__(import_from, import_data)
-        if import_from in ["YR_MPEA", "seq_viewer"] and import_data is not None:
+        self.batch_mode = False
+        if import_from in ["YR_MPEA", "seq_viewer", "DATASET_MANAGER"] and import_data is not None:
             self.handle_import_data(import_data)
         
     def init_plugin_info(self):
@@ -216,6 +217,7 @@ class ClustalOmegaPlugin(BasePlugin):
         
         # 确保布局存在并添加按钮
         self.control_layout.addWidget(self.import_to_platform_btn)
+    
     def get_parameters(self):
         """获取命令行参数"""
         params = []
@@ -313,8 +315,8 @@ class ClustalOmegaPlugin(BasePlugin):
         self.add_console_message("Alignment completed successfully!", "info")
         QMessageBox.information(self, "Success", "Alignment completed successfully!")
         
-        # 显示导入按钮（仅在从平台导入数据时显示）
-        if self.import_from in ["YR_MPEA", "seq_viewer"]:
+        # 显示导入按钮（支持多种来源）
+        if self.import_from in ["YR_MPEA", "seq_viewer", "DATASET_MANAGER"]:
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)
@@ -507,30 +509,40 @@ class ClustalOmegaPlugin(BasePlugin):
             return
             
         try:
-            # 解析比对结果文件
-            sequences = []
-            for output_file in self.alignment_output_files:
-                # 读取FASTA文件
-                for record in SeqIO.parse(output_file, "fasta"):
-                    sequences.append(record)
+            # 判断是否为批量模式
+            is_batch_mode = getattr(self, 'batch_mode', False)
             
-            if not sequences:
-                QMessageBox.warning(self, "Warning", "No sequences found in alignment results.")
-                return
+            if is_batch_mode:
+                # 批量模式：保持分组结构 [[SeqRecord, ...], [SeqRecord, ...]]
+                batch_sequences = []
+                for output_file in self.alignment_output_files:
+                    file_sequences = list(SeqIO.parse(output_file, "fasta"))
+                    batch_sequences.append(file_sequences)
+                self.batch_import_alignment_signal.emit(batch_sequences)
                 
-            # 发送信号将数据导入到平台
-            self.import_alignment_to_platform(sequences)
+            else:
+                # 单文件模式：扁平化列表 [SeqRecord, SeqRecord, ...]
+                sequences = []
+                for output_file in self.alignment_output_files:
+                    # 读取FASTA文件
+                    for record in SeqIO.parse(output_file, "fasta"):
+                        sequences.append(record)
+                
+                if not sequences:
+                    QMessageBox.warning(self, "Warning", "No sequences found in alignment results.")
+                    return
+                    
+                # 发送信号将数据导入到平台
+                self.import_alignment_signal.emit(sequences)
             
             # 显示成功消息
-            QMessageBox.information(self, "Success", f"Successfully imported {len(sequences)} sequences to the platform.")
+            if is_batch_mode:
+                QMessageBox.information(self, "Success", f"Successfully imported {len(self.alignment_output_files)} alignment files to the platform.")
+            else:
+                QMessageBox.information(self, "Success", f"Successfully imported {len(sequences)} sequences to the platform.")
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to import alignment results: {str(e)}")
-
-    def import_alignment_to_platform(self, sequences):
-        """将比对结果导入到平台的工作区"""
-        # 发送信号将数据导入到平台
-        self.import_alignment_signal.emit(sequences)
 
     def remove_file_tag(self, file_path, tag_widget):
         """Remove a file tag"""
@@ -557,20 +569,43 @@ class ClustalOmegaPlugin(BasePlugin):
             self.file_path_edit.setText(f"{len(self.imported_files)} files selected")
 
     def handle_import_data(self, import_data):
-        """处理从YR-MPEA导入的数据"""
+        """处理从YR-MPEA或Dataset Manager导入的数据"""
         if isinstance(import_data, list):
-            # 创建临时文件来存储导入的序列数据
-            temp_file = self.create_temp_file(suffix='.fas')
-            with open(temp_file, 'w') as f:
-                for seq in import_data:
-                    f.write(f">{seq.id}\n{seq.seq}\n")
-            self.temp_files.append(temp_file)
-            self.import_file = temp_file
-            self.imported_files = [temp_file]
-            
-            # 更新UI显示导入的文件
-            if hasattr(self, 'file_path_edit') and self.file_path_edit:
-                self.file_path_edit.setText(temp_file)
+            # 判断是否为批量模式：[[SeqRecord, ...], [SeqRecord, ...]]
+            if len(import_data) > 0 and isinstance(import_data[0], list):
+                # 批量模式
+                self.batch_mode = True
+                self.temp_files = []
+                self.imported_files = []
+                
+                for i, seq_list in enumerate(import_data):
+                    temp_file = self.create_temp_file(suffix=f'_batch_{i}.fas')
+                    with open(temp_file, 'w') as f:
+                        for seq in seq_list:
+                            f.write(f">{seq.id}\n{seq.seq}\n")
+                    self.temp_files.append(temp_file)
+                    self.imported_files.append(temp_file)
+                    
+                # 更新UI显示
+                if hasattr(self, 'file_path_edit') and self.file_path_edit:
+                    self.file_path_edit.setText(f"{len(import_data)} files selected")
+                    self.file_path_edit.setEnabled(False)
+                    
+            else:
+                # 单文件模式
+                self.batch_mode = False
+                # 创建临时文件来存储导入的序列数据
+                temp_file = self.create_temp_file(suffix='.fas')
+                with open(temp_file, 'w') as f:
+                    for seq in import_data:
+                        f.write(f">{seq.id}\n{seq.seq}\n")
+                self.temp_files.append(temp_file)
+                self.import_file = temp_file
+                self.imported_files = [temp_file]
+                
+                # 更新UI显示导入的文件
+                if hasattr(self, 'file_path_edit') and self.file_path_edit:
+                    self.file_path_edit.setText(temp_file)
         else:
             self.import_file = None
             self.imported_files = []
