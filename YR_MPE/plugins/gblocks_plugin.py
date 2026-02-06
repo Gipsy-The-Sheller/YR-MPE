@@ -92,17 +92,22 @@ class GBlocksThread(BaseProcessThread):
                     base_name = os.path.splitext(input_file)[0]
                     output_file = f"{base_name}-gb"
                 
-                # HTML文件通常为原文件名加-gb.htm后缀
-                gblocks_html_file = f"{base_name}-gb.htm"
+                # HTML文件为原输入文件名直接加-gb.html后缀
+                gblocks_html_file = f"{input_file}-gb.html"
                 
                 # 如果GBlocks生成了HTML文件，则使用它
                 if os.path.exists(gblocks_html_file):
                     html_files.append(gblocks_html_file)
                 else:
-                    # 创建一个简单的HTML报告
-                    html_file = self.create_temp_file(suffix='.html')
-                    self.create_simple_html_report(html_file, input_file, output_file, cmd, result)
-                    html_files.append(html_file)
+                    # 尝试.htm扩展名作为备选
+                    gblocks_html_file_alt = f"{input_file}-gb.htm"
+                    if os.path.exists(gblocks_html_file_alt):
+                        html_files.append(gblocks_html_file_alt)
+                    else:
+                        # 创建一个简单的HTML报告
+                        html_file = self.create_temp_file(suffix='.html')
+                        self.create_simple_html_report(html_file, input_file, output_file, cmd, result)
+                        html_files.append(html_file)
                 
                 # 检查输出文件是否存在，如果不存在则使用输入文件名
                 if not os.path.exists(output_file):
