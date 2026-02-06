@@ -44,7 +44,60 @@ class WorkspaceManager:
             self._workspace_hint.setAlignment(Qt.AlignCenter)
             self._workspace_hint.setStyleSheet("color: #555555;")
             self._main_layout.addWidget(self._workspace_hint)
-        
+            
+            # 添加Dataset和Single Sequence按钮
+            dataset_button = QToolButton()
+            dataset_button.setText("Dataset")
+            dataset_button.setIcon(QIcon(os.path.join(self.plugin_path, "icons/dataset.svg")))
+            dataset_button.setCheckable(True)  # 设置为可选中状态
+            dataset_button.setChecked(False)  # 初始未选中
+            dataset_button.clicked.connect(self._on_dataset_button_clicked)
+            self._main_layout.addWidget(dataset_button)
+            
+            single_sequence_button = QToolButton()
+            single_sequence_button.setText("Single Sequence")
+            single_sequence_button.setIcon(QIcon(os.path.join(self.plugin_path, "icons/single_sequence.svg")))
+            single_sequence_button.setCheckable(True)  # 设置为可选中状态
+            single_sequence_button.setChecked(True)  # 初始选中
+            single_sequence_button.clicked.connect(self._on_single_sequence_button_clicked)
+            self._main_layout.addWidget(single_sequence_button)
+            
+            # 存储按钮引用以便后续管理
+            self.dataset_button = dataset_button
+            self.single_sequence_button = single_sequence_button
+            
+            # 初始化数据项列表
+            self.datasets = []
+            self.single_sequences = []
+            
+    def _on_dataset_button_clicked(self):
+        """Dataset按钮点击事件处理"""
+        # 如果是单击，则切换选中状态
+        if not self.dataset_button.isChecked():
+            # 单击：选中Dataset功能模式
+            self.dataset_button.setChecked(True)
+            self.single_sequence_button.setChecked(False)
+            
+            # 打开Dataset管理器
+            from .dataset_manager import DatasetManagerDialog
+            dialog = DatasetManagerDialog()
+            dialog.exec_()
+            
+            # 保存创建的dataset
+            if hasattr(dialog, 'created_datasets'):
+                self.datasets.extend(dialog.created_datasets)
+                
+    def _on_single_sequence_button_clicked(self):
+        """Single Sequence按钮点击事件处理"""
+        # 如果是单击，则切换选中状态
+        if not self.single_sequence_button.isChecked():
+            # 单击：选中Single Sequence功能模式
+            self.single_sequence_button.setChecked(True)
+            self.dataset_button.setChecked(False)
+            
+            # 可以在这里添加单序列相关的功能
+            pass
+            
     def get_workspace_widget(self) -> QWidget:
         """获取工作区UI组件"""
         self._init_workspace_widget()

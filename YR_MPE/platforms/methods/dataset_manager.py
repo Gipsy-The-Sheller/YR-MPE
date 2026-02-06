@@ -13,6 +13,9 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor
 from Bio import SeqIO
 
+# 添加新的导入
+from .export_partitioned_nexus import export_partitioned_nexus
+
 
 class DatasetItem:
     """Dataset数据项模型"""
@@ -25,9 +28,19 @@ class DatasetItem:
         self.is_aligned = False       # 是否已比对（可手动修改）
         self.file_path = ""           # 原始文件路径
         self.sequences = []           # 序列数据
+        self.name = ""                # 添加name属性以兼容Sequence Viewer
         
     def __str__(self):
         return f"DatasetItem(loci_name={self.loci_name}, length={self.length}, count={self.sequence_count})"
+        
+    def set_name(self, name):
+        """设置name属性"""
+        self.name = name
+        self.loci_name = name  # 保持loci_name同步
+        
+    def get_name(self):
+        """获取name属性"""
+        return self.name
 
 
 class DatasetManager(QDialog):
@@ -36,11 +49,12 @@ class DatasetManager(QDialog):
     # 信号定义
     dataset_processed = pyqtSignal(list)  # 处理完成的dataset列表
     
-    def __init__(self, dataset_name: str = "Default Dataset", plugin_factory=None):
+    def __init__(self, dataset_name: str = "Default Dataset", plugin_factory=None, workspace=None):
         super().__init__()
         self.dataset_name = dataset_name
         self.dataset_items: List[DatasetItem] = []
         self.plugin_factory = plugin_factory  # 添加plugin_factory引用
+        self.workspace = workspace  # 添加workspace引用
         self.plugin_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         self.init_ui()
         
@@ -320,19 +334,28 @@ class DatasetManager(QDialog):
         try:
             if 0 <= row < len(self.dataset_items):
                 dataset = self.dataset_items[row]
-                # 使用PluginFactory获取序列查看器
-                seq_viewer = self.plugin_factory.get_sequence_viewer()
-                # 序列查看器不需要参数，直接显示
-                viewer_widget = seq_viewer.run()
+                # 确保dataset有name属性
+                if not dataset.name:
+                    dataset.name = dataset.loci_name
                 
-                # 创建对话框显示查看器
-                from PyQt5.QtWidgets import QDialog
-                dialog = QDialog()
-                dialog.setWindowTitle(f"View Dataset: {dataset.name}")
-                dialog.setMinimumSize(800, 600)
-                dialog.setLayout(QVBoxLayout())
-                dialog.layout().addWidget(viewer_widget)
-                dialog.exec_()
+                # 转换SeqRecord对象为SequenceAlignmentViewer期望的字典格式
+                sequences_for_viewer = []
+                for seq_record in dataset.sequences:
+                    seq_dict = {
+                        'header': getattr(seq_record, 'id', getattr(seq_record, 'name', 'Unknown')),
+                        'sequence': str(seq_record.seq) if hasattr(seq_record, 'seq') else str(seq_record)
+                    }
+                    sequences_for_viewer.append(seq_dict)
+                
+                # 使用PluginFactory获取序列查看器
+                from YR_MPE.sequence_editor import SequenceAlignmentViewer
+                viewer = SequenceAlignmentViewer(sequences_for_viewer)
+                viewer.show()
+                
+                # 保存viewer引用以防被垃圾回收
+                if not hasattr(self, 'viewers'):
+                    self.viewers = []
+                self.viewers.append(viewer)
         except Exception as e:
             QMessageBox.critical(None, "Error", f"Failed to open sequence viewer:\n{str(e)}")
             
@@ -367,11 +390,11 @@ class DatasetManager(QDialog):
             )
             
     def export_to_partitioned_nexus(self):
-        """导出为分区NEXUS格式"""
+        """导出为分区NEXUS格式 - 使用改进的实现"""
         # 获取选中的datasets
         selected_items = [item for item in self.dataset_items if item.selected]
         if not selected_items:
-            QMessageBox.warning(self, "Warning", "No datasets selected for export.")
+            QMessageBox.warning(self, "Warning", "No loci selected for export.")
             return
             
         # 选择导出文件
@@ -382,49 +405,36 @@ class DatasetManager(QDialog):
             return
             
         try:
-            # 合并所有序列
-            all_sequences = []
-            charsets = []
-            current_pos = 1
+            # 准备数据格式：转换为新函数需要的格式
+            loci = []
+            loci_names = []
             
             for item in selected_items:
-                # 为每个dataset的序列添加前缀以避免名称冲突
-                for seq in item.sequences:
-                    new_seq = seq.__class__()
-                    new_seq.id = f"{item.loci_name}_{seq.id}"
-                    new_seq.name = f"{item.loci_name}_{seq.name}"
-                    new_seq.description = seq.description
-                    new_seq.seq = seq.seq
-                    all_sequences.append(new_seq)
-                    
-                # 记录charset
-                end_pos = current_pos + item.length - 1
-                charsets.append(f"    CHARSET {item.loci_name} = {current_pos}-{end_pos};")
-                current_pos = end_pos + 1
-                
+                locus = []
+                for seq_record in item.sequences:
+                    # 获取序列名称和序列内容
+                    seq_name = getattr(seq_record, 'id', getattr(seq_record, 'name', 'Unknown'))
+                    seq_content = str(seq_record.seq) if hasattr(seq_record, 'seq') else str(seq_record)
+                    locus.append([seq_name, seq_content])
+                loci.append(locus)
+                loci_names.append(item.loci_name)
+            
+            # 调用新的export_partitioned_nexus函数
+            nexus_content, partition_scheme, missing_info = export_partitioned_nexus(loci, loci_names)
+            
             # 写入NEXUS文件
             with open(export_path, 'w') as f:
-                f.write("#NEXUS\n\n")
-                f.write("BEGIN DATA;\n")
-                f.write(f"    DIMENSIONS NTAX={len(all_sequences)} NCHAR={current_pos - 1};\n")
-                f.write("    FORMAT DATATYPE=DNA MISSING=? GAP=-;\n")
-                f.write("    MATRIX\n")
+                f.write(nexus_content)
                 
-                for seq in all_sequences:
-                    f.write(f"    {seq.id}    {str(seq.seq)}\n")
-                    
-                f.write("    ;\n")
-                f.write("END;\n\n")
-                
-                f.write("BEGIN SETS;\n")
-                for charset in charsets:
-                    f.write(charset + "\n")
-                f.write("END;\n")
-                
+            # 显示成功消息
+            total_taxa = len(missing_info) if missing_info else 0
+            total_loci = len(selected_items)
             QMessageBox.information(
                 self, "Success", 
-                f"Successfully exported partitioned NEXUS file to {export_path}"
+                f"Successfully exported partitioned NEXUS file to {export_path}\n"
+                f"Taxa: {total_taxa}, Loci: {total_loci}"
             )
+            
         except Exception as e:
             QMessageBox.critical(
                 self, "Error", f"Failed to export partitioned NEXUS: {str(e)}"
@@ -495,10 +505,10 @@ class DatasetManager(QDialog):
     def _batch_align_with_tool(self, tool_name: str):
         """使用指定工具批量执行比对"""
         # 获取选中的且未比对的数据集
-        selected_items = [item for item in self.dataset_items if item.selected and not item.is_aligned]
-        if not selected_items:
-            QMessageBox.warning(self, "Warning", f"No unaligned datasets selected for {tool_name} alignment.")
-            return
+        selected_items = [item for item in self.dataset_items if item.selected]
+        # if not selected_items:
+        #     QMessageBox.warning(self, "Warning", f"No unaligned datasets selected for {tool_name} alignment.")
+        #     return
             
         try:
             # 获取插件管理器
@@ -598,3 +608,9 @@ class DatasetManager(QDialog):
         if 0 <= row < len(self.dataset_items):
             del self.dataset_items[row]
             self.table.removeRow(row)
+            
+    def closeEvent(self, event):
+        """关闭事件处理"""
+        # 不再自动添加到workspace，因为现在是在创建时就添加
+        # 继续正常的关闭流程
+        super().closeEvent(event)

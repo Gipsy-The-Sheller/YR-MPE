@@ -19,9 +19,9 @@
 
 import os
 from Bio import SeqIO
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, 
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
 QMenuBar, QToolBar, QToolButton, QGroupBox, QLabel,
-QAction, QMenu, QSizePolicy, QGridLayout, QFileDialog, QMessageBox)
+QAction, QMenu, QSizePolicy, QGridLayout, QFileDialog, QMessageBox, QDialog)
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QIcon
 
@@ -352,7 +352,7 @@ class YR_MPEA_Widget(QWidget):
         # main_layout.addWidget(mainworkspace_group)
 
         # 创建SingleGeneWorkspace实例
-        self.workspace = SingleGeneWorkspace()
+        self.workspace = SingleGeneWorkspace(resource_factory=self.resource_factory, parent=self)
         self.workspace.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         main_layout.addWidget(self.workspace)
 
@@ -365,28 +365,32 @@ class YR_MPEA_Widget(QWidget):
     def open_dataset_manager(self):
         """打开Dataset管理对话框"""
         try:
-            from ..plugins.dataset_plugin import DatasetPluginEntry
-            from PyQt5.QtWidgets import QDialog
-            dialog = QDialog()
-            dialog.setWindowTitle("Dataset Manager - YR-MPEA")
-            dialog.setMinimumSize(800, 600)
-            dialog.setLayout(QVBoxLayout())
+            # 使用PluginFactory获取DatasetManager插件
+            dataset_manager = self.plugin_factory.get_dataset_manager()
             
-            dataset_plugin = DatasetPluginEntry().run()
+            # 保存引用防止被垃圾回收
+            if not hasattr(self, 'dataset_managers'):
+                self.dataset_managers = []
+            self.dataset_managers.append(dataset_manager)
+            
+            # 设置必要的参数
+            dataset_manager.dataset_name = "Dataset Manager"
+            dataset_manager.plugin_factory = self.plugin_factory
+            dataset_manager.workspace = self
+            
             # 连接信号以便在Dataset管理器中查看序列
-            if hasattr(dataset_plugin, 'view_sequence_signal'):
-                dataset_plugin.view_sequence_signal.connect(self.view_sequence_in_viewer)
+            if hasattr(dataset_manager, 'view_sequence_signal'):
+                dataset_manager.view_sequence_signal.connect(self.view_sequence_in_viewer)
             
-            dialog.layout().addWidget(dataset_plugin)
-            dialog.exec_()
+            dataset_manager.show()  # 改为非模态显示
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open Dataset Manager: {str(e)}")
     
     def view_sequence_in_viewer(self, sequences):
         """使用SeqViewer插件查看序列"""
         try:
-            sequence_viewer = self.plugin_factory.get_sequence_viewer()
-            viewer = sequence_viewer.run(sequences)
+            from YR_MPE.sequence_editor import SequenceAlignmentViewer
+            viewer = SequenceAlignmentViewer(sequences)
             viewer.show()
             # 保存viewer引用以防被垃圾回收
             if not hasattr(self, 'viewers'):
@@ -767,11 +771,19 @@ class YR_MPEA_Widget(QWidget):
         dialog.exec_()
 
     def create_new_dataset(self):
-        """创建新的Dataset"""
+        """创建新的Dataset - 只创建空对象和ToolButton，不打开对话框"""
         try:
-            from .methods.dataset_manager import DatasetManager
-            dialog = DatasetManager("New Dataset")
-            dialog.exec_()
+            # 创建Dataset对象用于工作区显示
+            class DatasetObject:
+                def __init__(self, name):
+                    self.dataset_name = name
+                    self.items = []  # 用于存储实际的dataset items
+            
+            dataset = DatasetObject("New Dataset")
+            
+            # 添加到工作区（创建QToolButton）
+            self.workspace.add_dataset(dataset)
+                    
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create new dataset: {str(e)}")
     
@@ -820,8 +832,10 @@ class YR_MPEA_Widget(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to create dataset by SeqDBG: {str(e)}")
 
 class SingleGeneWorkspace(QWidget):
-    def __init__(self):
+    def __init__(self, resource_factory=None, parent=None):
         super().__init__()
+        self.resource_factory = resource_factory  # 添加resource_factory引用
+        self.parent_window = parent  # 添加parent引用
         self.items = {
             "alignments": [],
             "models": [],
@@ -868,512 +882,374 @@ class SingleGeneWorkspace(QWidget):
 
             # align to top-left
             self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-            
-            # 添加工作区主区块的图标按钮（第一行）
-            self.add_workspace_main_icons()
         
         # add the sequence set to items["alignments"]
         self.items["alignments"].append(sequences)
-        # add an 'alignment' icon to workspace - 这里应该是第二行及以后的内容
+        # add an 'alignment' icon to workspace
         alignment_icon = self.resource_factory.get_icon("file/sequence.svg")
         alignment_button = QToolButton()
         alignment_button.setIcon(alignment_icon)
         alignment_button.setIconSize(QSize(45, 45))
         # alignment_button.setToolTip("Alignment")
         alignment_button.clicked.connect(lambda: self.view_alignment(sequences))
-        # 添加到第二行第一列
-        self.grid_layout.addWidget(alignment_button, 1, 0)
-    
-    def add_workspace_main_icons(self):
-        """在工作区主区块第一行添加图标按钮"""
-        # Sequence (Alignments)
-        seq_button = QToolButton()
-        seq_button.setIcon(self.resource_factory.get_icon("file/sequence.svg"))
-        seq_button.setIconSize(QSize(45, 45))
-        seq_button.setToolTip("Sequence/Alignment")
-        seq_button.clicked.connect(self.open_sequence_files)
-        self.grid_layout.addWidget(seq_button, 0, 0)
-        
-        # Model
-        model_button = QToolButton()
-        model_button.setIcon(self.resource_factory.get_icon("file/model.svg"))
-        model_button.setIconSize(QSize(45, 45))
-        model_button.setToolTip("Model")
-        model_button.clicked.connect(self.open_model_selection)
-        self.grid_layout.addWidget(model_button, 0, 1)
-        
-        # Distance
-        distance_button = QToolButton()
-        distance_button.setIcon(self.resource_factory.get_icon("file/distance.svg"))
-        distance_button.setIconSize(QSize(45, 45))
-        distance_button.setToolTip("Distance")
-        distance_button.clicked.connect(self.open_distance_calculation)
-        self.grid_layout.addWidget(distance_button, 0, 2)
-        
-        # Tree (Phylogeny)
-        tree_button = QToolButton()
-        tree_button.setIcon(self.resource_factory.get_icon("file/phylogeny.svg"))
-        tree_button.setIconSize(QSize(45, 45))
-        tree_button.setToolTip("Tree")
-        tree_button.clicked.connect(self.open_tree_building)
-        self.grid_layout.addWidget(tree_button, 0, 3)
-        
-        # Dataset - NEW (无文字，只有图标)
-        dataset_button = QToolButton()
-        dataset_button.setIcon(self.resource_factory.get_icon("file/dataset.svg"))  # 使用专门的dataset图标
-        dataset_button.setIconSize(QSize(45, 45))
-        dataset_button.setToolTip("Dataset")
-        dataset_button.setCheckable(True)
-        dataset_button.clicked.connect(lambda: self.handle_dataset_click(dataset_button))
-        dataset_button.doubleClicked = False
-        
-        # Override mouse events for double-click functionality
-        dataset_button.mouseDoubleClickEvent_original = dataset_button.mouseDoubleClickEvent
-        dataset_button.mousePressEvent_original = dataset_button.mousePressEvent
-        
-        def dataset_mouse_double_click(event):
-            dataset_button.doubleClicked = True
-            self.open_dataset_manager()
-            dataset_button.mouseDoubleClickEvent_original(event)
-            
-        def dataset_mouse_press(event):
-            dataset_button.doubleClicked = False
-            dataset_button.mousePressEvent_original(event)
-            
-        dataset_button.mouseDoubleClickEvent = dataset_mouse_double_click
-        dataset_button.mousePressEvent = dataset_mouse_press
-        
-        self.grid_layout.addWidget(dataset_button, 0, 4)
-    
-    def handle_dataset_click(self, button):
-        """处理Dataset按钮点击事件"""
-        if not button.doubleClicked:
-            # 单击：选中Dataset功能模式
-            button.setChecked(True)
-    
-    def open_dataset_manager(self):
-        """打开Dataset管理对话框"""
-        try:
-            from ..plugins.dataset_plugin import DatasetPluginEntry
-            from PyQt5.QtWidgets import QDialog
-            dialog = QDialog()
-            dialog.setWindowTitle("Dataset Manager - YR-MPEA")
-            dialog.setMinimumSize(800, 600)
-            dialog.setLayout(QVBoxLayout())
-            
-            dataset_plugin = DatasetPluginEntry().run()
-            # 连接信号以便在Dataset管理器中查看序列
-            dataset_plugin.view_sequence_signal = getattr(dataset_plugin, 'view_sequence_signal', None)
-            if hasattr(dataset_plugin, 'view_sequence_signal'):
-                dataset_plugin.view_sequence_signal.connect(self.view_sequence_in_viewer)
-            
-            dialog.layout().addWidget(dataset_plugin)
-            dialog.exec_()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open Dataset Manager: {str(e)}")
-    
-    def view_sequence_in_viewer(self, sequences):
-        """使用SeqViewer插件查看序列"""
-        try:
-            from YR_MPE.sequence_editor import SequenceAlignmentViewer
-            viewer = SequenceAlignmentViewer(sequences)
-            viewer.show()
-            # 保存viewer引用以防被垃圾回收
-            if not hasattr(self, 'viewers'):
-                self.viewers = []
-            self.viewers.append(viewer)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open sequence viewer: {str(e)}")
-    
-    def open_sequence_files(self):
-        """打开序列文件"""
-        file_dialog = QFileDialog()
-        file_dialog.setFileMode(QFileDialog.ExistingFile)        
-        file_dialog.setNameFilter("FASTA files (*.fas *.fasta *.fa *.fna);;Phylip files (*.phy);;NEXUS files (*.nex *.nexus)")
-        file_types = {
-            "fas": "fasta",
-            "fasta": "fasta",
-            "fa": "fasta",
-            "fna": "fasta",
-            "phy": "phylip",
-            "nex": "nexus",
-            "nexus": "nexus",
-        }
-        file_dialog.exec_()
-        files = file_dialog.selectedFiles()
-        if len(files) == 0:
-            return
-        file = files[0]
-        try:
-            from Bio import SeqIO
-            file_format = file_types[file.split(".")[-1].lower()]
-            sequences = list(SeqIO.parse(file, file_format))
-            
-            if not sequences:
-                QMessageBox.warning(self, "Error", "No sequences found in the file")
-                return
-            
-            self.add_sequence(sequences)
-            QMessageBox.information(self, "Success", f"Successfully loaded {len(sequences)} sequence(s) from {file}")
-            
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"Error opening file: {e}")
-            return
-    
-    def open_model_selection(self):
-        """打开模型选择"""
-        if len(self.items["alignments"]) == 0:
-            QMessageBox.warning(self, "Warning", "Please load an alignment first.")
-            return
-        self.open_modelfinder_wrapper()
-    
-    def open_distance_calculation(self):
-        """打开距离计算"""
-        if len(self.items["alignments"]) == 0:
-            QMessageBox.warning(self, "Warning", "Please load an alignment first.")
-            return
-        self.open_ml_distance_wrapper()
-    
-    def open_tree_building(self):
-        """打开树构建"""
-        if len(self.items["alignments"]) == 0:
-            QMessageBox.warning(self, "Warning", "Please load an alignment first.")
-            return
-        self.open_iqtree_wrapper()
+        self.grid_layout.addWidget(alignment_button, 0, len(self.items["alignments"])-1)
     
     def add_model(self, model):
         # 检查是单个模型还是模型表
         if isinstance(model, dict) and "type" in model and model["type"] == "model_table":
-            # 处理完整模型表
+            # 处理模型表
+            model_name = model.get("name", "Model Table")
             self.items["models"].append(model)
-            # 添加模型表图标到工作区
-            model_icon = QIcon(os.path.join(self.plugin_path, "icons/file/model.svg"))
+            
+            # 确保grid_layout存在
+            if not hasattr(self, 'grid_layout'):
+                # disable hint label
+                self.workspace_hint.setVisible(False)
+                # add a grid layout
+                self.grid_widget = QWidget()
+                self.grid_layout = QGridLayout()
+                self.grid_widget.setLayout(self.grid_layout)
+                self.main_layout.addWidget(self.grid_widget)
+                self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            
+            # add a 'model' icon to workspace
+            model_icon = self.resource_factory.get_icon("file/model.svg")
             model_button = QToolButton()
             model_button.setIcon(model_icon)
             model_button.setIconSize(QSize(45, 45))
-            model_button.setToolTip(f"Model Table ({len(model['data'])} models)")
-            model_button.clicked.connect(lambda: self.view_model_table(model))
-            self.grid_layout.addWidget(model_button, 1, 0)
+            model_button.setToolTip(f"Substitution Model: {model_name}")
+            model_button.clicked.connect(lambda: self.view_model_result(model))
+            self.grid_layout.addWidget(model_button, 1, len(self.items["models"])-1)
         else:
-            # 处理单个模型（向后兼容）
+            # 处理单个模型（保持向后兼容）
+            model_name = getattr(model, 'model_name', 'Unknown Model')
             self.items["models"].append(model)
-            # add a model icon to workspace
-            model_icon = QIcon(os.path.join(self.plugin_path, "icons/file/model.svg"))
+            
+            # 确保grid_layout存在
+            if not hasattr(self, 'grid_layout'):
+                # disable hint label
+                self.workspace_hint.setVisible(False)
+                # add a grid layout
+                self.grid_widget = QWidget()
+                self.grid_layout = QGridLayout()
+                self.grid_widget.setLayout(self.grid_layout)
+                self.main_layout.addWidget(self.grid_widget)
+                self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            
+            # add a 'model' icon to workspace
+            model_icon = self.resource_factory.get_icon("file/model.svg")
             model_button = QToolButton()
             model_button.setIcon(model_icon)
             model_button.setIconSize(QSize(45, 45))
-            self.grid_layout.addWidget(model_button, 1, 0)
+            model_button.setToolTip(f"Substitution Model: {model_name}")
+            model_button.clicked.connect(lambda: self.view_model_result(model))
+            self.grid_layout.addWidget(model_button, 1, len(self.items["models"])-1)
     
     def add_distance(self, distance):
         # add a distance to items["distances"]
         self.items["distances"].append(distance)
-        # add a distance icon to workspace
-        distance_icon = QIcon(os.path.join(self.plugin_path, "icons/file/distance.svg"))
+        
+        # 确保grid_layout存在
+        if not hasattr(self, 'grid_layout'):
+            # disable hint label
+            self.workspace_hint.setVisible(False)
+            # add a grid layout
+            self.grid_widget = QWidget()
+            self.grid_layout = QGridLayout()
+            self.grid_widget.setLayout(self.grid_layout)
+            self.main_layout.addWidget(self.grid_widget)
+            self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        
+        # add a 'distance' icon to workspace
+        distance_icon = self.resource_factory.get_icon("file/distance.svg")
         distance_button = QToolButton()
         distance_button.setIcon(distance_icon)
         distance_button.setIconSize(QSize(45, 45))
-        distance_button.setToolTip(f"Distance Matrix")
-        distance_button.clicked.connect(lambda: self.show_distance_matrix(distance))
+        distance_button.setToolTip(f"Pairwise Distance Matrix")
+        distance_button.clicked.connect(lambda: self.view_distance_matrix(distance))
         self.grid_layout.addWidget(distance_button, 2, len(self.items["distances"])-1)
     
     def add_phylogeny(self, phylogeny):
         # add a phylogeny to items["phylogenies"]
         self.items["phylogenies"].append(phylogeny)
         # add a phylogeny icon to workspace
-        phylogeny_icon = QIcon(os.path.join(self.plugin_path, "icons/file/phylogeny.svg"))
+        phylogeny_icon = self.resource_factory.get_icon("file/phylogeny.svg")
         phylogeny_button = QToolButton()
         phylogeny_button.setIcon(phylogeny_icon)
         phylogeny_button.setIconSize(QSize(45, 45))
         phylogeny_button.setToolTip(f"Phylogenetic Tree")
         phylogeny_button.clicked.connect(self.open_icytree_wrapper)
-        self.grid_layout.addWidget(phylogeny_button, 4, len(self.items["phylogenies"])-1)
+        self.grid_layout.addWidget(phylogeny_button, 3, len(self.items["phylogenies"])-1)
     
     def add_dataset(self, dataset):
         """添加数据集到工作区"""
         # add a dataset to items["datasets"]
         self.items["datasets"].append(dataset)
+        
+        # 确保grid_layout存在
+        if not hasattr(self, 'grid_layout'):
+            # disable hint label
+            self.workspace_hint.setVisible(False)
+            # add a grid layout
+            self.grid_widget = QWidget()
+            self.grid_layout = QGridLayout()
+            self.grid_widget.setLayout(self.grid_layout)
+            self.main_layout.addWidget(self.grid_widget)
+            self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        
         # add a dataset icon to workspace
         dataset_icon = self.resource_factory.get_icon("file/dataset.svg")
         dataset_button = QToolButton()
         dataset_button.setIcon(dataset_icon)
         dataset_button.setIconSize(QSize(45, 45))
-        dataset_button.setToolTip(f"Dataset: {dataset.dataset_name}")
-        # TODO: 连接点击事件打开Dataset Manager
-        self.grid_layout.addWidget(dataset_button, 3, len(self.items["datasets"])-1)
+        dataset_button.setToolTip(f"Dataset: {getattr(dataset, 'dataset_name', 'Unnamed Dataset')}")
+        # Dataset数据项应该显示在数据区域，使用合适的行号
+        # 根据老版实现，Dataset应该有自己的行（比如第4行，因为0-3已被其他功能占用）
+        dataset_row = 4
+        
+        # 实现单击选中，双击查看的交互逻辑
+        dataset_button.doubleClicked = False
+        dataset_button.mousePressEvent = lambda event, btn=dataset_button: self._on_dataset_mouse_press(btn, event)
+        dataset_button.mouseReleaseEvent = lambda event, btn=dataset_button, ds=dataset: self._on_dataset_mouse_release(btn, ds, event)
+        dataset_button.mouseDoubleClickEvent = lambda event, btn=dataset_button: self._on_dataset_double_click(btn, event)
+        
+        self.grid_layout.addWidget(dataset_button, dataset_row, len(self.items["datasets"])-1)
+        
+        # 存储dataset引用到按钮上，便于后续访问
+        dataset_button.dataset_ref = dataset
     
-    def add_model_to_workspace(self, model_data):
-        """添加模型结果到工作区"""
-        # 检查是单个模型还是模型表
-        if "type" in model_data and model_data["type"] == "model_table":
-            # 处理完整模型表
-            self.items["models"].append(model_data)
-            # 添加模型表图标到工作区
-            model_icon = QIcon(os.path.join(self.plugin_path, "icons/file/model.svg"))
+    def refresh_workspace_layout(self):
+        """刷新工作区布局，重新创建所有按钮"""
+        # 清除现有的grid_layout内容
+        if hasattr(self, 'grid_widget'):
+            self.main_layout.removeWidget(self.grid_widget)
+            self.grid_widget.deleteLater()
+            del self.grid_widget
+            del self.grid_layout
+        
+        # 重新创建grid_layout
+        self.grid_widget = QWidget()
+        self.grid_layout = QGridLayout()
+        self.grid_widget.setLayout(self.grid_layout)
+        self.main_layout.addWidget(self.grid_widget)
+        self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        
+        # 重新添加所有项目
+        # 添加alignments
+        for i, alignment in enumerate(self.items["alignments"]):
+            alignment_icon = self.resource_factory.get_icon("file/sequence.svg")
+            alignment_button = QToolButton()
+            alignment_button.setIcon(alignment_icon)
+            alignment_button.setIconSize(QSize(45, 45))
+            alignment_button.clicked.connect(lambda checked, seq=alignment: self.view_alignment(seq))
+            self.grid_layout.addWidget(alignment_button, 0, i)
+        
+        # 添加models
+        for i, model in enumerate(self.items["models"]):
+            model_icon = self.resource_factory.get_icon("file/model.svg")
             model_button = QToolButton()
             model_button.setIcon(model_icon)
             model_button.setIconSize(QSize(45, 45))
-            model_button.setToolTip(f"Model Table ({len(model_data['data'])} models)")
-            model_button.clicked.connect(lambda: self.view_model_table(model_data))
-            self.grid_layout.addWidget(model_button, 1, 0)
-        else:
-            # 处理单个模型（向后兼容）
-            self.items["models"].append(model_data)
-            # 添加模型图标到工作区
-            model_icon = QIcon(os.path.join(self.plugin_path, "icons/file/model.svg"))
-            model_button = QToolButton()
-            model_button.setIcon(model_icon)
-            model_button.setIconSize(QSize(45, 45))
-            model_button.setToolTip(f"Model: {model_data['Model']}\n"
-                                   f"LogL: {model_data['LogL']}\n"
-                                   f"AIC: {model_data['AIC']}\n"
-                                   f"BIC: {model_data['BIC']}")
-            self.grid_layout.addWidget(model_button, 1, 0)
+            model_button.setToolTip(f"Substitution Model: {getattr(model, 'model_name', 'Unknown Model')}")
+            model_button.clicked.connect(lambda checked, m=model: self.view_model_result(m))
+            self.grid_layout.addWidget(model_button, 1, i)
+        
+        # 添加distances
+        for i, distance in enumerate(self.items["distances"]):
+            distance_icon = self.resource_factory.get_icon("file/distance.svg")
+            distance_button = QToolButton()
+            distance_button.setIcon(distance_icon)
+            distance_button.setIconSize(QSize(45, 45))
+            distance_button.setToolTip(f"Pairwise Distance Matrix")
+            distance_button.clicked.connect(lambda checked, d=distance: self.view_distance_matrix(d))
+            self.grid_layout.addWidget(distance_button, 2, i)
+        
+        # 添加phylogenies
+        for i, phylogeny in enumerate(self.items["phylogenies"]):
+            phylogeny_icon = self.resource_factory.get_icon("file/phylogeny.svg")
+            phylogeny_button = QToolButton()
+            phylogeny_button.setIcon(phylogeny_icon)
+            phylogeny_button.setIconSize(QSize(45, 45))
+            phylogeny_button.setToolTip(f"Phylogenetic Tree")
+            phylogeny_button.clicked.connect(self.open_icytree_wrapper)
+            self.grid_layout.addWidget(phylogeny_button, 3, i)
+        
+        # 添加datasets
+        for i, dataset in enumerate(self.items["datasets"]):
+            dataset_icon = self.resource_factory.get_icon("file/dataset.svg")
+            dataset_button = QToolButton()
+            dataset_button.setIcon(dataset_icon)
+            dataset_button.setIconSize(QSize(45, 45))
+            dataset_button.setToolTip(f"Dataset: {getattr(dataset, 'dataset_name', 'Unnamed Dataset')}")
+            dataset_row = 4
+            
+            # 实现单击选中，双击查看的交互逻辑
+            dataset_button.doubleClicked = False
+            dataset_button.mousePressEvent = lambda event, btn=dataset_button: self._on_dataset_mouse_press(btn, event)
+            dataset_button.mouseReleaseEvent = lambda event, btn=dataset_button, ds=dataset: self._on_dataset_mouse_release(btn, ds, event)
+            dataset_button.mouseDoubleClickEvent = lambda event, btn=dataset_button: self._on_dataset_double_click(btn, event)
+            
+            self.grid_layout.addWidget(dataset_button, dataset_row, i)
+            # 存储dataset引用到按钮上，便于后续访问
+            dataset_button.dataset_ref = dataset
+    
+    def _on_dataset_mouse_press(self, button, event):
+        """Dataset按钮鼠标按下事件"""
+        button.doubleClicked = False
+        from PyQt5.QtWidgets import QToolButton
+        QToolButton.mousePressEvent(button, event)
+    
+    def _on_dataset_mouse_release(self, button, dataset, event):
+        """Dataset按钮鼠标释放事件"""
+        if not button.doubleClicked:
+            # 单击：选中Dataset功能模式（这里可以添加选中逻辑）
+            pass
+        from PyQt5.QtWidgets import QToolButton
+        QToolButton.mouseReleaseEvent(button, event)
+    
+    def _on_dataset_double_click(self, button, event):
+        """Dataset按钮双击事件"""
+        button.doubleClicked = True
+        # 直接使用存储的dataset引用
+        if hasattr(button, 'dataset_ref'):
+            dataset = button.dataset_ref
+            self.open_dataset_manager_for_dataset(dataset)
+        from PyQt5.QtWidgets import QToolButton
+        QToolButton.mouseDoubleClickEvent(button, event)
+    
+    def open_dataset_manager_for_dataset(self, dataset):
+        """打开Dataset Manager查看特定数据集"""
+        try:
+            # 使用PluginFactory获取DatasetManager插件
+            dataset_manager = self.parent_window.plugin_factory.get_dataset_manager()
+            
+            # 保存引用防止被垃圾回收
+            if not hasattr(self.parent_window, 'dataset_managers'):
+                self.parent_window.dataset_managers = []
+            self.parent_window.dataset_managers.append(dataset_manager)
+            
+            dialog = dataset_manager
+            
+            # 设置必要的参数
+            dialog.dataset_name = getattr(dataset, 'dataset_name', 'Dataset')
+            dialog.plugin_factory = self.parent_window.plugin_factory
+            dialog.workspace = self
+            
+            # 如果dataset包含items数据，加载到dialog中
+            if hasattr(dataset, 'items') and dataset.items:
+                dialog.dataset_items = dataset.items
+                # 重新填充表格
+                dialog.table.setRowCount(0)
+                for item in dataset.items:
+                    dialog.add_dataset_to_table(item)
+            
+            # 执行对话框
+            dialog.show()  # 改为非模态显示
+            # 无论用户如何关闭对话框，都保存数据
+            # 因为DatasetManager没有明确的"Cancel"按钮
+            if hasattr(dialog, 'dataset_items'):
+                dataset.items = dialog.dataset_items
+                    
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open Dataset Manager: {str(e)}")
+    
+    def view_alignment(self, alignment):
+        """使用SeqViewer插件查看比对结果"""
+        try:
+            from YR_MPE.sequence_editor import SequenceAlignmentViewer
+            viewer = SequenceAlignmentViewer(alignment)
+            viewer.show()
+            # 保存viewer引用以防被垃圾回收
+            if not hasattr(self, 'viewers'):
+                self.viewers = []
+            self.viewers.append(viewer)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open alignment viewer: {str(e)}")
+    
+    def view_model_result(self, model_result):
+        """查看模型选择结果"""
+        try:
+            # 创建一个简单的对话框显示模型结果
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Model Selection Result")
+            dialog.resize(600, 400)
+            
+            layout = QVBoxLayout()
+            text_edit = QTextEdit()
+            text_edit.setReadOnly(True)
+            
+            # 格式化模型结果显示
+            if isinstance(model_result, dict) and "type" in model_result and model_result["type"] == "model_table":
+                # 显示模型表
+                content = f"Model Selection Results for {model_result.get('name', 'Unknown')}\n\n"
+                content += "Rank\tModel\tAIC\tBIC\tWeight\n"
+                content += "-" * 50 + "\n"
+                for i, model_info in enumerate(model_result.get("models", [])):
+                    content += f"{i+1}\t{model_info.get('model', 'N/A')}\t{model_info.get('aic', 'N/A')}\t{model_info.get('bic', 'N/A')}\t{model_info.get('weight', 'N/A')}\n"
+            else:
+                # 显示单个模型
+                content = f"Selected Model: {getattr(model_result, 'model_name', 'Unknown')}\n"
+                content += f"Details: {str(model_result)}"
+            
+            text_edit.setText(content)
+            layout.addWidget(text_edit)
+            
+            close_button = QPushButton("Close")
+            close_button.clicked.connect(dialog.accept)
+            layout.addWidget(close_button)
+            
+            dialog.setLayout(layout)
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to display model result: {str(e)}")
+    
+    def view_distance_matrix(self, distance_matrix):
+        """查看距离矩阵"""
+        try:
+            # 创建一个简单的对话框显示距离矩阵
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Distance Matrix")
+            dialog.resize(600, 400)
+            
+            layout = QVBoxLayout()
+            text_edit = QTextEdit()
+            text_edit.setReadOnly(True)
+            
+            # 格式化距离矩阵显示
+            content = "Pairwise Distance Matrix\n\n"
+            if hasattr(distance_matrix, 'matrix') and hasattr(distance_matrix, 'taxa'):
+                # 假设distance_matrix有matrix和taxa属性
+                taxa = distance_matrix.taxa
+                matrix = distance_matrix.matrix
+                content += "\t" + "\t".join(taxa) + "\n"
+                for i, taxon in enumerate(taxa):
+                    row = [taxon] + [f"{matrix[i][j]:.4f}" for j in range(len(taxa))]
+                    content += "\t".join(row) + "\n"
+            else:
+                content += str(distance_matrix)
+            
+            text_edit.setText(content)
+            layout.addWidget(text_edit)
+            
+            close_button = QPushButton("Close")
+            close_button.clicked.connect(dialog.accept)
+            layout.addWidget(close_button)
+            
+            dialog.setLayout(layout)
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to display distance matrix: {str(e)}")
     
     def open_icytree_wrapper(self):
-        from YR_MPE.icytree import IcyTreePlugin
-        from PyQt5.QtWidgets import QDialog
-        dialog = QDialog()
-        dialog.setWindowTitle("IcyTree - YR-MPEA")
-        dialog.setWindowIcon(self.resource_factory.get_icon("software/icytree.svg"))
-        dialog.setMinimumSize(800, 600)
-        dialog.setLayout(QVBoxLayout())
-        icytree_wrapper = IcyTreePlugin()
-        icytree_wrapper.set_newick_string(self.items["phylogenies"][-1]['data'][0]['content'])
-        dialog.layout().addWidget(icytree_wrapper)
-        dialog.exec_()
-    def view_model_table(self, model_data):
-        """查看模型表"""
-        from PyQt5.QtWidgets import QDialog, QTableWidget, QTableWidgetItem, QVBoxLayout
-        from PyQt5.QtCore import Qt
-        import json
-        
-        dialog = QDialog()
-        dialog.setWindowTitle("Model Selection Results")
-        dialog.setMinimumSize(800, 400)
-        layout = QVBoxLayout()
-        dialog.setLayout(layout)
-        
-        # 创建菜单栏
-        menubar = QMenuBar(dialog)
-        layout.setMenuBar(menubar)
-        
-        # 创建Export菜单
-        export_menu = QMenu("&Export", dialog)
-        menubar.addMenu(export_menu)
-        
-        # 创建表格
-        table = QTableWidget()
-        table.setColumnCount(8)
-        table.setHorizontalHeaderLabels([
-            "Model", "LogL", "AIC", "w-AIC", "AICc", "w-AICc", "BIC", "w-BIC"
-        ])
-        table.setRowCount(len(model_data['data']))
-        
-        # 填充数据
-        for row, model in enumerate(model_data['data']):
-            for col, (key, value) in enumerate(model.items()):
-                item = QTableWidgetItem(value)
-                if key not in ['Model']:
-                    # 数值列右对齐
-                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                table.setItem(row, col, item)
-        
-        # 调整列宽
-        table.resizeColumnsToContents()
-        table.setSortingEnabled(True)
-        
-        # 添加导出选项
-        export_csv_action = QAction("&To CSV", dialog)
-        export_csv_action.triggered.connect(lambda: self.export_model_table_to_csv(table, model_data))
-        export_menu.addAction(export_csv_action)
-        
-        export_xlsx_action = QAction("To &XLSX", dialog)
-        export_xlsx_action.triggered.connect(lambda: self.export_model_table_to_xlsx(table, model_data))
-        export_menu.addAction(export_xlsx_action)
-        
-        layout.addWidget(table)
-        dialog.exec_()
-    
-    def view_alignment(self, sequences):
-        """查看序列比对结果"""
-        from .sequence_editor import SequenceAlignmentViewer
-        # convert sequences to diction format: {"header", "sequence"}
-        sequences = [{"header": seq.name, "sequence": str(seq.seq)} for seq in sequences]
-        viewer = SequenceAlignmentViewer(sequences)
-        viewer.show()
-        # 保存viewer引用以防被垃圾回收
-        if not hasattr(self, 'viewers'):
-            self.viewers = []
-        self.viewers.append(viewer)
-
-    def show_phylogeny(self):
-        """显示系统发育树"""
-        if not self.items["phylogenies"]:
-            QMessageBox.information(self, "Info", "No phylogeny data available.")
-            return
-            
-        # 显示系统发育树
-        from .icytree import IcyTreeViewer
-        viewer = IcyTreeViewer()
-        print(self.items["phylogenies"][0])
-        viewer.load_tree(self.items["phylogenies"][0])
-
-    def show_distance_matrix(self, distance_data=None):
-        """显示距离矩阵"""
-        if not distance_data:
-            QMessageBox.information(self, "Info", "No distance matrix data available.")
-            return
-            
-        # 创建对话框显示距离矩阵
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
-        from PyQt5.QtCore import Qt
-        from PyQt5.QtGui import QFont
-        
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Distance Matrix Visualization")
-        dialog.resize(800, 600)
-        layout = QVBoxLayout(dialog)
-        
-        # 创建菜单栏
-        menubar = QMenuBar(dialog)
-        layout.setMenuBar(menubar)
-        
-        # 创建Export菜单
-        export_menu = QMenu("&Export", dialog)
-        menubar.addMenu(export_menu)
-        
-        # 添加导出选项
-        export_csv_action = QAction("&To CSV", dialog)
-        export_csv_action.triggered.connect(lambda: self.export_distance_matrix_to_csv(table, sequence_names))
-        export_menu.addAction(export_csv_action)
-        
-        export_xlsx_action = QAction("To &XLSX", dialog)
-        export_xlsx_action.triggered.connect(lambda: self.export_distance_matrix_to_xlsx(table, sequence_names))
-        export_menu.addAction(export_xlsx_action)
-        
-        # 创建表格控件
-        table = QTableWidget()
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        
-        # 获取第一个距离矩阵数据
-        content = distance_data['data'][0]['content']
-        
-        # 解析距离矩阵内容
-        lines = content.strip().split('\n')
-        if not lines:
-            QMessageBox.warning(self, "Warning", "Invalid distance matrix format.")
-            return
-            
-        # 第一行是序列数量
+        """打开IcyTree查看系统发育树"""
         try:
-            num_sequences = int(lines[0].strip())
-        except ValueError:
-            QMessageBox.warning(self, "Warning", "Invalid distance matrix format: first line should be the number of sequences.")
-            return
-            
-        # 后续行是距离数据
-        if len(lines) < num_sequences + 1:
-            QMessageBox.warning(self, "Warning", "Incomplete distance matrix data.")
-            return
-            
-        # 获取序列名称和距离数据
-        sequence_names = []
-        matrix_values = []
-        
-        for i in range(1, num_sequences + 1):
-            parts = lines[i].split()
-            if len(parts) < 2:
-                QMessageBox.warning(self, "Warning", f"Invalid distance matrix format at line {i+1}.")
-                return
-                
-            sequence_names.append(parts[0])
-            try:
-                # 剩余部分都是距离值
-                row_values = [float(val) for val in parts[1:]]
-                matrix_values.append(row_values)
-            except ValueError:
-                QMessageBox.warning(self, "Warning", f"Invalid numeric value in distance matrix at line {i+1}.")
-                return
-        
-        # 设置表格行列数
-        table.setRowCount(num_sequences)
-        table.setColumnCount(num_sequences)
-        
-        # 设置表头
-        for i in range(num_sequences):
-            table.setHorizontalHeaderItem(i, QTableWidgetItem(sequence_names[i]))
-            table.setVerticalHeaderItem(i, QTableWidgetItem(sequence_names[i]))
-        
-        # 填充数据
-        for i in range(num_sequences):
-            for j in range(num_sequences):
-                if i == j:
-                    item = QTableWidgetItem("0.0000")
-                else:
-                    # 注意矩阵索引，因为第一列是序列名
-                    value = matrix_values[i][j]
-                    item = QTableWidgetItem(f"{value:.4f}")
-                    
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                table.setItem(i, j, item)
-        
-        # 设置表格属性
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        table.setSizeAdjustPolicy(QTableWidget.AdjustToContents)
-        
-        layout.addWidget(table)
-        dialog.exec_()
-        
-    def export_distance_matrix_to_csv(self, table, sequence_names):
-        """导出距离矩阵到CSV文件"""
-        file_path, _ = QFileDialog.getSaveFileName(None, "Save Distance Matrix to CSV", "", "CSV Files (*.csv)")
-        if file_path:
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    # 写入表头
-                    f.write("," + ",".join(sequence_names) + "\n")
-                    
-                    # 写入数据行
-                    for i in range(table.rowCount()):
-                        row_data = [sequence_names[i]]
-                        for j in range(table.columnCount()):
-                            item = table.item(i, j)
-                            row_data.append(item.text() if item else "")
-                        f.write(",".join(row_data) + "\n")
-                
-                QMessageBox.information(None, "Success", f"Distance matrix exported to {file_path}")
-            except Exception as e:
-                QMessageBox.critical(None, "Error", f"Failed to export distance matrix:\n{str(e)}")
-                
-    def export_distance_matrix_to_xlsx(self, table, sequence_names):
-        """导出距离矩阵到XLSX文件"""
-        try:
-            import pandas as pd
-            import numpy as np
-            
-            file_path, _ = QFileDialog.getSaveFileName(None, "Save Distance Matrix to Excel", "", "Excel Files (*.xlsx)")
-            if file_path:
-                # 创建数据矩阵
-                data = []
-                for i in range(table.rowCount()):
-                    row_data = []
-                    for j in range(table.columnCount()):
-                        item = table.item(i, j)
-                        row_data.append(item.text() if item else "")
-                    data.append(row_data)
-                
-                # 创建DataFrame
-                df = pd.DataFrame(data, columns=sequence_names, index=sequence_names)
-                
-                # 保存到Excel
-                df.to_excel(file_path)
-                QMessageBox.information(None, "Success", f"Distance matrix exported to {file_path}")
-                
-        except ImportError:
-            QMessageBox.warning(None, "Warning", "pandas library is required for Excel export. Please install pandas to use this feature.")
+            plugin_entry = self.parent_window.plugin_factory.get_icytree_plugin()
+            dialog = plugin_entry.run()
+            dialog.exec_()
         except Exception as e:
-            QMessageBox.critical(None, "Error", f"Failed to export distance matrix:\n{str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to open IcyTree: {str(e)}")
 
 class YR_MPEA_entry:
     def run(self):
