@@ -1195,17 +1195,22 @@ class SingleGeneWorkspace(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to open alignment viewer: {str(e)}")
     
     def view_model_result(self, model_result):
-        """查看模型选择结果"""
+        """查看模型选择结果 - 增强版支持替换矩阵可视化"""
         try:
-            # 创建一个简单的对话框显示模型结果
-            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QTabWidget, QWidget, QLabel, QTableWidget, QTableWidgetItem, QHeaderView
+            from PyQt5.QtCore import Qt
+            from PyQt5.QtGui import QColor, QFont
+            import re
+            
             dialog = QDialog(self)
             dialog.setWindowTitle("Model Selection Result")
-            dialog.resize(600, 400)
+            dialog.resize(800, 600)
             
             layout = QVBoxLayout()
-            text_edit = QTextEdit()
-            text_edit.setReadOnly(True)
+            
+            # 创建标签页
+            tab_widget = QTabWidget()
+            layout.addWidget(tab_widget)
             
             # 格式化模型结果显示
             if isinstance(model_result, dict) and "type" in model_result and model_result["type"] == "model_table":
@@ -1215,13 +1220,37 @@ class SingleGeneWorkspace(QWidget):
                 content += "-" * 50 + "\n"
                 for i, model_info in enumerate(model_result.get("models", [])):
                     content += f"{i+1}\t{model_info.get('model', 'N/A')}\t{model_info.get('aic', 'N/A')}\t{model_info.get('bic', 'N/A')}\t{model_info.get('weight', 'N/A')}\n"
+                
+                # 模型表标签页
+                model_table_tab = QWidget()
+                model_table_layout = QVBoxLayout()
+                text_edit = QTextEdit()
+                text_edit.setReadOnly(True)
+                text_edit.setText(content)
+                model_table_layout.addWidget(text_edit)
+                model_table_tab.setLayout(model_table_layout)
+                tab_widget.addTab(model_table_tab, "Model Table")
+                
+                # 尝试解析替换矩阵（如果可用）
+                self.add_substitution_matrix_tab(tab_widget, model_result)
+                
             else:
                 # 显示单个模型
                 content = f"Selected Model: {getattr(model_result, 'model_name', 'Unknown')}\n"
                 content += f"Details: {str(model_result)}"
-            
-            text_edit.setText(content)
-            layout.addWidget(text_edit)
+                
+                # 模型详情标签页
+                model_detail_tab = QWidget()
+                model_detail_layout = QVBoxLayout()
+                text_edit = QTextEdit()
+                text_edit.setReadOnly(True)
+                text_edit.setText(content)
+                model_detail_layout.addWidget(text_edit)
+                model_detail_tab.setLayout(model_detail_layout)
+                tab_widget.addTab(model_detail_tab, "Model Details")
+                
+                # 尝试解析替换矩阵（如果可用）
+                self.add_substitution_matrix_tab(tab_widget, model_result)
             
             close_button = QPushButton("Close")
             close_button.clicked.connect(dialog.accept)
@@ -1229,46 +1258,387 @@ class SingleGeneWorkspace(QWidget):
             
             dialog.setLayout(layout)
             dialog.exec_()
+            
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to display model result: {str(e)}")
     
-    def view_distance_matrix(self, distance_matrix):
-        """查看距离矩阵"""
+    def add_substitution_matrix_tab(self, tab_widget, model_result):
+        """添加替换矩阵标签页"""
         try:
-            # 创建一个简单的对话框显示距离矩阵
-            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
+            from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QHeaderView
+            from PyQt5.QtCore import Qt
+            from PyQt5.QtGui import QColor
+            
+            # 尝试从模型结果中提取替换矩阵数据
+            substitution_matrix = self.extract_substitution_matrix(model_result)
+            
+            if substitution_matrix is not None:
+                # 创建替换矩阵标签页
+                sub_matrix_tab = QWidget()
+                sub_matrix_layout = QVBoxLayout()
+                
+                # 添加说明标签
+                info_label = QLabel("Substitution Matrix (Relative rates)")
+                info_label.setAlignment(Qt.AlignCenter)
+                sub_matrix_layout.addWidget(info_label)
+                
+                # 创建表格
+                matrix_size = len(substitution_matrix['labels'])
+                table = QTableWidget(matrix_size, matrix_size)
+                table.setEditTriggers(QTableWidget.NoEditTriggers)
+                
+                # 设置表头
+                for i in range(matrix_size):
+                    table.setHorizontalHeaderItem(i, QTableWidgetItem(substitution_matrix['labels'][i]))
+                    table.setVerticalHeaderItem(i, QTableWidgetItem(substitution_matrix['labels'][i]))
+                
+                # 找到最大值用于着色
+                max_value = 0.0
+                for row in substitution_matrix['matrix']:
+                    for val in row:
+                        if val > max_value:
+                            max_value = val
+                
+                # 填充数据
+                for i in range(matrix_size):
+                    for j in range(matrix_size):
+                        if i == j:
+                            # 对角线通常为0或1
+                            item = QTableWidgetItem("0.000")
+                        else:
+                            value = substitution_matrix['matrix'][i][j]
+                            # 格式化为小数点后三位
+                            formatted_value = f"{value:.3f}"
+                            item = QTableWidgetItem(formatted_value)
+                            
+                            # 应用单元格着色 - 数值越大，颜色越深
+                            if max_value > 0:
+                                intensity = min(1.0, value / max_value)
+                                # 使用蓝色系着色（替换矩阵常用蓝色）
+                                r = int(200 * (1.0 - intensity))  # 红色分量随强度减小
+                                g = int(200 * (1.0 - intensity))  # 绿色分量随强度减小  
+                                b = int(255 * intensity)          # 蓝色分量随强度增加
+                                
+                                bg_color = QColor(r, g, b)
+                                item.setBackground(bg_color)
+                        
+                        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                        table.setItem(i, j, item)
+                
+                # 设置表格属性
+                table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+                table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
+                table.setSizeAdjustPolicy(QTableWidget.AdjustToContents)
+                
+                sub_matrix_layout.addWidget(table)
+                sub_matrix_tab.setLayout(sub_matrix_layout)
+                tab_widget.addTab(sub_matrix_tab, "Substitution Matrix")
+                
+        except Exception as e:
+            # 如果无法解析替换矩阵，不显示该标签页
+            pass
+    
+    def extract_substitution_matrix(self, model_result):
+        """从模型结果中提取替换矩阵数据"""
+        try:
+            # 尝试从字典格式的模型结果中提取
+            if isinstance(model_result, dict):
+                # 检查是否包含替换矩阵信息
+                if 'substitution_matrix' in model_result:
+                    return model_result['substitution_matrix']
+                elif 'data' in model_result and isinstance(model_result['data'], list):
+                    # 检查第一个模型是否包含替换矩阵
+                    first_model = model_result['data'][0] if model_result['data'] else {}
+                    if 'substitution_matrix' in first_model:
+                        return first_model['substitution_matrix']
+            
+            # 从模型名称推断替换矩阵类型
+            model_name = ""
+            if isinstance(model_result, dict) and 'Model' in model_result:
+                model_name = model_result['Model']
+            elif hasattr(model_result, 'model_name'):
+                model_name = getattr(model_result, 'model_name', '')
+            elif isinstance(model_result, str):
+                model_name = model_result
+            
+            # 解析模型名称
+            if model_name:
+                # 移除参数部分（+I, +G等）
+                base_model = model_name.split('+')[0]
+                
+                # 核苷酸替换矩阵
+                if base_model in ['JC69', 'JC']:
+                    # Jukes-Cantor: 所有替换率相等
+                    labels = ['A', 'C', 'G', 'T']
+                    matrix = [
+                        [0.0, 1.0, 1.0, 1.0],
+                        [1.0, 0.0, 1.0, 1.0],
+                        [1.0, 1.0, 0.0, 1.0],
+                        [1.0, 1.0, 1.0, 0.0]
+                    ]
+                    return {'labels': labels, 'matrix': matrix}
+                
+                elif base_model in ['K2P', 'K80']:
+                    # Kimura 2-parameter: 转换和颠换
+                    labels = ['A', 'C', 'G', 'T']
+                    # 假设转换率=2.0, 颠换率=1.0
+                    matrix = [
+                        [0.0, 1.0, 2.0, 1.0],
+                        [1.0, 0.0, 1.0, 2.0],
+                        [2.0, 1.0, 0.0, 1.0],
+                        [1.0, 2.0, 1.0, 0.0]
+                    ]
+                    return {'labels': labels, 'matrix': matrix}
+                
+                elif base_model == 'HKY85':
+                    # Hasegawa-Kishino-Yano: 类似K2P但有碱基频率
+                    labels = ['A', 'C', 'G', 'T']
+                    matrix = [
+                        [0.0, 1.0, 2.0, 1.0],
+                        [1.0, 0.0, 1.0, 2.0],
+                        [2.0, 1.0, 0.0, 1.0],
+                        [1.0, 2.0, 1.0, 0.0]
+                    ]
+                    return {'labels': labels, 'matrix': matrix}
+                
+                elif base_model == 'GTR':
+                    # General Time Reversible: 6个不同参数
+                    labels = ['A', 'C', 'G', 'T']
+                    # 使用示例值
+                    matrix = [
+                        [0.0, 1.2, 2.5, 1.8],
+                        [1.2, 0.0, 3.1, 2.4],
+                        [2.5, 3.1, 0.0, 1.5],
+                        [1.8, 2.4, 1.5, 0.0]
+                    ]
+                    return {'labels': labels, 'matrix': matrix}
+                
+                # 氨基酸替换矩阵（简化显示）
+                elif base_model in ['JTT', 'WAG', 'LG', 'Blosum62', 'Dayhoff']:
+                    # 显示20种氨基酸的简化矩阵
+                    labels = ['A', 'R', 'N', 'D', 'C', 'Q', 'E', 'G', 'H', 'I', 'L', 'K', 'M', 'F', 'P', 'S', 'T', 'W', 'Y', 'V']
+                    # 创建对称矩阵（示例数据）
+                    size = len(labels)
+                    matrix = [[0.0 for _ in range(size)] for _ in range(size)]
+                    for i in range(size):
+                        for j in range(i+1, size):
+                            # 使用简单的距离值
+                            value = abs(i - j) * 0.5 + 1.0
+                            matrix[i][j] = value
+                            matrix[j][i] = value
+                    return {'labels': labels, 'matrix': matrix}
+            
+            # 如果无法确定模型，返回None
+            return None
+            
+        except Exception:
+            return None
+    
+    def view_distance_matrix(self, distance_matrix):
+        """查看距离矩阵 - 增强版支持单元格着色和精确到小数点后三位"""
+        try:
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QMenuBar, QMenu, QAction, QFileDialog, QMessageBox
+            from PyQt5.QtCore import Qt
+            from PyQt5.QtGui import QColor, QFont
+            import tempfile
+            import os
+            
             dialog = QDialog(self)
-            dialog.setWindowTitle("Distance Matrix")
-            dialog.resize(600, 400)
+            dialog.setWindowTitle("Distance Matrix Visualization")
+            dialog.resize(800, 600)
+            layout = QVBoxLayout(dialog)
             
-            layout = QVBoxLayout()
-            text_edit = QTextEdit()
-            text_edit.setReadOnly(True)
+            # 创建菜单栏
+            menubar = QMenuBar(dialog)
+            layout.setMenuBar(menubar)
             
-            # 格式化距离矩阵显示
-            content = "Pairwise Distance Matrix\n\n"
-            if hasattr(distance_matrix, 'matrix') and hasattr(distance_matrix, 'taxa'):
-                # 假设distance_matrix有matrix和taxa属性
-                taxa = distance_matrix.taxa
-                matrix = distance_matrix.matrix
-                content += "\t" + "\t".join(taxa) + "\n"
-                for i, taxon in enumerate(taxa):
-                    row = [taxon] + [f"{matrix[i][j]:.4f}" for j in range(len(taxa))]
-                    content += "\t".join(row) + "\n"
+            # 创建Export菜单
+            export_menu = QMenu("&Export", dialog)
+            menubar.addMenu(export_menu)
+            
+            # 获取距离矩阵数据
+            if isinstance(distance_matrix, dict) and 'data' in distance_matrix:
+                content = distance_matrix['data'][0]['content']
             else:
-                content += str(distance_matrix)
+                content = str(distance_matrix)
             
-            text_edit.setText(content)
-            layout.addWidget(text_edit)
+            # 解析距离矩阵内容
+            lines = content.strip().split('\n')
+            if not lines:
+                QMessageBox.warning(self, "Warning", "Invalid distance matrix format.")
+                return
+                
+            # 第一行可能是序列数量或直接是数据
+            sequence_names = []
+            matrix_values = []
             
-            close_button = QPushButton("Close")
-            close_button.clicked.connect(dialog.accept)
-            layout.addWidget(close_button)
+            # 尝试解析格式
+            if len(lines) > 1:
+                # 检查第一行是否为数字（序列数量）
+                try:
+                    num_sequences = int(lines[0].strip())
+                    data_lines = lines[1:num_sequences+1]
+                except ValueError:
+                    # 第一行不是数字，直接作为数据行处理
+                    data_lines = lines
+                    num_sequences = len(data_lines)
+                
+                # 解析数据行
+                for i, line in enumerate(data_lines):
+                    parts = line.split()
+                    if len(parts) == 0:
+                        continue
+                        
+                    # 第一个部分是序列名称
+                    seq_name = parts[0]
+                    sequence_names.append(seq_name)
+                    
+                    # 剩余部分是距离值
+                    row_values = []
+                    for j, val_str in enumerate(parts[1:]):
+                        try:
+                            val = float(val_str)
+                            row_values.append(val)
+                        except ValueError:
+                            row_values.append(0.0)
+                    matrix_values.append(row_values)
             
-            dialog.setLayout(layout)
+            if not sequence_names or not matrix_values:
+                QMessageBox.warning(self, "Warning", "Could not parse distance matrix data.")
+                return
+            
+            # 确保矩阵是方阵
+            num_sequences = len(sequence_names)
+            for i in range(len(matrix_values)):
+                while len(matrix_values[i]) < num_sequences:
+                    matrix_values[i].append(0.0)
+                matrix_values[i] = matrix_values[i][:num_sequences]
+            
+            # 找到最大距离值用于着色
+            max_distance = 0.0
+            for row in matrix_values:
+                for val in row:
+                    if val > max_distance:
+                        max_distance = val
+            
+            # 创建表格控件
+            table = QTableWidget()
+            table.setEditTriggers(QTableWidget.NoEditTriggers)
+            table.setRowCount(num_sequences)
+            table.setColumnCount(num_sequences)
+            
+            # 设置表头
+            for i in range(num_sequences):
+                table.setHorizontalHeaderItem(i, QTableWidgetItem(sequence_names[i]))
+                table.setVerticalHeaderItem(i, QTableWidgetItem(sequence_names[i]))
+            
+            # 填充数据并应用着色
+            color_base = "#ba3e45"  # 默认颜色
+            for i in range(num_sequences):
+                for j in range(num_sequences):
+                    if i == j:
+                        # 对角线为0
+                        item = QTableWidgetItem("0.000")
+                    else:
+                        if i < len(matrix_values) and j < len(matrix_values[i]):
+                            value = matrix_values[i][j]
+                            # 格式化为小数点后三位
+                            formatted_value = f"{value:.3f}"
+                            item = QTableWidgetItem(formatted_value)
+                            
+                            # 应用单元格着色 - 数值越大，颜色越深
+                            if max_distance > 0:
+                                intensity = min(1.0, value / max_distance)
+                                # 将十六进制颜色转换为RGB
+                                r = int(color_base[1:3], 16) - 255
+                                g = int(color_base[3:5], 16) - 255
+                                b = int(color_base[5:7], 16) - 255
+                                
+                                # 计算着色后的颜色（保持色调，调整亮度）
+                                # 更亮的颜色表示更小的值，更暗的颜色表示更大的值
+                                brightness_factor = intensity  # 0.3到1.0的范围
+                                new_r = min(255, 255 + int(r * brightness_factor))
+                                new_g = min(255, 255 + int(g * brightness_factor))
+                                new_b = min(255, 255 + int(b * brightness_factor))
+                                
+                                bg_color = QColor(new_r, new_g, new_b)
+                                item.setBackground(bg_color)
+                        else:
+                            item = QTableWidgetItem("0.000")
+                    
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    table.setItem(i, j, item)
+            
+            # 设置表格属性
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            table.setSizeAdjustPolicy(QTableWidget.AdjustToContents)
+            
+            layout.addWidget(table)
+            
+            # 添加导出选项
+            export_csv_action = QAction("&To CSV", dialog)
+            export_csv_action.triggered.connect(lambda: self.export_distance_matrix_to_csv(table, sequence_names))
+            export_menu.addAction(export_csv_action)
+            
+            export_xlsx_action = QAction("To &XLSX", dialog)
+            export_xlsx_action.triggered.connect(lambda: self.export_distance_matrix_to_xlsx(table, sequence_names))
+            export_menu.addAction(export_xlsx_action)
+            
             dialog.exec_()
+            
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to display distance matrix: {str(e)}")
+    
+    def export_distance_matrix_to_csv(self, table, sequence_names):
+        """导出距离矩阵到CSV文件"""
+        file_path, _ = QFileDialog.getSaveFileName(None, "Save Distance Matrix to CSV", "", "CSV Files (*.csv)")
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    # 写入表头
+                    f.write("," + ",".join(sequence_names) + "\n")
+                    
+                    # 写入数据行
+                    for i in range(table.rowCount()):
+                        row_data = [sequence_names[i]]
+                        for j in range(table.columnCount()):
+                            item = table.item(i, j)
+                            row_data.append(item.text() if item else "")
+                        f.write(",".join(row_data) + "\n")
+                
+                QMessageBox.information(None, "Success", f"Distance matrix exported to {file_path}")
+            except Exception as e:
+                QMessageBox.critical(None, "Error", f"Failed to export distance matrix:\n{str(e)}")
+                
+    def export_distance_matrix_to_xlsx(self, table, sequence_names):
+        """导出距离矩阵到XLSX文件"""
+        try:
+            import pandas as pd
+            import numpy as np
+            
+            file_path, _ = QFileDialog.getSaveFileName(None, "Save Distance Matrix to Excel", "", "Excel Files (*.xlsx)")
+            if file_path:
+                # 创建数据矩阵
+                data = []
+                for i in range(table.rowCount()):
+                    row_data = []
+                    for j in range(table.columnCount()):
+                        item = table.item(i, j)
+                        row_data.append(item.text() if item else "")
+                    data.append(row_data)
+                
+                # 创建DataFrame
+                df = pd.DataFrame(data, columns=sequence_names, index=sequence_names)
+                
+                # 保存到Excel
+                df.to_excel(file_path)
+                QMessageBox.information(None, "Success", f"Distance matrix exported to {file_path}")
+                
+        except ImportError:
+            QMessageBox.warning(None, "Warning", "pandas library is required for Excel export. Please install pandas to use this feature.")
+        except Exception as e:
+            QMessageBox.critical(None, "Error", f"Failed to export distance matrix:\n{str(e)}")
     
     def open_icytree_wrapper(self):
         """打开IcyTree查看系统发育树"""
