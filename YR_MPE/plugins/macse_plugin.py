@@ -555,6 +555,7 @@ class MACSEPlugin(BasePlugin):
         
         # 保存输出文件和报告
         self.reports = html_files
+        self.alignment_output_files = output_files  # 保存output_files为实例属性
         
         # 显示导入按钮（支持多种来源）
         if self.import_from in ["YR_MPEA", "seq_viewer", "DATASET_MANAGER"]:
@@ -592,8 +593,9 @@ class MACSEPlugin(BasePlugin):
         try:
             # 解析输出文件
             all_sequences = []
-            nt_files = [f for f in self.thread.output_files if '_NT.fasta' in f]
-            aa_files = [f for f in self.thread.output_files if '_AA.fasta' in f]
+            # 使用实例属性而不是线程属性
+            nt_files = [f for f in self.alignment_output_files if '_NT.fasta' in f]
+            aa_files = [f for f in self.alignment_output_files if '_AA.fasta' in f]
             
             if self.batch_mode:
                 # 批量模式
@@ -819,16 +821,12 @@ class MACSEPlugin(BasePlugin):
             QMessageBox.warning(self, "Warning", "Please provide sequence files or sequence text!")
             return
             
-        # 获取工具路径
-        if os.name == 'nt':  # Windows
-            tool_path = os.path.join(self.plugin_path, 'bin', 'macse', 'macse.bat')
-        else:  # Unix-like
-            tool_path = os.path.join(self.plugin_path, 'bin', 'macse', 'macse.sh')
-        
-        if not os.path.exists(tool_path):
-            QMessageBox.critical(self, "Error", f"MACSE executable not found at: {tool_path}")
+        # 获取工具路径 - 使用config方法而不是硬编码
+        if not self.config():
+            QMessageBox.critical(self, "Error", f"MACSE executable configuration not found in config.json")
             return
-            
+        tool_path = self.tool_path
+        
         # 添加控制台消息
         self.add_console_message("Starting MACSE alignment...", "info")
         

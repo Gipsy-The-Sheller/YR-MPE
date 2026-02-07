@@ -68,3 +68,7 @@ class PluginFactory:
     def get_caster_site_plugin(self):
         """获取CASTER-site插件"""
         return self.load_plugin("YR_MPE.plugins.caster_site_plugin", "CasterSitePluginEntry")
+    
+    def get_macse_plugin(self):
+        """获取MACSE插件"""
+        return self.load_plugin("YR_MPE.plugins.macse_plugin", "MACSEPluginEntry")

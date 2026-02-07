@@ -104,7 +104,7 @@ class DatasetManager(QDialog):
         align_menu.addAction(muscle5_action)
         
         macse2_action = QAction("MACSE 2", self)
-        # macse2_action.triggered.connect(self.batch_align_macse2)
+        macse2_action.triggered.connect(self.batch_align_macse2)
         align_menu.addAction(macse2_action)
         
         trim_menu = QMenu("Trim by...", self)
@@ -490,6 +490,10 @@ class DatasetManager(QDialog):
         """批量执行MUSCLE5比对"""
         self._batch_align_with_tool("muscle5")
     
+    def batch_align_macse2(self):
+        """批量执行MACSE2比对"""
+        self._batch_align_with_tool("macse2")
+    
     def batch_trim_gblocks(self):
         """批量执行GBlocks修剪"""
         self._batch_align_with_tool("gblocks")
@@ -523,6 +527,8 @@ class DatasetManager(QDialog):
                 plugin_instance = self.plugin_factory.get_trimal_plugin()
             elif tool_name == "gblocks":
                 plugin_instance = self.plugin_factory.get_gblocks_plugin()
+            elif tool_name == "macse2":
+                plugin_instance = self.plugin_factory.get_macse_plugin()
             else:
                 QMessageBox.critical(self, "Error", f"Plugin {tool_name} not available.")
                 return

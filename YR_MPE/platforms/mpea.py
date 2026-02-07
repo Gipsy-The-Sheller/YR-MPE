@@ -1,6 +1,6 @@
 # YR-MPEA
 #
-# Copyright (c) 2025 Zhi-Jie Xu
+# Copyright (c) 2026 Zhi-Jie Xu
 #
 # This file is part of YR-MPE.
 #
@@ -172,7 +172,10 @@ class YR_MPEA_Widget(QWidget):
         muscle5_action.setIcon(self.resource_factory.get_icon("software/muscle.svg"))
         muscle5_action.triggered.connect(self.open_muscle5_wrapper)
         aligners_menu.addAction(muscle5_action)
-        aligners_menu.addAction(QAction("MACSE", align_button))
+        macse_action = QAction("MACSE", align_button)
+        macse_action.setIcon(self.resource_factory.get_icon("software/macse.svg"))
+        macse_action.triggered.connect(self.open_macse_wrapper)
+        aligners_menu.addAction(macse_action)
         align_action.setMenu(aligners_menu)
 
         trim_menu = QMenu()
@@ -296,15 +299,15 @@ class YR_MPEA_Widget(QWidget):
         phylogeny_button_menu.addAction(tree_viewer_action)
         # phylogeny_button_menu.addSeparator()
 
-        variants_button = QToolButton()
-        variants_button.setText("VARIANTS")
-        variants_button.setIcon(self.resource_factory.get_icon("variants.svg"))
-        variants_button.setPopupMode(QToolButton.InstantPopup)
-        variants_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        variants_button_menu = QMenu()
-        variants_button.setMenu(variants_button_menu)
-        # phylogeny_button.setFixedSize(60, 60)
-        main_toolbar.addWidget(variants_button)
+        # variants_button = QToolButton()
+        # variants_button.setText("VARIANTS")
+        # variants_button.setIcon(self.resource_factory.get_icon("variants.svg"))
+        # variants_button.setPopupMode(QToolButton.InstantPopup)
+        # variants_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        # variants_button_menu = QMenu()
+        # variants_button.setMenu(variants_button_menu)
+        # # phylogeny_button.setFixedSize(60, 60)
+        # main_toolbar.addWidget(variants_button)
 
         coalescent_button = QToolButton()
         coalescent_button.setText("COALESCENCE")
@@ -511,6 +514,31 @@ class YR_MPEA_Widget(QWidget):
         mafft_wrapper = mafft_entry.run(import_from=import_from, import_data=import_data)
         mafft_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
         dialog.layout().addWidget(mafft_wrapper)
+        dialog.exec_()
+    
+    def open_macse_wrapper(self):
+        """打开MACSE插件"""
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle("MACSE - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("software/macse.svg"))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+        
+        # use PluginFactory to get the plugin
+        macse_entry = self.plugin_factory.get_macse_plugin()
+        macse_wrapper = macse_entry.run(import_from=import_from, import_data=import_data)
+        macse_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        dialog.layout().addWidget(macse_wrapper)
         dialog.exec_()
     
     def open_modelfinder_wrapper(self):
