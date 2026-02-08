@@ -113,6 +113,7 @@ class YR_MPEA_Widget(QWidget):
         dataset_menu = QMenu(workspace_button)
         
         new_dataset_action = QAction("New", dataset_menu)
+        new_dataset_action.setIcon(self.resource_factory.get_icon("new.svg"))
         new_dataset_action.triggered.connect(self.create_new_dataset)
         dataset_menu.addAction(new_dataset_action)
         
@@ -144,15 +145,15 @@ class YR_MPEA_Widget(QWidget):
         open_action = QAction("Open Sequence Files", align_button)
         open_action.setIcon(self.resource_factory.get_icon("open.svg"))
         open_action.triggered.connect(self.open_sequence_files)
-        build_action = QAction("New Alignment", align_button)
-        build_action.setIcon(self.resource_factory.get_icon("new.svg"))
+        # build_action = QAction("New Alignment", align_button)
+        # build_action.setIcon(self.resource_factory.get_icon("new.svg"))
         align_action = QAction("Align by...", align_button)
         align_action.setIcon(self.resource_factory.get_icon("alignby.svg"))
         trim_action = QAction("Trim Alignment by...", align_button)
         trim_action.setIcon(self.resource_factory.get_icon("trim.svg"))
         
         align_button.addAction(open_action)
-        align_button.addAction(build_action)
+        # align_button.addAction(build_action)
         align_button.addAction(align_action)
         align_button.addAction(trim_action)
 
@@ -1181,11 +1182,25 @@ class SingleGeneWorkspace(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open Dataset Manager: {str(e)}")
     
-    def view_alignment(self, alignment):
-        """使用SeqViewer插件查看比对结果"""
+    def view_alignment(self, sequences):
+        """查看序列比对结果 - 修复序列格式转换问题"""
         try:
             from YR_MPE.sequence_editor import SequenceAlignmentViewer
-            viewer = SequenceAlignmentViewer(alignment)
+            
+            # 确保序列数据格式正确
+            # 如果是Bio.SeqRecord对象列表，需要转换为字典格式
+            if sequences and hasattr(sequences[0], 'seq'):
+                # 转换Bio.SeqRecord对象为字典格式
+                converted_sequences = []
+                for seq_record in sequences:
+                    seq_dict = {
+                        'header': getattr(seq_record, 'id', getattr(seq_record, 'name', 'Unknown')),
+                        'sequence': str(seq_record.seq)
+                    }
+                    converted_sequences.append(seq_dict)
+                sequences = converted_sequences
+            
+            viewer = SequenceAlignmentViewer(sequences)
             viewer.show()
             # 保存viewer引用以防被垃圾回收
             if not hasattr(self, 'viewers'):
