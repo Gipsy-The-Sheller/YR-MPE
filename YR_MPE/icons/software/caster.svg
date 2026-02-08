@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_1" data-name=" 图层 1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 45 45.7">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #fff;
+      }
+
+      .cls-1, .cls-2, .cls-3 {
+        stroke-linejoin: round;
+        stroke-width: 3px;
+      }
+
+      .cls-1, .cls-3 {
+        stroke: #4e6691;
+      }
+
+      .cls-2 {
+        stroke: #ba3e45;
+      }
+
+      .cls-2, .cls-3 {
+        fill: none;
+      }
+    </style>
+  </defs>
+  <circle class="cls-2" cx="10.9" cy="26.7" r="2.3"/>
+  <circle class="cls-3" cx="35.7" cy="26.7" r="2.3"/>
+  <circle class="cls-2" cx="10.9" cy="40.1" r="2.3"/>
+  <circle class="cls-3" cx="35.7" cy="40.1" r="2.3"/>
+  <line class="cls-2" x1="12.5" y1="27.8" x2="18" y2="33.4"/>
+  <line class="cls-2" x1="18" y1="33.4" x2="12.5" y2="38.9"/>
+  <line class="cls-3" x1="34.5" y1="27.8" x2="28.9" y2="33.4"/>
+  <line class="cls-3" x1="28.9" y1="33.4" x2="34.5" y2="38.9"/>
+  <line class="cls-2" x1="18" y1="33.4" x2="23.5" y2="33.4"/>
+  <line class="cls-3" x1="23.5" y1="33.4" x2="28.9" y2="33.4"/>
+  <polygon class="cls-1" points="2.7 19 42.3 19 30.2 14.7 33 7.4 36.8 9.1 31.7 2.3 17.4 12.2 2.7 19"/>
+</svg>
