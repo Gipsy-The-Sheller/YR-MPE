@@ -197,6 +197,13 @@ class DecentTreePlugin(BasePlugin):
     def setup_output_tab(self):
         layout = QVBoxLayout()
         self.output_tab.setLayout(layout)
+        
+        # Add output info label
+        self.output_info = QLabel("No tree available yet.")
+        self.output_info.setAlignment(Qt.AlignCenter)
+        self.output_info.setStyleSheet("color: #6c757d; padding: 20px;")
+        layout.addWidget(self.output_info)
+        
         self.output_preview = QTextEdit()
         self.output_preview.setReadOnly(True)
         self.output_preview.setFont(QFont("Courier", 10))
@@ -311,6 +318,10 @@ class DecentTreePlugin(BasePlugin):
                 from .icytree import IcyTreePlugin
                 plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
                 icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
+                
+                # Connect to IcyTree status_changed signal to remove output_info when tree is loaded
+                icytree_plugin.status_changed.connect(lambda status: self._on_icytree_status_changed(status, icytree_plugin))
+                
                 icytree_plugin.set_newick_string(tree_content)
                 output_layout = self.output_tab.layout()
                 if output_layout:
@@ -327,6 +338,14 @@ class DecentTreePlugin(BasePlugin):
                 self.add_console_message(error_msg, "error")
         else:
             QMessageBox.warning(self, "Error", f"No tree file found. Generated {len(output_files)} file(s).")
+    
+    def _on_icytree_status_changed(self, status, icytree_plugin):
+        """Handle IcyTree status changes"""
+        if status == "Tree loaded to IcyTree":
+            # Remove the "No tree available yet." label when tree is loaded
+            if hasattr(self, 'output_info') and self.output_info:
+                self.output_info.setParent(None)
+                self.output_info = None
     
     def import_to_platform(self):
         if not hasattr(self, 'current_output_files') or not self.current_output_files:
@@ -366,19 +385,31 @@ class DecentTreePlugin(BasePlugin):
                     # Handle different data formats
                     self.imported_files = []
                     for item in import_data['data']:
-                        if isinstance(item, dict):
-                            if 'filename' in item:
-                                self.imported_files.append(item['filename'])
-                            elif 'content' in item and 'filename' not in item:
-                                # Create temporary file from content
-                                temp_file = self.create_temp_file(suffix='.mldist')
-                                with open(temp_file, 'w', encoding='utf-8') as f:
-                                    f.write(item['content'])
-                                self.temp_files.append(temp_file)
-                                self.imported_files.append(temp_file)
-                        elif isinstance(item, str) and os.path.exists(item):
-                            self.imported_files.append(item)
+                        try:
+                            if isinstance(item, dict):
+                                if 'filename' in item:
+                                    # Check if file exists before adding
+                                    if os.path.exists(item['filename']):
+                                        self.imported_files.append(item['filename'])
+                                elif 'content' in item and 'filename' not in item:
+                                    # Create temporary file from content
+                                    try:
+                                        temp_file = self.create_temp_file(suffix='.mldist')
+                                        with open(temp_file, 'w', encoding='utf-8') as f:
+                                            f.write(str(item['content']))
+                                        self.temp_files.append(temp_file)
+                                        self.imported_files.append(temp_file)
+                                        print(f"Created temp file: {temp_file}")
+                                    except Exception as e:
+                                        print(f"Error creating temp file: {e}")
+                                        continue
+                            elif isinstance(item, str) and os.path.exists(item):
+                                self.imported_files.append(item)
+                        except Exception as e:
+                            print(f"Error processing distance item: {e}")
+                            continue
                     self.import_file = self.imported_files[0] if self.imported_files else None
+                    print(f"Imported files: {self.imported_files}")
             elif import_data['type'] == 'alignment':
                 QMessageBox.warning(self, "Data Type Mismatch", "Alignment data detected. Please use the DISTANCE menu to compute ML distances first before building a tree.")
         else:
@@ -386,7 +417,7 @@ class DecentTreePlugin(BasePlugin):
             self.imported_files = []
         
         # Update UI to show imported files
-        if hasattr(self, 'file_path_edit') and self.imported_files:
+        if self.imported_files and hasattr(self, 'file_path_edit'):
             # Update file path display
             if len(self.imported_files) == 1:
                 self.file_path_edit.setText(self.imported_files[0])
@@ -394,20 +425,22 @@ class DecentTreePlugin(BasePlugin):
                 self.file_path_edit.setText(f"{len(self.imported_files)} files selected")
             
             # Add file tags
-            if hasattr(self, 'file_tags_layout'):
+            if hasattr(self, 'file_tags_layout') and hasattr(self, 'file_tags_container'):
                 for file_path in self.imported_files:
                     self.add_file_tag(file_path)
+                self.file_tags_container.setVisible(True)
             
-            # Hide input group if imported
+            # Hide input group
             if hasattr(self, 'input_tab'):
                 input_layout = self.input_tab.layout()
-                for i in range(input_layout.count()):
-                    item = input_layout.itemAt(i)
-                    if item and item.widget():
-                        widget = item.widget()
-                        if isinstance(widget, QGroupBox) and widget.title() == "Input":
-                            widget.setVisible(False)
-                            break
+                if input_layout:
+                    for i in range(input_layout.count()):
+                        item = input_layout.itemAt(i)
+                        if item and item.widget():
+                            widget = item.widget()
+                            if isinstance(widget, QGroupBox) and widget.title() == "Input":
+                                widget.setVisible(False)
+                                break
 
 
 class DecentTreePluginEntry:
