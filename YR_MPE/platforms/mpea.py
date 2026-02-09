@@ -219,6 +219,12 @@ class YR_MPEA_Widget(QWidget):
         self.comp_dist_action.triggered.connect(self.open_ml_distance_wrapper)
         distance_button.addAction(self.comp_dist_action)
         
+        # 添加"Compute Uncorrected Distances"动作
+        self.comp_uncorr_dist_action = QAction("Compute Uncorrected Distances (p-distance)", self)
+        self.comp_uncorr_dist_action.setIcon(self.resource_factory.get_icon("dist.svg"))
+        self.comp_uncorr_dist_action.triggered.connect(self.open_uncorrected_distance_wrapper)
+        distance_button.addAction(self.comp_uncorr_dist_action)
+        
         # 添加"Compute Overall Mean Distances"动作
         # self.comp_mdist_action = QAction("Compute Overall Mean Distances (ML)", self)
         # self.comp_mdist_action.setIcon(self.resource_factory.get_icon("mdist.svg"))
@@ -686,7 +692,7 @@ class YR_MPEA_Widget(QWidget):
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
         dialog.setWindowTitle(f"Distance Calculator [implemented from IQ-TREE] - YR-MPEA")
-        dialog.setWindowIcon(self.resource_factory.get_icon("distance.svg"))
+        dialog.setWindowIcon(self.resource_factory.get_icon("dist.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
@@ -708,6 +714,31 @@ class YR_MPEA_Widget(QWidget):
         dialog.layout().addWidget(plugin_wrapper)
         dialog.exec_()
         
+    def open_uncorrected_distance_wrapper(self):
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle(f"Uncorrected Distance Calculator - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("dist.svg"))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+
+        # Use PluginFactory to get the plugin
+        p_distance_entry = self.plugin_factory.get_p_distance_plugin()
+        plugin_wrapper = p_distance_entry.run(import_from=import_from, import_data=import_data)
+        plugin_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        plugin_wrapper.export_distance_result_signal.connect(self.add_distance_matrix_to_workspace)
+
+        dialog.layout().addWidget(plugin_wrapper)
+        dialog.exec_()
     def open_iqtree_wrapper(self):
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
