@@ -75,7 +75,7 @@ class DecentTreePlugin(BasePlugin):
     def init_plugin_info(self):
         self.plugin_name = "DecentTree Distance Methods"
         self.tool_name = "DecentTree"
-        self.citation = ["Gascuel O et al. (2010) BioNJ, PhyML and PhyloBayes."]
+        self.citation = ["Weiwen Wang, James Barbetti, Thomas Wong, Bryan Thornlow, Russ Corbett-Detig, Yatish Turakhia, Robert Lanfear, Bui Quang Minh, DecentTree: scalable Neighbour-Joining for the genomic era, Bioinformatics, Volume 39, Issue 9, September 2023, btad536, doi: <a href='https://doi.org/10.1093/bioinformatics/btad536'>10.1093/bioinformatics/btad536</a>"]
         self.input_types = {"ML Distance Matrix": ["mldist", "dist"]}
         self.output_types = {"Newick Tree": ".nwk"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
@@ -98,22 +98,17 @@ class DecentTreePlugin(BasePlugin):
         file_layout.addWidget(self.file_browse_btn)
         input_layout.addRow("File input:", file_layout)
         
+        # 添加文件标签容器到 input_group 内部
         self.file_tags_container = QFrame()
         self.file_tags_layout = QVBoxLayout()
         self.file_tags_container.setLayout(self.file_tags_layout)
         self.file_tags_container.setVisible(False)
         input_layout.addRow("", self.file_tags_container)
         
+        # 注意：imported_files 的处理将在 handle_import_data 中完成
+        # 这里不在此处处理，避免重复操作和阻塞
         if self.import_file:
             self.file_path_edit.setText(self.import_file)
-            input_group.setVisible(False)
-        elif hasattr(self, 'imported_files') and self.imported_files:
-            for file_path in self.imported_files:
-                self.add_file_tag(file_path)
-            if len(self.imported_files) == 1:
-                self.file_path_edit.setText(self.imported_files[0])
-            else:
-                self.file_path_edit.setText(f"{len(self.imported_files)} files selected")
         
         params_group = QGroupBox("DecentTree Parameters")
         params_form_layout = QFormLayout()
@@ -150,7 +145,8 @@ class DecentTreePlugin(BasePlugin):
                 self.file_path_edit.setText(f"{len(self.imported_files)} files selected")
     
     def add_file_tag(self, file_path):
-        self.imported_files.append(file_path)
+        # 不要在这里添加到 imported_files，因为调用者已经添加过了
+        # self.imported_files.append(file_path)
         tag_widget = QFrame()
         tag_widget.setFrameStyle(QFrame.Box)
         tag_widget.setStyleSheet("QFrame { background-color: #e9ecef; border-radius: 15px; margin: 2px; }")
@@ -371,14 +367,33 @@ class DecentTreePlugin(BasePlugin):
     
     def handle_import_data(self, import_data):
         if isinstance(import_data, list):
-            if import_data and hasattr(import_data[0], 'filename'):
-                if 'mldist' in import_data[0]['filename'].lower():
-                    self.imported_files = [item['filename'] for item in import_data]
-                    self.import_file = self.imported_files[0] if self.imported_files else None
+            if import_data:
+                # 检查是否是字典格式（新格式：{'filename': '...', 'content': '...'}）
+                if isinstance(import_data[0], dict):
+                    # 处理带 filename 的字典
+                    if 'filename' in import_data[0]:
+                        if 'mldist' in import_data[0]['filename'].lower():
+                            self.imported_files = [item['filename'] for item in import_data]
+                            self.import_file = self.imported_files[0] if self.imported_files else None
+                        else:
+                            QMessageBox.warning(self, "Data Type Mismatch", "The imported data is not a distance matrix. Please use the DISTANCE menu to compute ML distances first.")
+                    # 处理只有 content 没有 filename 的字典（新格式）
+                    elif 'content' in import_data[0]:
+                        self.imported_files = []
+                        for item in import_data:
+                            try:
+                                temp_file = self.create_temp_file(suffix='.mldist')
+                                with open(temp_file, 'w', encoding='utf-8') as f:
+                                    f.write(str(item['content']))
+                                self.temp_files.append(temp_file)
+                                self.imported_files.append(temp_file)
+                            except Exception as e:
+                                continue
+                        self.import_file = self.imported_files[0] if self.imported_files else None
                 else:
-                    QMessageBox.warning(self, "Data Type Mismatch", "The imported data is not a distance matrix. Please use the DISTANCE menu to compute ML distances first.")
+                    QMessageBox.warning(self, "Warning", "Imported data format not supported.")
             else:
-                QMessageBox.warning(self, "Warning", "Imported data format not supported.")
+                QMessageBox.warning(self, "Warning", "No data imported.")
         elif isinstance(import_data, dict) and 'type' in import_data:
             if import_data['type'] == 'distance_matrix':
                 if 'data' in import_data and isinstance(import_data['data'], list):
@@ -387,37 +402,43 @@ class DecentTreePlugin(BasePlugin):
                     for item in import_data['data']:
                         try:
                             if isinstance(item, dict):
-                                if 'filename' in item:
-                                    # Check if file exists before adding
-                                    if os.path.exists(item['filename']):
-                                        self.imported_files.append(item['filename'])
-                                elif 'content' in item and 'filename' not in item:
-                                    # Create temporary file from content
+                                # 优先使用 content 创建临时文件（因为 filename 可能只是文件名，不是完整路径）
+                                if 'content' in item:
                                     try:
                                         temp_file = self.create_temp_file(suffix='.mldist')
                                         with open(temp_file, 'w', encoding='utf-8') as f:
                                             f.write(str(item['content']))
                                         self.temp_files.append(temp_file)
                                         self.imported_files.append(temp_file)
-                                        print(f"Created temp file: {temp_file}")
                                     except Exception as e:
-                                        print(f"Error creating temp file: {e}")
                                         continue
+                                # 如果只有 filename 没有 content，尝试检查文件是否存在
+                                elif 'filename' in item:
+                                    # Check if file exists before adding
+                                    if os.path.exists(item['filename']):
+                                        self.imported_files.append(item['filename'])
                             elif isinstance(item, str) and os.path.exists(item):
                                 self.imported_files.append(item)
                         except Exception as e:
-                            print(f"Error processing distance item: {e}")
                             continue
                     self.import_file = self.imported_files[0] if self.imported_files else None
-                    print(f"Imported files: {self.imported_files}")
             elif import_data['type'] == 'alignment':
                 QMessageBox.warning(self, "Data Type Mismatch", "Alignment data detected. Please use the DISTANCE menu to compute ML distances first before building a tree.")
         else:
             self.import_file = None
             self.imported_files = []
         
-        # Update UI to show imported files
-        if self.imported_files and hasattr(self, 'file_path_edit'):
+        # 使用 QTimer.singleShot 延迟执行 UI 更新，避免阻塞
+        if self.imported_files:
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(0, self.update_ui_for_imported_files)
+    
+    def update_ui_for_imported_files(self):
+        """更新 UI 以显示导入的文件"""
+        if not self.imported_files:
+            return
+            
+        if hasattr(self, 'file_path_edit'):
             # Update file path display
             if len(self.imported_files) == 1:
                 self.file_path_edit.setText(self.imported_files[0])
@@ -429,18 +450,6 @@ class DecentTreePlugin(BasePlugin):
                 for file_path in self.imported_files:
                     self.add_file_tag(file_path)
                 self.file_tags_container.setVisible(True)
-            
-            # Hide input group
-            if hasattr(self, 'input_tab'):
-                input_layout = self.input_tab.layout()
-                if input_layout:
-                    for i in range(input_layout.count()):
-                        item = input_layout.itemAt(i)
-                        if item and item.widget():
-                            widget = item.widget()
-                            if isinstance(widget, QGroupBox) and widget.title() == "Input":
-                                widget.setVisible(False)
-                                break
 
 
 class DecentTreePluginEntry:
