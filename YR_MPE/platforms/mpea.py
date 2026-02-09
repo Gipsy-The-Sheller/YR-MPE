@@ -220,11 +220,11 @@ class YR_MPEA_Widget(QWidget):
         distance_button.addAction(self.comp_dist_action)
         
         # 添加"Compute Overall Mean Distances"动作
-        self.comp_mdist_action = QAction("Compute Overall Mean Distances (ML)", self)
-        self.comp_mdist_action.setIcon(self.resource_factory.get_icon("mdist.svg"))
+        # self.comp_mdist_action = QAction("Compute Overall Mean Distances (ML)", self)
+        # self.comp_mdist_action.setIcon(self.resource_factory.get_icon("mdist.svg"))
         # TODO: 实现平均距离计算功能
         # self.comp_mdist_action.triggered.connect(self.compute_mean_distances)
-        distance_button.addAction(self.comp_mdist_action)
+        # distance_button.addAction(self.comp_mdist_action)
 
         phylogeny_button = QToolButton()
         phylogeny_button.setText("PHYLOGENY")
@@ -236,7 +236,7 @@ class YR_MPEA_Widget(QWidget):
         # phylogeny_button.setFixedSize(60, 60)
         main_toolbar.addWidget(phylogeny_button)
 
-        cons_ml_action = QAction("Phenetics - Maximum Likelihood Phylogenies (ML)", phylogeny_button)
+        cons_ml_action = QAction("Maximum Likelihood (ML)", phylogeny_button)
         cons_ml_action.setIcon(self.resource_factory.get_icon("ml.svg"))
 
         ml_menu = QMenu()
@@ -251,33 +251,25 @@ class YR_MPEA_Widget(QWidget):
         
         # TODO: ML Programs: IQ-TREE 3 / FastTree
 
-        cons_bi_action = QAction("Phenetics - Bayesian Inference Phylogenies (BI)", phylogeny_button)
+        cons_bi_action = QAction("Bayesian Inference (BI)", phylogeny_button)
         cons_bi_action.setIcon(self.resource_factory.get_icon("bi.svg"))
 
         # TODO: BI Programs: MrBayes
 
-        cons_mp_action = QAction("Cladistics - Maximum Parsimony Phylogenies (MP)", phylogeny_button)
-        cons_mp_action.setIcon(self.resource_factory.get_icon("mp.svg"))
+        # cons_mp_action = QAction("Cladistics - Maximum Parsimony Phylogenies (MP)", phylogeny_button)
+        # cons_mp_action.setIcon(self.resource_factory.get_icon("mp.svg"))
 
         # TODO: MP Programs: TNT
 
-        cons_nj_action = QAction("Clustering - Neighbor-Joining (NJ)", phylogeny_button)
-        cons_nj_action.setIcon(self.resource_factory.get_icon("nj.svg"))
+        cons_distance_action = QAction("Distance Methods (DecentTree)", phylogeny_button)
+        cons_distance_action.setIcon(self.resource_factory.get_icon("bionj.svg"))
+        cons_distance_action.triggered.connect(self.open_decenttree_wrapper)
 
-        cons_upgma_action = QAction("Clustering - UPGMA", phylogeny_button)
-        cons_upgma_action.setIcon(self.resource_factory.get_icon("upgma.svg"))
+        # cons_rand_action = QAction("Simulation - Random Trees (Evolver)", phylogeny_button)
+        # cons_rand_action.setIcon(self.resource_factory.get_icon("randtree.svg"))
 
-        cons_me_action = QAction("Clustering - Minimum Evolution (ME)", phylogeny_button)
-        cons_me_action.setIcon(self.resource_factory.get_icon("me.svg"))
-
-        cons_bionj_action = QAction("Clustering - BioNJ [IQ-TREE 3]", phylogeny_button)
-        cons_bionj_action.setIcon(self.resource_factory.get_icon("bionj.svg"))
-
-        cons_rand_action = QAction("Simulation - Random Trees (Evolver)", phylogeny_button)
-        cons_rand_action.setIcon(self.resource_factory.get_icon("randtree.svg"))
-
-        cons_seq_action = QAction("Simulation - Simulated Sequences (Evolver)", phylogeny_button)
-        cons_seq_action.setIcon(self.resource_factory.get_icon("randseq.svg"))
+        # cons_seq_action = QAction("Simulation - Simulated Sequences (Evolver)", phylogeny_button)
+        # cons_seq_action.setIcon(self.resource_factory.get_icon("randseq.svg"))
 
         tree_viewer_action = QAction("Tree Viewer (IcyTree)", phylogeny_button)
         tree_viewer_action.setIcon(self.resource_factory.get_icon("software/icytree.svg"))
@@ -286,16 +278,12 @@ class YR_MPEA_Widget(QWidget):
         phylogeny_button_menu.addAction(cons_ml_action)
         phylogeny_button_menu.addAction(cons_bi_action)
         phylogeny_button_menu.addSeparator()
-        phylogeny_button_menu.addAction(cons_mp_action)
+        # phylogeny_button_menu.addAction(cons_mp_action)
         phylogeny_button_menu.addSeparator()
-        phylogeny_button_menu.addAction(cons_nj_action)
-        phylogeny_button_menu.addAction(cons_upgma_action)
-        phylogeny_button_menu.addAction(cons_me_action)
-        # phylogeny_button_menu.addSeparator()
-        phylogeny_button_menu.addAction(cons_bionj_action)
+        phylogeny_button_menu.addAction(cons_distance_action)
         phylogeny_button_menu.addSeparator()
-        phylogeny_button_menu.addAction(cons_rand_action)
-        phylogeny_button_menu.addAction(cons_seq_action)
+        # phylogeny_button_menu.addAction(cons_rand_action)
+        # phylogeny_button_menu.addAction(cons_seq_action)
         phylogeny_button_menu.addSeparator()
         phylogeny_button_menu.addAction(tree_viewer_action)
         # phylogeny_button_menu.addSeparator()
@@ -438,7 +426,14 @@ class YR_MPEA_Widget(QWidget):
 
     def add_distance_matrix_to_workspace(self, distance_matrix):
         """将距离矩阵添加到工作区"""
-        self.workspace.add_distance(distance_matrix)
+        # Extract the data part from the signal
+        if isinstance(distance_matrix, dict) and 'data' in distance_matrix:
+            # Store only the distance matrix data, not the wrapper
+            for dist_data in distance_matrix['data']:
+                self.workspace.add_distance(dist_data)
+        else:
+            # Fallback: store as-is
+            self.workspace.add_distance(distance_matrix)
 
     def add_phylogeny_to_workspace(self, phylogeny):
         """将树形图添加到工作区"""
@@ -775,6 +770,45 @@ class YR_MPEA_Widget(QWidget):
                 plugin_wrapper.gamma_checkbox.setChecked(True)
                 plugin_wrapper.gamma_spinbox.setValue(int(item[1:]))
         dialog.layout().addWidget(plugin_wrapper)
+        dialog.exec_()
+
+    def open_decenttree_wrapper(self):
+        """打开 DecentTree 插件"""
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle("DecentTree Distance Methods - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("bionj.svg"))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        
+        if workspace_type == "SingleGeneWorkspace":
+            # 优先导入距离矩阵数据
+            if len(self.workspace.items["distances"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = {
+                    'type': 'distance_matrix',
+                    'data': self.workspace.items["distances"]
+                }
+            # 如果没有距离矩阵，可以提示用户先计算距离
+            else:
+                QMessageBox.information(
+                    self, 
+                    "Distance Matrix Required",
+                    "Please compute ML distances first using the DISTANCE menu before building a tree."
+                )
+                return
+
+        # Use PluginFactory to get the plugin
+        decenttree_entry = self.plugin_factory.get_decenttree_plugin()
+        decenttree_wrapper = decenttree_entry.run(import_from=import_from, import_data=import_data)
+        decenttree_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
+
+        dialog.layout().addWidget(decenttree_wrapper)
         dialog.exec_()
 
     def open_pdguide_wrapper(self):
@@ -1472,8 +1506,15 @@ class SingleGeneWorkspace(QWidget):
             menubar.addMenu(export_menu)
             
             # 获取距离矩阵数据
-            if isinstance(distance_matrix, dict) and 'data' in distance_matrix:
-                content = distance_matrix['data'][0]['content']
+            if isinstance(distance_matrix, dict):
+                if 'content' in distance_matrix:
+                    # 新格式：dist_data 直接包含 content（由 add_distance_matrix_to_workspace 提取）
+                    content = distance_matrix['content']
+                elif 'data' in distance_matrix:
+                    # 旧格式：data[0]['content']
+                    content = distance_matrix['data'][0]['content']
+                else:
+                    content = str(distance_matrix)
             else:
                 content = str(distance_matrix)
             
