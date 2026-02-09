@@ -65,6 +65,10 @@ class PluginFactory:
         """获取ML距离计算插件"""
         return self.load_plugin("YR_MPE.plugins.ml_distance_plugin", "MLDistancePluginEntry")
     
+    def get_p_distance_plugin(self):
+        """获取未校正距离(p-distance)计算插件"""
+        return self.load_plugin("YR_MPE.plugins.uncorrected_distance_plugin", "UncorrectedDistancePluginEntry")
+    
     def get_caster_site_plugin(self):
         """获取CASTER-site插件"""
         return self.load_plugin("YR_MPE.plugins.caster_site_plugin", "CasterSitePluginEntry")

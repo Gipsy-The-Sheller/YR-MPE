@@ -21,13 +21,14 @@ def form_calibration_table(data):
     calibrations = f'{len(data)}'
     for calibration in data:
         if len(calibration['set']) > 1:
-            calibrations = f'{calibrations}\nmrca({','.join(taxon for taxon in calibration['set'])})'
+            taxa_str = ','.join(taxon for taxon in calibration['set'])
+            calibrations = f'{calibrations}\nmrca({taxa_str})'
         elif len(calibration['set']) == 1:
             calibrations = f'{calibrations}\n{calibration["set"][0]}'
         else:
             raise ValueError('Empty taxon set')
         
-        calibrations = f'{calibrations} {switch_type[calibration["type"]](calibration['values'])}'
+        calibrations = f'{calibrations} {switch_type[calibration["type"]](calibration["values"])}'
     
     return calibrations
 
