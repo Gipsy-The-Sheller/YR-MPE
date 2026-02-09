@@ -69,6 +69,10 @@ class PluginFactory:
         """获取CASTER-site插件"""
         return self.load_plugin("YR_MPE.plugins.caster_site_plugin", "CasterSitePluginEntry")
     
-    def get_macse_plugin(self):
-        """获取MACSE插件"""
-        return self.load_plugin("YR_MPE.plugins.macse_plugin", "MACSEPluginEntry")
+    def get_decenttree_plugin(self):
+        """获取DecentTree插件"""
+        return self.load_plugin("YR_MPE.plugins.decenttree_plugin", "DecentTreePluginEntry")
+    
+    def get_icytree_plugin(self):
+        """获取IcyTree插件"""
+        return self.load_plugin("YR_MPE.icytree", "IcyTreePluginEntry")

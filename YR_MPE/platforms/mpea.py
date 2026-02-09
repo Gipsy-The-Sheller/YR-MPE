@@ -563,16 +563,36 @@ class YR_MPEA_Widget(QWidget):
         dialog.exec_()
     
     def open_icytree_wrapper(self):
-        from YR_MPE.icytree import IcyTreePlugin
+        """打开IcyTree查看系统发育树"""
         from PyQt5.QtWidgets import QDialog
-        dialog = QDialog()
-        dialog.setWindowTitle("IcyTree - YR-MPEA")
-        dialog.setWindowIcon(self.resource_factory.get_icon("software/icytree.svg"))
-        dialog.setMinimumSize(800, 600)
-        dialog.setLayout(QVBoxLayout())
-        icytree_wrapper = IcyTreePlugin()
-        dialog.layout().addWidget(icytree_wrapper)
-        dialog.exec_()
+        try:
+            dialog = QDialog()
+            dialog.setWindowTitle("IcyTree - YR-MPEA")
+            dialog.setWindowIcon(self.resource_factory.get_icon("software/icytree.svg"))
+            dialog.setMinimumSize(800, 600)
+            dialog.setLayout(QVBoxLayout())
+            
+            # 使用PluginFactory获取IcyTree插件
+            plugin_entry = self.plugin_factory.get_icytree_plugin()
+            icytree_wrapper = plugin_entry.run()
+            
+            # # 如果工作区中有系统树数据，则传递给IcyTree
+            # if hasattr(self, 'workspace') and len(self.workspace.items["phylogenies"]) > 0:
+            #     latest_phylogeny = self.workspace.items["phylogenies"][-1]
+            #     # 检查系统树数据格式
+            #     if isinstance(latest_phylogeny, dict) and 'data' in latest_phylogeny and len(latest_phylogeny['data']) > 0:
+            #         # 如果系统树数据是字典格式，提取Newick字符串
+            #         tree_data = latest_phylogeny['data'][0]
+            #         if 'content' in tree_data:
+            #             icytree_wrapper.set_newick_string(tree_data['content'])
+            #     elif isinstance(latest_phylogeny, str):
+            #         # 如果系统树数据直接是字符串
+            #         icytree_wrapper.set_newick_string(latest_phylogeny)
+            
+            dialog.layout().addWidget(icytree_wrapper)
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open IcyTree: {str(e)}")
 
     def open_trimal_wrapper(self):
         from PyQt5.QtWidgets import QDialog
@@ -1698,9 +1718,32 @@ class SingleGeneWorkspace(QWidget):
     
     def open_icytree_wrapper(self):
         """打开IcyTree查看系统发育树"""
+        from PyQt5.QtWidgets import QDialog
         try:
+            dialog = QDialog()
+            dialog.setWindowTitle("IcyTree - YR-MPEA")
+            dialog.setWindowIcon(self.parent_window.resource_factory.get_icon("software/icytree.svg"))
+            dialog.setMinimumSize(800, 600)
+            dialog.setLayout(QVBoxLayout())
+            
+            # 使用PluginFactory获取IcyTree插件
             plugin_entry = self.parent_window.plugin_factory.get_icytree_plugin()
-            dialog = plugin_entry.run()
+            icytree_wrapper = plugin_entry.run()
+            
+            # 从工作区获取最新的系统树数据并传递给IcyTree
+            if len(self.items["phylogenies"]) > 0:
+                latest_phylogeny = self.items["phylogenies"][-1]
+                # 检查系统树数据格式
+                if isinstance(latest_phylogeny, dict) and 'data' in latest_phylogeny and len(latest_phylogeny['data']) > 0:
+                    # 如果系统树数据是字典格式，提取Newick字符串
+                    tree_data = latest_phylogeny['data'][0]
+                    if 'content' in tree_data:
+                        icytree_wrapper.set_newick_string(tree_data['content'])
+                elif isinstance(latest_phylogeny, str):
+                    # 如果系统树数据直接是字符串
+                    icytree_wrapper.set_newick_string(latest_phylogeny)
+            
+            dialog.layout().addWidget(icytree_wrapper)
             dialog.exec_()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open IcyTree: {str(e)}")
