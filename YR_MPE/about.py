@@ -71,6 +71,10 @@ class AboutPlugin(QWidget):
         IconLabel4.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "mafft.svg")).pixmap(QSize(40, 40)))
         icon_group_layout.addWidget(IconLabel4)
 
+        IconLabel7 = QLabel()
+        IconLabel7.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "macse.svg")).pixmap(QSize(40, 40)))
+        icon_group_layout.addWidget(IconLabel7)
+
         IconLabel5 = QLabel()
         IconLabel5.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "trimal.svg")).pixmap(QSize(40, 40)))
         icon_group_layout.addWidget(IconLabel5)
@@ -81,6 +85,18 @@ class AboutPlugin(QWidget):
 
         IconLabel7 = QLabel()
         IconLabel7.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "iqtree.svg")).pixmap(QSize(40, 40)))
+        icon_group_layout.addWidget(IconLabel7)
+
+        IconLabel7 = QLabel()
+        IconLabel7.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "mrbayes.svg")).pixmap(QSize(40, 40)))
+        icon_group_layout.addWidget(IconLabel7)
+
+        IconLabel7 = QLabel()
+        IconLabel7.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "phylobayes.svg")).pixmap(QSize(40, 40)))
+        icon_group_layout.addWidget(IconLabel7)
+
+        IconLabel7 = QLabel()
+        IconLabel7.setPixmap(QIcon(os.path.join(self.plugin_path, "icons", "software", "caster.svg")).pixmap(QSize(40, 40)))
         icon_group_layout.addWidget(IconLabel7)
 
         IconLabel8 = QLabel()
@@ -115,6 +131,14 @@ class AboutPlugin(QWidget):
         license_text.setWordWrap(True)
         license_text.setAlignment(Qt.AlignLeft)
         license_layout.addWidget(license_text)
+
+        license_warning = QLabel("This program is distributed in the hope that it will be useful, "
+                                "but WITHOUT ANY WARRANTY; without even the implied warranty of " 
+                                "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.")
+        license_warning.setWordWrap(True)
+        license_warning.setAlignment(Qt.AlignLeft)
+        license_warning.setStyleSheet("font-weight: bold;")
+        license_layout.addWidget(license_warning)
         
         main_layout.addWidget(license_group)
         
@@ -125,19 +149,23 @@ class AboutPlugin(QWidget):
         copyright_group.setLayout(copyright_layout)
 
         # 版权信息
-        copyright_label = QLabel("Copyright (c) 2025 Zhi-Jie Xu")
+        copyright_label = QLabel("Copyright (c) 2025-2026 Zhi-Jie Xu (email: zjxmolls@outlook.com)")
         copyright_label.setAlignment(Qt.AlignCenter)
         copyright_layout.addWidget(copyright_label)
         
-        # 联系信息
-        email_label = QLabel("Email: zjxmolls@outlook.com")
-        email_label.setAlignment(Qt.AlignCenter)
-        copyright_layout.addWidget(email_label)
+        # # 联系信息
+        # email_label = QLabel("Email: zjxmolls@outlook.com")
+        # email_label.setAlignment(Qt.AlignCenter)
+        # copyright_layout.addWidget(email_label)
 
         # 存储库信息
-        repo_label = QLabel("Repository: <a href='https://github.com/Gipsy-The-Sheller/YR-MPE'>https://github.com/Gipsy-The-Sheller/YR-MPE</a>")
+        repo_label = QLabel("Repository: <a href='https://github.com/Gipsy-The-Sheller/YR-MPE'>Github</a>  " + 
+                            "<a href='https://gitee.com/zjxmolls/YR-MPE'>Gitee</a>  " + 
+                            "Wiki: <a href='https://github.com/Gipsy-The-Sheller/YR-MPE/wiki'>Github wiki</a>  " + 
+                            " <a href='https://gitee.com/zjxmolls/YR-MPE/wikis'>Gitee wiki</a>")
         repo_label.setAlignment(Qt.AlignCenter)
         repo_label.setOpenExternalLinks(True)
+        repo_label.setWordWrap(True)
         copyright_layout.addWidget(repo_label)
 
         main_layout.addWidget(copyright_group) 
@@ -153,9 +181,9 @@ class AboutPlugin(QWidget):
         version_label.setAlignment(Qt.AlignCenter)
         version_layout.addWidget(version_label)  
 
-        update_label = QLabel("Get new updates from YR-Pacman or by Git pull.")
-        update_label.setAlignment(Qt.AlignCenter)
-        version_layout.addWidget(update_label)
+        # update_label = QLabel("Get new updates from YR-Pacman or by Git pull.")
+        # update_label.setAlignment(Qt.AlignCenter)
+        # version_layout.addWidget(update_label)
 
         main_layout.addWidget(version_group)      
         # 添加伸展以美化布局
