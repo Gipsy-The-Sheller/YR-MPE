@@ -7,6 +7,14 @@
 
 <img src="/YR_MPE/icons/yr-mpea.svg" width="auto" height="50"/>
 
+> [!NOTE]
+> 
+> If you find this repository useful for your research, please consider giving it a star! It helps me gauge interest. For any questions, please open an issue.
+>
+> If you want a specific function, please describe it in detail in a new issue. I will consider implementing it in priority.
+>
+> YR-MPE temporarily have no publications. If you need to cite it, please cite the repository.
+
 ## What is YR-MPE?
 
 `YR-MPE` is originally a collection of plugins for `YRTools`, which is a plugin-based bioinformatic platform. `YR-MPE` is for its molecular phylogenetics and evolution analysis functions.
