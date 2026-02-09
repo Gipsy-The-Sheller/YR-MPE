@@ -225,6 +225,12 @@ class YR_MPEA_Widget(QWidget):
         self.comp_uncorr_dist_action.triggered.connect(self.open_uncorrected_distance_wrapper)
         distance_button.addAction(self.comp_uncorr_dist_action)
         
+        # 添加"Calculate & Plot Substitution Saturation"动作
+        self.saturation_action = QAction("Calculate && Plot Substitution Saturation", self)
+        self.saturation_action.setIcon(self.resource_factory.get_icon("saturation.svg"))
+        self.saturation_action.triggered.connect(self.open_substitution_saturation_wrapper)
+        distance_button.addAction(self.saturation_action)
+        
         # 添加"Compute Overall Mean Distances"动作
         # self.comp_mdist_action = QAction("Compute Overall Mean Distances (ML)", self)
         # self.comp_mdist_action.setIcon(self.resource_factory.get_icon("mdist.svg"))
@@ -259,6 +265,28 @@ class YR_MPEA_Widget(QWidget):
 
         cons_bi_action = QAction("Bayesian Inference (BI)", phylogeny_button)
         cons_bi_action.setIcon(self.resource_factory.get_icon("bi.svg"))
+
+        # 创建Bayesian Inference子菜单
+        bi_menu = QMenu()
+        cons_bi_action.setMenu(bi_menu)
+        
+        # 添加MrBayes选项（TODO）
+        mrbayes_action = QAction("MrBayes3-MPI-BEAGLE", phylogeny_button)
+        mrbayes_action.setIcon(self.resource_factory.get_icon("software/mrbayes.svg"))
+        # mrbayes_action.triggered.connect(self.open_mrbayes_wrapper)  # TODO: 实现MrBayes集成
+        bi_menu.addAction(mrbayes_action)
+        
+        # 添加PhyloBayes选项（TODO）
+        phylobayes_action = QAction("PhyloBayes-MPI", phylogeny_button)
+        phylobayes_action.setIcon(self.resource_factory.get_icon("software/phylobayes.svg"))
+        # phylobayes_action.triggered.connect(self.open_phylobayes_wrapper)  # TODO: 实现PhyloBayes集成
+        bi_menu.addAction(phylobayes_action)
+        
+        # 添加miniTracer选项
+        minitracer_action = QAction("MCMC Diagnostics (MiniTracer)", phylogeny_button)
+        minitracer_action.setIcon(self.resource_factory.get_icon("software/minitracer.svg"))
+        minitracer_action.triggered.connect(self.open_minitracer_wrapper)
+        bi_menu.addAction(minitracer_action)
 
         # TODO: BI Programs: MrBayes
 
@@ -568,6 +596,28 @@ class YR_MPEA_Widget(QWidget):
         dialog.layout().addWidget(modelfinder_wrapper)
         dialog.exec_()
     
+    def open_minitracer_wrapper(self):
+        """打开MiniTracer进行MCMC诊断分析"""
+        from PyQt5.QtWidgets import QDialog
+        try:
+            dialog = QDialog()
+            dialog.setWindowTitle("MiniTracer - MCMC Diagnostics - YR-MPEA")
+            dialog.setWindowIcon(self.resource_factory.get_icon("software/minitracer.svg"))
+            # dialog.setMinimumSize(600, 500)
+
+            dlayout = QVBoxLayout()
+            dlayout.setContentsMargins(0, 0, 0, 0)
+            dialog.setLayout(dlayout)
+            
+            # 使用PluginFactory获取MiniTracer插件
+            plugin_entry = self.plugin_factory.get_minitracer_plugin()
+            minitracer_wrapper = plugin_entry.run()
+            
+            dialog.layout().addWidget(minitracer_wrapper)
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open MiniTracer: {str(e)}")
+
     def open_icytree_wrapper(self):
         """打开IcyTree查看系统发育树"""
         from PyQt5.QtWidgets import QDialog
@@ -739,6 +789,32 @@ class YR_MPEA_Widget(QWidget):
 
         dialog.layout().addWidget(plugin_wrapper)
         dialog.exec_()
+    
+    def open_substitution_saturation_wrapper(self):
+        """打开替代饱和度分析插件"""
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle("Substitution Saturation Analysis - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("saturation.svg"))
+        dialog.setMinimumSize(900, 700)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+
+        # Use PluginFactory to get the plugin
+        saturation_entry = self.plugin_factory.get_substitution_saturation_plugin()
+        plugin_wrapper = saturation_entry.run(import_from=import_from, import_data=import_data)
+        
+        dialog.layout().addWidget(plugin_wrapper)
+        dialog.exec_()
+    
     def open_iqtree_wrapper(self):
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
