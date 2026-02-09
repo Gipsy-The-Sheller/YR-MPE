@@ -12,7 +12,7 @@
 
       .cls-2 {
         fill: #4e6691;
-        opacity: .3;
+        opacity: 0;
       }
 
       .cls-2, .cls-3 {
