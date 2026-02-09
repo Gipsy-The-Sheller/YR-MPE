@@ -196,9 +196,10 @@ class MplTreeView(FigureCanvas):
         # 设置初始状态
         self.root = None
         self.ax = self.fig.add_subplot(111)
+        self.fig.tight_layout()
         self.ax.axis('off')
         
-    def draw_dendrogram(self, newick_str=None, root=None, args=None):
+    def draw_dendrogram(self, newick_str=None, root=None, args=None, show_time_scale=False, title=""):
         """绘制树状图，可以传入Newick字符串或已解析的根节点
         Args:
             newick_str: Newick格式字符串
@@ -206,6 +207,8 @@ class MplTreeView(FigureCanvas):
             args: 配置字典，可包含：
                 - taxon_set: 要高亮的分类单元集合
                 - mrca_name: MRCA节点名称（用于高亮内部节点）
+            show_time_scale: 是否显示时间标尺
+            title: 图表标题
         """
         start_time = time.time()  # 添加开始时间记录
         
@@ -264,72 +267,79 @@ class MplTreeView(FigureCanvas):
                     collect_descendants(child)
             collect_descendants(mrca_node)
         
-        # 绘制节点和连线
+        # 绘制连线（移除节点绘制，只保留连线）
         for node in nodes:
-            # 确定节点的绘制样式
-            if node.is_leaf and node.name in taxon_set:
-                # 叶节点且在taxon_set中：高亮显示
-                marker_color = 'red'
-                marker_size = 10
-                marker_style = 'o'
-            elif not node.is_leaf and node.name == mrca_name:
-                # 内部节点且名称匹配MRCA名称：红色+放大圆形
-                marker_color = 'red'
-                marker_size = 15
-                marker_style = 'o'
-            else:
-                # 普通节点
-                marker_color = 'black'
-                marker_size = 6
-                marker_style = 'o'
-            
-            # 绘制节点
-            self.ax.plot(node.age, node.order, marker_style, 
-                        markersize=marker_size, color=marker_color)
-            
             # 添加标签（包括叶节点和内部节点）
             if node.name:
                 # 对于高亮的节点，使用红色标签
                 if (node.is_leaf and node.name in taxon_set) or (not node.is_leaf and node.name == mrca_name):
                     label_color = 'red'
+                    fontweight = 'bold'
                 else:
                     label_color = 'black'
+                    fontweight = 'normal'
                 self.ax.text(node.age, node.order, f" {node.name}", 
-                           verticalalignment='center', fontsize=10, color=label_color)
+                           verticalalignment='center', fontsize=10, color=label_color, 
+                           fontweight=fontweight)
             
             # 绘制到子节点的连线
             for child in node.children:
                 # 判断连线是否需要高亮
                 # 高亮条件：连线属于MRCA clade 或 连接到高亮的taxon
                 line_color = 'black'
+                line_width = 1
                 
                 # 如果整条连线属于MRCA clade，则高亮
                 if mrca_node and node in clade_highlight_nodes and child in clade_highlight_nodes:
                     line_color = 'red'
+                    line_width = 2  # 加粗MRCA clade的连线
                 # 如果连接到高亮的taxon节点，也高亮
                 elif (node.is_leaf and node.name in taxon_set) or (child.is_leaf and child.name in taxon_set):
                     line_color = 'red'
+                    line_width = 2
                 # 如果父节点是MRCA节点，也高亮（确保MRCA节点本身被正确连接）
                 elif not node.is_leaf and node.name == mrca_name:
                     line_color = 'red'
+                    line_width = 2
                 
                 # 先画垂直线：从父节点向下到子节点的水平位置
                 self.ax.plot([node.age, node.age], [node.order, child.order], 
-                           '-', color=line_color, linewidth=1)
+                           '-', color=line_color, linewidth=line_width)
                 # 再画水平线：从父节点的水平位置向右到子节点
                 self.ax.plot([node.age, child.age], [child.order, child.order], 
-                           '-', color=line_color, linewidth=1)
+                           '-', color=line_color, linewidth=line_width)
         
         # 设置图形属性
         self.ax.set_xlim(-0.1, max_age * 1.2 if max_age > 0 else 1.0)
         self.ax.set_ylim(min_order - 0.5, max_order + 0.5)
-        self.ax.set_xlabel('Distance')
-        self.ax.set_ylabel('Nodes')
-        self.ax.set_title('Phylogenetic Tree')
+        
+        # 根据是否显示时间标尺设置不同的标签
+        # if show_time_scale:
+            # self.ax.set_xlabel('Time (Age)')
+            # self.ax.set_ylabel('Taxa')
+            # self.ax.set_title(title if title else 'Time-Scaled Phylogenetic Tree')
+        # else:
+            # self.ax.set_xlabel('Distance')
+            # self.ax.set_ylabel('Nodes')
+            # self.ax.set_title(title if title else 'Phylogenetic Tree')
+        
         self.ax.grid(True, alpha=0.3)
         
         # 反转y轴，使叶节点从上到下排列
         self.ax.invert_yaxis()
+        
+        # 添加时间标尺（如果启用）
+        if show_time_scale:
+            # 在X轴下方添加时间标尺
+            x_ticks = self.ax.get_xticks()
+            x_labels = [f'{tick:.2f}' for tick in x_ticks]
+            self.ax.set_xticklabels(x_labels)
+            
+            # 添加时间方向指示
+            self.ax.annotate('Past', xy=(0.02, 0.02), xycoords='axes fraction', 
+                           fontsize=8, ha='left', va='bottom', alpha=0.6)
+            self.ax.annotate('Present', xy=(0.98, 0.02), xycoords='axes fraction', 
+                           fontsize=8, ha='right', va='bottom', alpha=0.6)
         
         self.fig.tight_layout()
         self.ax.axis('off')

@@ -1,7 +1,9 @@
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel, QLineEdit,
                              QListWidget, QListWidgetItem, QPushButton, QComboBox,
                              QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
-                             QSizePolicy, QMessageBox, QSplitter)
+                             QSizePolicy, QMessageBox, QSplitter, QDialog,
+                             QDialogButtonBox)
+from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 # 修复相对导入
 from .mpl_treeview import MplTreeView
@@ -10,11 +12,13 @@ from .mpl_distribution import MplDistribution
 from .methods.streamlined_ete import build_tree_block, find_mrca_position, inspect_newick_string
 import sys
 
-class MDMRCA(QWidget):
+class MDMRCA(QDialog):
     def __init__(self, parent=None, example=False):
         super().__init__(parent)
         self.setWindowTitle("MRCA Annotation")
         self.resize(800, 600)
+        self.setMinimumSize(600, 400)  # 设置最小尺寸
+        self.setModal(True)  # 设置为模态对话框
         
         # 初始化Newick字符串（示例数据）
         if example:
@@ -34,14 +38,24 @@ class MDMRCA(QWidget):
     def init_ui(self):
         self.setWindowTitle("MD-MRCA")
         # self.setGeometry(100, 100, 800, 600)
+        
+        # 设置对话框大小策略，允许拉伸
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         # 使用QSplitter替代HLayout
-        self.splitter = QSplitter()
-        self.setLayout(QHBoxLayout())
-        self.layout().addWidget(self.splitter)
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+        # 创建主布局（只创建一次）
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(5, 5, 5, 5)  # 设置边距
+        main_layout.setSpacing(5)  # 设置控件间距
+        main_layout.addWidget(self.splitter, 1)  # splitter占据大部分空间，伸缩因子为1
+        self.setLayout(main_layout)
 
         # 创建左侧控件容器
         self.left_widget = QWidget()
+        self.left_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.left_layout = QVBoxLayout()
         self.left_layout.setContentsMargins(0,0,0,0)
         self.left_widget.setLayout(self.left_layout)
@@ -52,8 +66,30 @@ class MDMRCA(QWidget):
         self.init_tmrca_set()
         self.init_tree_view()
         
-        # 设置分割器比例 6:4 (左侧60%，右侧40%)
+        # 设置分割器比例 6:4 (左侧60%，右侧40%）
         self.splitter.setSizes([600, 400])  # 初始大小比例
+        self.splitter.setStretchFactor(0, 6)  # 左侧权重
+        self.splitter.setStretchFactor(1, 4)  # 右侧权重
+        
+        # 为左侧布局添加伸缩因子，让各个部分能够自适应
+        self.left_layout.addStretch(1)  # 在底部添加弹性空间
+        
+        # 添加底部按钮
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        self.apply_button = QPushButton("Apply")
+        self.apply_button.clicked.connect(self.accept)
+        self.apply_button.setMinimumWidth(100)
+        button_layout.addWidget(self.apply_button)
+        
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+        self.cancel_button.setMinimumWidth(100)
+        button_layout.addWidget(self.cancel_button)
+        
+        # 将按钮布局添加到主布局
+        main_layout.addLayout(button_layout)
     
     def extract_all_taxa_from_newick(self, newick_string):
         """
@@ -243,6 +279,29 @@ class MDMRCA(QWidget):
         # 更新左侧显示，移除已选中的分类单元
         self._update_available_taxa_display()
     
+    def load_newick_data(self):
+        """从self.newick_string加载数据到UI"""
+        if not self.newick_string:
+            return
+        
+        # 从树中提取所有叶子节点（分类单元）
+        taxa = self.extract_all_taxa_from_newick(self.newick_string)
+        
+        # 存储所有可用的分类单元
+        self.all_taxa = set(taxa)
+        
+        # 填充OTU浏览器中的分类单元列表（初始时显示所有）
+        self.taxon_list.clear()
+        for taxon in taxa:
+            item = QListWidgetItem(taxon)
+            self.taxon_list.addItem(item)
+        
+        # 绘制树
+        self.tree_figure_canvas.draw_dendrogram(newick_str=self.newick_string)
+        
+        # 更新左侧显示
+        self._update_available_taxa_display()
+    
     def _update_available_taxa_display(self):
         """更新左侧可用分类单元的显示，排除已选中的"""
         # 获取当前选中的分类单元
@@ -278,9 +337,10 @@ class MDMRCA(QWidget):
 
         self.taxon_list = QListWidget()
         self.taxon_list.setSelectionMode(QListWidget.ExtendedSelection)
+        self.taxon_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         otu_explor_layout.addWidget(self.otu_filter)
-        otu_explor_layout.addWidget(self.taxon_list)
+        otu_explor_layout.addWidget(self.taxon_list, 1)  # 添加伸缩因子
 
         # part 2. Pushbuttons
         button_layout = QVBoxLayout()
@@ -306,11 +366,18 @@ class MDMRCA(QWidget):
 
         self.taxon_set_name = QLineEdit()
         self.taxon_set_name.setPlaceholderText("Taxon set name...")
+        self.taxon_set_name.textChanged.connect(self.update_tree_highlight)
         selected_taxa_layout.addWidget(self.taxon_set_name)
 
         self.selected_taxa_list = QListWidget()
         self.selected_taxa_list.setSelectionMode(QListWidget.ExtendedSelection)
-        selected_taxa_layout.addWidget(self.selected_taxa_list)
+        self.selected_taxa_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        selected_taxa_layout.addWidget(self.selected_taxa_list, 1)  # 添加伸缩因子
+        
+        # 设置各部分的拉伸因子
+        taxon_set_layout.setStretch(0, 1)  # OTU explorer
+        taxon_set_layout.setStretch(1, 0)  # Buttons (不拉伸)
+        taxon_set_layout.setStretch(2, 1)  # Selected taxa
         
     def init_tmrca_set(self):
         tmrca_set_layout = QHBoxLayout()
@@ -342,7 +409,12 @@ class MDMRCA(QWidget):
 
         # matplotlib figure canvas to display tMRCA distribution
         self.tmrca_figure_canvas = MplDistribution()
-        tmrca_set_layout.addWidget(self.tmrca_figure_canvas)
+        self.tmrca_figure_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        tmrca_set_layout.addWidget(self.tmrca_figure_canvas, 1)  # 添加伸缩因子
+        
+        # 设置tmrca_set_layout的拉伸因子
+        tmrca_set_layout.setStretch(0, 0)  # tmrca_left_layout (不拉伸)
+        tmrca_set_layout.setStretch(1, 1)  # tmrca_figure_canvas (拉伸)
 
         # 初始化参数输入字段
         self.init_tmrca_parameters()
@@ -350,6 +422,7 @@ class MDMRCA(QWidget):
     def init_tree_view(self):
         # 使用封装的MplTreeView组件来绘制树状图
         self.tree_figure_canvas = MplTreeView()
+        self.tree_figure_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.tree_figure_canvas.draw_dendrogram("(((1:0.1, 2:0.1):0.1,3:0.3):0.5,4:0.9);")
         # 将树视图添加到splitter而不是main_layout
         self.splitter.addWidget(self.tree_figure_canvas)
@@ -568,6 +641,13 @@ class MDMRCA(QWidget):
         if not mrca_name:
             # 如果输入框为空，尝试从Newick字符串中提取
             mrca_name = self.get_current_mrca_name()
+        
+        # 如果MRCA名称为空但有选中的taxa，自动生成默认名称
+        if not mrca_name and selected_taxa:
+            # 检查是否有taxon_set_name_counter属性
+            if not hasattr(self, 'taxon_set_name_counter'):
+                self.taxon_set_name_counter = 0
+            mrca_name = f"Taxon_set_{self.taxon_set_name_counter + 1}"
         
         # 构建args字典
         args = {}
