@@ -413,12 +413,16 @@ class TrimAlPlugin(BasePlugin):
             self.file_path_edit.setVisible(False)
             self.file_browse_btn.setVisible(False)
             self.file_tags_container.setVisible(False)
+            # Force select Temporary File mode for text input
+            self.save_to_tmp.setChecked(True)
+            self.save_to_cwd.setEnabled(False)
             # Clear imported files
             self.clear_all_file_tags()
         else:
             # Show file input when text is empty
             self.file_path_edit.setVisible(True)
             self.file_browse_btn.setVisible(True)
+            self.save_to_cwd.setEnabled(True)
             if self.imported_files:
                 self.file_tags_container.setVisible(True)
     

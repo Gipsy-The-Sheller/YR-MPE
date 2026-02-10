@@ -468,11 +468,15 @@ class GBlocksPlugin(BasePlugin):
             self.file_tags.clear()
             self.file_path_edit.clear()
             self.file_tags_container.setVisible(False)
+            # Force select Temporary File mode for text input
+            self.save_to_tmp.setChecked(True)
+            self.save_to_cwd.setEnabled(False)
         elif not self.imported_files:
             # 如果既没有文本也没有文件，恢复初始状态
             self.file_tags_container.setVisible(False)
             self.sequence_text.setVisible(True)
             self.sequence_text.setEnabled(True)
+            self.save_to_cwd.setEnabled(True)
     
     def setup_gblocks_params(self):
         """设置GBlocks参数"""
