@@ -88,3 +88,7 @@ class PluginFactory:
     def get_substitution_saturation_plugin(self):
         """获取替代饱和度分析插件"""
         return self.load_plugin("YR_MPE.plugins.substitution_saturation_plugin", "SubstitutionSaturationPluginEntry")
+    
+    def get_macse_plugin(self):
+        """获取MACSE插件"""
+        return self.load_plugin("YR_MPE.plugins.macse_plugin", "MACSEPluginEntry")

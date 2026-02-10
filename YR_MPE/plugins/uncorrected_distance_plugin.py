@@ -367,24 +367,46 @@ class UncorrectedDistancePlugin(BasePlugin):
         if file_path not in self.imported_files:
             self.imported_files.append(file_path)
             
-            # 创建标签控件
-            tag_frame = QFrame()
+            # Create file tag widget (使用IQ-TREE plugin的灰底风格)
+            tag_widget = QFrame()
+            tag_widget.setFrameStyle(QFrame.Box)
+            tag_widget.setStyleSheet("""
+                QFrame {
+                    background-color: #e9ecef;
+                    border-radius: 15px;
+                    margin: 2px;
+                }
+            """)
+            
             tag_layout = QHBoxLayout()
-            tag_layout.setContentsMargins(2, 2, 2, 2)
-            tag_frame.setLayout(tag_layout)
+            tag_layout.setContentsMargins(8, 4, 8, 4)
+            tag_widget.setLayout(tag_layout)
             
             # 文件名标签
             name_label = QLabel(os.path.basename(file_path))
+            name_label.setStyleSheet("color: #495057;")
             tag_layout.addWidget(name_label)
             
-            # 删除按钮
-            remove_btn = QPushButton("×")
-            remove_btn.setFixedSize(20, 20)
-            remove_btn.clicked.connect(lambda: self.remove_file_tag(tag_frame, file_path))
-            tag_layout.addWidget(remove_btn)
+            # 关闭按钮
+            close_btn = QPushButton("×")
+            close_btn.setFixedSize(20, 20)
+            close_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    border: none;
+                    color: #6c757d;
+                    font-weight: bold;
+                    font-size: 14px;
+                }
+                QPushButton:hover {
+                    color: #dc3545;
+                }
+            """)
+            close_btn.clicked.connect(lambda: self.remove_file_tag(tag_widget, file_path))
+            tag_layout.addWidget(close_btn)
             
-            self.file_tags_layout.addWidget(tag_frame)
-            self.file_tags.append(tag_frame)
+            self.file_tags_layout.addWidget(tag_widget)
+            self.file_tags.append((file_path, tag_widget))
             self.file_tags_container.setVisible(True)
             
             # 更新文件路径显示
@@ -393,16 +415,16 @@ class UncorrectedDistancePlugin(BasePlugin):
             else:
                 self.file_path_edit.setText(f"{len(self.imported_files)} files selected")
     
-    def remove_file_tag(self, tag_frame, file_path):
+    def remove_file_tag(self, tag_widget, file_path):
         """移除文件标签"""
         # 从列表中移除
         if file_path in self.imported_files:
             self.imported_files.remove(file_path)
         
         # 从UI中移除
-        self.file_tags_layout.removeWidget(tag_frame)
-        tag_frame.deleteLater()
-        self.file_tags.remove(tag_frame)
+        self.file_tags = [(fp, tw) for fp, tw in self.file_tags if fp != file_path]
+        self.file_tags_layout.removeWidget(tag_widget)
+        tag_widget.deleteLater()
         
         # 更新显示
         if not self.imported_files:
