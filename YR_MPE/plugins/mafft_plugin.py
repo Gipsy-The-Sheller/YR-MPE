@@ -166,6 +166,9 @@ class MAFFTPlugin(BasePlugin):
         layout = QVBoxLayout()
         self.input_tab.setLayout(layout)
         
+        # 初始化文件标签列表
+        self.file_tags = []
+        
         # 输入组
         input_group = QGroupBox("Input / Output")
         input_layout = QFormLayout()
@@ -489,12 +492,16 @@ class MAFFTPlugin(BasePlugin):
             self.file_path_edit.setVisible(False)
             self.file_browse_btn.setVisible(False)
             self.file_tags_container.setVisible(False)
+            # Force select Temporary File mode for text input
+            self.save_to_tmp.setChecked(True)
+            self.save_to_cwd.setEnabled(False)
             # Clear imported files
             self.clear_all_file_tags()
         else:
             # Show file input when text is empty
             self.file_path_edit.setVisible(True)
             self.file_browse_btn.setVisible(True)
+            self.save_to_cwd.setEnabled(True)
             if self.imported_files:
                 self.file_tags_container.setVisible(True)
 
@@ -667,18 +674,12 @@ class MAFFTAdvancedDialog(QDialog):
         # 调整方向选项
         self.adjust_direction_combo = QComboBox()
         self.adjust_direction_combo.addItems([
-            "No adjustment", 
-            "Adjust direction (--adjustdirection)", 
-            "Adjust direction directly (--adjustdirectionaccurately)"
+            "No adjustment",
+            "Adjust direction (--adjustdirection)",
+            "Adjust direction accurately (--adjustdirectionaccurately)"
         ])
         self.adjust_direction_combo.setToolTip("Handle potentially reversed sequencing reads")
         output_layout.addRow("Direction adjustment:", self.adjust_direction_combo)
-        
-        # 特殊选项
-        special_group = QGroupBox("Special Options")
-        special_layout = QFormLayout()
-        special_group.setLayout(special_layout)
-        scroll_layout.addWidget(special_group)
         
         scroll_layout.addStretch()
         
@@ -731,23 +732,14 @@ class MAFFTAdvancedDialog(QDialog):
         
         if self.reorder_checkbox.isChecked():
             params.append("--reorder")
-        
-        # 移除quiet选项
-        # if self.quiet_checkbox.isChecked():
-        #     params.append("--quiet")
-        
+
         # 添加调整方向参数
         adjust_index = self.adjust_direction_combo.currentIndex()
         if adjust_index == 1:  # --adjustdirection
             params.append("--adjustdirection")
         elif adjust_index == 2:  # --adjustdirectionaccurately
             params.append("--adjustdirectionaccurately")
-        
-        # 特殊选项
-        # 移除dash选项
-        # if self.dash_checkbox.isChecked():
-        #     params.append("--dash")
-        
+
         return params
 
 
