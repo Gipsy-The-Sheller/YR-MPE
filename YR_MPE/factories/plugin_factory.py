@@ -80,3 +80,11 @@ class PluginFactory:
     def get_icytree_plugin(self):
         """获取IcyTree插件"""
         return self.load_plugin("YR_MPE.icytree", "IcyTreePluginEntry")
+    
+    def get_minitracer_plugin(self):
+        """获取MiniTracer插件"""
+        return self.load_plugin("YR_MPE.plugins.minitracer_plugin", "MiniTracerPluginEntry")
+    
+    def get_substitution_saturation_plugin(self):
+        """获取替代饱和度分析插件"""
+        return self.load_plugin("YR_MPE.plugins.substitution_saturation_plugin", "SubstitutionSaturationPluginEntry")
