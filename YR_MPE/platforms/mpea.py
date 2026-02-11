@@ -27,9 +27,10 @@ from PyQt5.QtGui import QIcon
 
 # 导入新的模块架构
 from .methods import (
-    WorkspaceManager, PluginManager, PluginExecutor, 
+    WorkspaceManager, PluginManager, PluginExecutor,
     FileOperations, UIHelpers
 )
+from .methods.import_partitioned_nexus import import_partitioned_nexus
 
 # 导入工厂模式
 from ..factories import ResourceFactory, PluginFactory
@@ -118,10 +119,12 @@ class YR_MPEA_Widget(QWidget):
         dataset_menu.addAction(new_dataset_action)
         
         import_nexus_action = QAction("Import from partitioned NEXUS file", dataset_menu)
+        import_nexus_action.setIcon(self.resource_factory.get_icon("partition.svg"))
         import_nexus_action.triggered.connect(self.import_dataset_from_nexus)
         dataset_menu.addAction(import_nexus_action)
         
         create_seqmatrix_action = QAction("Create by SeqMatrix", dataset_menu)
+        create_seqmatrix_action.setIcon(self.resource_factory.get_icon("seqmatrix/seqmatrix.svg"))
         create_seqmatrix_action.triggered.connect(self.create_dataset_by_seqmatrix)
         dataset_menu.addAction(create_seqmatrix_action)
         
@@ -224,6 +227,10 @@ class YR_MPEA_Widget(QWidget):
         self.comp_uncorr_dist_action.setIcon(self.resource_factory.get_icon("dist.svg"))
         self.comp_uncorr_dist_action.triggered.connect(self.open_uncorrected_distance_wrapper)
         distance_button.addAction(self.comp_uncorr_dist_action)
+        
+        separator = QAction(workspace_button)
+        separator.setSeparator(True)
+        distance_button.addAction(separator)
         
         # 添加"Calculate & Plot Substitution Saturation"动作
         self.saturation_action = QAction("Calculate && Plot Substitution Saturation", self)
@@ -365,6 +372,22 @@ class YR_MPEA_Widget(QWidget):
         pdguide_action.setIcon(self.resource_factory.get_icon("software/pdguide.svg"))
         pdguide_action.triggered.connect(self.open_pdguide_wrapper)
         clock_button_menu.addAction(pdguide_action)
+
+        # TOOLS button
+        tools_button = QToolButton()
+        tools_button.setText("TOOLS")
+        tools_button.setIcon(self.resource_factory.get_icon("new.svg"))  # Using new.svg as a temporary icon
+        tools_button.setPopupMode(QToolButton.InstantPopup)
+        tools_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        tools_button_menu = QMenu()
+        tools_button.setMenu(tools_button_menu)
+        main_toolbar.addWidget(tools_button)
+
+        # Add SeqDBG action
+        seqdbg_action = QAction("SeqDBG - Annotation Graph", tools_button)
+        seqdbg_action.setIcon(self.resource_factory.get_icon("seqdbg/seqdbg.svg"))
+        seqdbg_action.triggered.connect(self.open_seqdbg_wrapper)
+        tools_button_menu.addAction(seqdbg_action)
 
         # mainworkspace_group = QGroupBox("Workspace")
         # # mainworkspace_layout = QGridLayout(10,4)
@@ -960,6 +983,45 @@ class YR_MPEA_Widget(QWidget):
         dialog.layout().addWidget(plugin_wrapper)
         dialog.exec_()
 
+    def open_seqdbg_wrapper(self):
+        """Open SeqDBG plugin for annotation graph visualization"""
+        from PyQt5.QtWidgets import QDialog
+        from ..plugins.seqdbg_plugin import SeqDBGPlugin
+        dialog = QDialog()
+        dialog.setWindowTitle(f"SeqDBG - Annotation Graph - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("seqdbg/seqdbg.svg"))
+        dialog.setMinimumSize(1200, 800)
+        dialog.setLayout(QVBoxLayout())
+
+        # Create SeqDBG plugin instance
+        plugin = SeqDBGPlugin()
+        plugin.setup_ui()
+        
+        # Connect export signal to workspace
+        plugin.export_to_dataset_signal.connect(self.add_seqdbg_export_to_workspace)
+        
+        dialog.layout().addWidget(plugin)
+        dialog.exec_()
+    
+    def add_seqdbg_export_to_workspace(self, dataset_items):
+        """Add exported items from SeqDBG to workspace"""
+        if not dataset_items:
+            return
+        
+        # Add sequences to workspace
+        for item in dataset_items:
+            if item.item_type == "sequence":
+                self.workspace.add_sequence(item.sequences)
+                self.workspace_hint.setText("Single Gene Workspace")
+                self.workspace_hint.hide()
+        
+        QMessageBox.information(
+            self,
+            "Export Successful",
+            f"Exported {len(dataset_items)} items from SeqDBG to workspace.\n\n"
+            "Sequences are now available for alignment and phylogenetic analysis."
+        )
+
     def create_new_dataset(self):
         """创建新的Dataset - 只创建空对象和ToolButton，不打开对话框"""
         try:
@@ -982,32 +1044,160 @@ class YR_MPEA_Widget(QWidget):
         file_dialog = QFileDialog()
         file_dialog.setFileMode(QFileDialog.ExistingFile)
         file_dialog.setNameFilter("NEXUS files (*.nex *.nexus)")
-        
+
         if file_dialog.exec_():
             selected_files = file_dialog.selectedFiles()
             if selected_files:
                 nexus_file = selected_files[0]
                 try:
-                    # TODO: 实现从NEXUS文件解析Dataset的逻辑
-                    QMessageBox.information(
-                        self, "Import Dataset", 
-                        f"Dataset imported from NEXUS file: {nexus_file}\n"
-                        "Note: Full implementation requires NEXUS parser integration."
+                    # 调用导入函数解析NEXUS文件
+                    dataset_items, partition_scheme, summary = import_partitioned_nexus(nexus_file)
+
+                    # 创建Dataset对象
+                    class DatasetObject:
+                        def __init__(self, name, items=None, partition_scheme=None):
+                            self.dataset_name = name
+                            self.items = items if items else []
+                            self.partition_scheme = partition_scheme
+                            self.summary = summary if summary else {}
+
+                    # 使用文件名（不含扩展名）作为数据集名称
+                    dataset_name = os.path.splitext(os.path.basename(nexus_file))[0]
+                    dataset = DatasetObject(
+                        name=dataset_name,
+                        items=dataset_items,
+                        partition_scheme=partition_scheme
                     )
+
+                    # 添加到工作区
+                    self.workspace.add_dataset(dataset)
+
+                    # 显示成功消息
+                    message = (
+                        f"Successfully imported dataset from:\n{nexus_file}\n\n"
+                        f"Dataset Name: {dataset_name}\n"
+                        f"Taxa: {summary.get('ntax', 0)}\n"
+                        f"Total Length: {summary.get('nchar', 0)}\n"
+                        f"Partitions: {summary.get('partition_count', 0)}\n"
+                        f"Partition Names: {', '.join(summary.get('partition_names', []))}"
+                    )
+                    QMessageBox.information(self, "Import Success", message)
+
+                except FileNotFoundError as e:
+                    QMessageBox.critical(self, "File Not Found", str(e))
+                except ValueError as e:
+                    QMessageBox.critical(self, "Parse Error", str(e))
                 except Exception as e:
-                    QMessageBox.critical(self, "Error", f"Failed to import dataset from NEXUS: {str(e)}")
+                    QMessageBox.critical(self, "Import Error", f"Failed to import dataset from NEXUS: {str(e)}")
     
     def create_dataset_by_seqmatrix(self):
         """通过SeqMatrix创建Dataset"""
         try:
-            # TODO: 实现SeqMatrix插件调用
-            QMessageBox.information(
-                self, "Create Dataset", 
-                "Creating dataset using SeqMatrix plugin...\n"
-                "Note: SeqMatrix plugin integration pending."
-            )
+            # 获取 SeqMatrix 插件
+            seqmatrix_entry = self.plugin_factory.get_seqmatrix_plugin()
+            seqmatrix_window = seqmatrix_entry.run(import_from="YR_MPEA")
+            
+            # 连接信号
+            seqmatrix_window.import_dataset_signal.connect(self.handle_seqmatrix_import)
+            
+            # 保存引用防止被垃圾回收
+            if not hasattr(self, 'seqmatrix_windows'):
+                self.seqmatrix_windows = []
+            self.seqmatrix_windows.append(seqmatrix_window)
+            
+            # 显示窗口
+            seqmatrix_window.show()
+            
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to create dataset by SeqMatrix: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to open SeqMatrix: {str(e)}")
+    
+    def handle_seqmatrix_import(self, sequences_list, partition_definitions):
+        """处理从 SeqMatrix 导入的数据
+        
+        Args:
+            sequences_list: 序列列表 [{'name': str, 'seq': str}, ...]
+            partition_definitions: 分区定义列表 [{'name': str, 'start': int, 'end': int}, ...]
+        """
+        try:
+            from YR_MPE.platforms.methods.import_partitioned_nexus import TempDatasetItem
+            from Bio.Seq import Seq
+            from Bio.SeqRecord import SeqRecord
+
+            # 创建 DatasetItem 列表
+            dataset_items = []
+
+            for partition in partition_definitions:
+                partition_name = partition['name']
+                start_pos = partition['start'] - 1  # 转换为0-based索引
+                end_pos = partition['end']  # 包含结束位置
+
+                # 创建 DatasetItem
+                dataset_item = TempDatasetItem()
+                dataset_item.loci_name = partition_name
+                dataset_item.file_path = "SeqMatrix"
+                dataset_item.format = 'nexus'
+
+                # 提取该分区的序列
+                item_sequences = []
+                for seq_data in sequences_list:
+                    full_seq = seq_data['seq']
+                    partition_seq = full_seq[start_pos:end_pos]
+
+                    # 创建 SeqRecord
+                    seq_record = SeqRecord(
+                        Seq(partition_seq),
+                        id=seq_data['name'],
+                        description=f"{partition_name} partition"
+                    )
+                    item_sequences.append(seq_record)
+
+                dataset_item.sequences = item_sequences
+                dataset_item.length = end_pos - start_pos
+                dataset_item.sequence_count = len(item_sequences)
+
+                # 检查是否已比对
+                all_chars = ''.join(str(record.seq) for record in item_sequences)
+                has_missing = '?' in all_chars or '-' in all_chars
+                dataset_item.is_aligned = not has_missing or (has_missing and len(set(all_chars) - set('?-\n')) > 1)
+
+                dataset_items.append(dataset_item)
+
+            # 生成分区方案字符串
+            partition_scheme = "begin sets;\n"
+            for partition in partition_definitions:
+                partition_scheme += f"    charset {partition['name']} = {partition['start']}-{partition['end']};\n"
+            partition_scheme += "end;"
+
+            # 创建 Dataset 对象
+            class DatasetObject:
+                def __init__(self, name, items=None, partition_scheme=None):
+                    self.dataset_name = name
+                    self.items = items if items else []
+                    self.partition_scheme = partition_scheme
+                    self.summary = {}
+
+            dataset = DatasetObject(
+                name="SeqMatrix Dataset",
+                items=dataset_items,
+                partition_scheme=partition_scheme
+            )
+
+            # 添加到工作区
+            self.workspace.add_dataset(dataset)
+
+            # 显示成功消息
+            partition_names = [p['name'] for p in partition_definitions]
+            message = (
+                f"Successfully imported dataset from SeqMatrix\n\n"
+                f"Taxa: {len(sequences_list)}\n"
+                f"Total Length: {len(sequences_list[0]['seq']) if sequences_list else 0}\n"
+                f"Partitions: {len(partition_definitions)}\n"
+                f"Partition Names: {', '.join(partition_names)}"
+            )
+            QMessageBox.information(self, "Import Success", message)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Import Error", f"Failed to import dataset from SeqMatrix: {str(e)}")
     
     def create_dataset_by_seqdbg(self):
         """通过SeqDBG创建Dataset"""
