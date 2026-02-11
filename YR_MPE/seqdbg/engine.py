@@ -104,7 +104,8 @@ class SeqDBGraphBuilder:
     def load_files(
         self, 
         file_paths: List[str],
-        extract_sequences: bool = True
+        extract_sequences: bool = True,
+        progress_callback=None
     ) -> Dict[str, bool]:
         """
         批量加载GeneBank文件
@@ -112,13 +113,19 @@ class SeqDBGraphBuilder:
         Args:
             file_paths: GeneBank文件路径列表
             extract_sequences: 是否提取序列
+            progress_callback: 可选，进度回调函数 (message, current, total)
             
         Returns:
             {file_path: success} 字典
         """
         results = {}
+        total_files = len(file_paths)
         
-        for file_path in file_paths:
+        for i, file_path in enumerate(file_paths):
+            # 调用进度回调
+            if progress_callback:
+                progress_callback(f"正在解析: {Path(file_path).name}", i + 1, total_files)
+            
             results[file_path] = self.load_file(file_path, extract_sequences)
         
         return results
@@ -211,7 +218,8 @@ class SeqDBGraphBuilder:
     def build_multi_genome_graph(
         self, 
         file_paths: List[str],
-        extract_sequences: bool = True
+        extract_sequences: bool = True,
+        progress_callback=None
     ) -> AnnotationGraph:
         """
         构建多基因组邻接图
@@ -219,6 +227,7 @@ class SeqDBGraphBuilder:
         Args:
             file_paths: GeneBank文件路径列表
             extract_sequences: 是否提取序列
+            progress_callback: 可选，进度回调函数 (message, current, total)
             
         Returns:
             构建好的图
@@ -234,7 +243,7 @@ class SeqDBGraphBuilder:
         }
         
         # 加载所有文件
-        self.load_files(file_paths, extract_sequences)
+        self.load_files(file_paths, extract_sequences, progress_callback)
         
         # 统计唯一注释
         self.stats["unique_annotations"] = len(self.graph.nodes)

@@ -11,6 +11,7 @@ from .models import AnnotationNode, AnnotationGraph, GeneInfo, GeneStats
 from .parser import GeneBankParser
 from .normalizer import AnnotationNormalizer
 from .engine import SeqDBGraphBuilder
+from .parser_thread import SeqDBGParserThread, SeqDBGIncrementalParserThread
 
 __all__ = [
     "AnnotationNode",
@@ -20,4 +21,6 @@ __all__ = [
     "GeneBankParser",
     "AnnotationNormalizer",
     "SeqDBGraphBuilder",
+    "SeqDBGParserThread",
+    "SeqDBGIncrementalParserThread",
 ]
