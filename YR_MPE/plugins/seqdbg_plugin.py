@@ -118,7 +118,7 @@ class SeqDBGWindow(QMainWindow):
             self.builder.reset()
             graph = self.builder.build_multi_genome_graph(
                 self.loaded_files,
-                extract_sequences=False  # 不提取序列以加快速度
+                extract_sequences=True  # 提取序列以支持导出功能
             )
             
             # 统计信息
@@ -169,7 +169,7 @@ class SeqDBGWindow(QMainWindow):
             self.builder.reset()
             graph = self.builder.build_multi_genome_graph(
                 self.loaded_files,
-                extract_sequences=False
+                extract_sequences=True  # 提取序列以支持导出功能
             )
             
             # 更新查看器，只显示选中的entries
@@ -191,7 +191,11 @@ class SeqDBGWindow(QMainWindow):
         """
         # 获取统计数据
         stats = self.builder.get_gene_stats(filter_entries=filter_entries)
-        self.table_viewer.set_stats_data(stats)
+        
+        # 获取基因信息和序列数据
+        gene_info_data, sequence_data, gene_type_map = self.builder.get_gene_info_and_sequences()
+        
+        self.table_viewer.set_stats_data(stats, self.loaded_files, gene_info_data, sequence_data, gene_type_map)
         
         # 获取邻接数据
         adjacency_data = {}

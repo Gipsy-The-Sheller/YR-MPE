@@ -15,6 +15,8 @@ from pathlib import Path
 from .models import AnnotationGraph, GeneInfo, AnnotationNode, GeneStats
 from .parser import GeneBankParser
 from .normalizer import AnnotationNormalizer
+from Bio import SeqIO
+from Bio.SeqRecord import SeqRecord
 
 logger = logging.getLogger(__name__)
 
@@ -165,18 +167,33 @@ class SeqDBGraphBuilder:
             
             # 提取序列
             if extract_sequences:
+                # 提取 DNA 序列
                 seq_record = self.parser.extract_sequence(file_path, entry_id, gene)
                 if seq_record:
                     node = self.graph.get_or_create_node(gene.normalized_name)
                     node.add_sequence(genome_id, seq_record)
+                
+                # 如果是 CDS 类型，也提取蛋白质序列
+                if gene.gene_type == "CDS":
+                    protein_record = self.parser.extract_protein_sequence(file_path, entry_id, gene)
+                    if protein_record:
+                        node = self.graph.get_or_create_node(gene.normalized_name)
+                        # 蛋白质序列ID使用 entry_id_protein 后缀，可通过后缀区分
+                        node.add_sequence(genome_id, protein_record)
+        
+        # 构建邻接关系（基于基因组坐标顺序）
+        # 按基因组坐标排序后的相邻基因即为邻接关系
+        # 邻接关系是有向的：前面基因 -> 后面基因
+        for i in range(len(normalized_genes) - 1):
+            gene1 = normalized_genes[i]
+            gene2 = normalized_genes[i + 1]
             
-            # 添加边（邻接关系）
-            if i > 0:
-                prev_gene = normalized_genes[i - 1]
-                self.graph.add_edge(
-                    prev_gene.normalized_name,
-                    gene.normalized_name
-                )
+            # 添加有向边：gene1 -> gene2
+            self.graph.add_edge(
+                gene1.normalized_name,
+                gene2.normalized_name
+            )
+            logger.debug(f"邻接: {gene1.normalized_name}({gene1.start}-{gene1.end}) -> {gene2.normalized_name}({gene2.start}-{gene2.end})")
     
     def _apply_normalization_mapping(self):
         """
@@ -407,8 +424,18 @@ class SeqDBGraphBuilder:
                     left_node_counts[target_name] += 1
             
             taxon_counts: Dict[str, int] = {}
+            gene_type_map: Dict[str, Dict[str, int]] = {}  # {node_name: {gene_type: count}}
             for node_name, node in self.graph.nodes.items():
                 taxon_counts[node_name] = node.occurrences
+                
+                # 收集基因类型信息
+                gene_type_map[node_name] = {}
+                for genome_id, gene_infos in node.genomes.items():
+                    for gene_info in gene_infos:
+                        gene_type = gene_info.gene_type or "gene"
+                        if gene_type not in gene_type_map[node_name]:
+                            gene_type_map[node_name][gene_type] = 0
+                        gene_type_map[node_name][gene_type] += 1
             
             for node_name in self.graph.nodes.keys():
                 left = left_counts.get(node_name, 0)
@@ -417,13 +444,19 @@ class SeqDBGraphBuilder:
                 right_nodes = right_node_counts.get(node_name, 0)
                 taxon = taxon_counts.get(node_name, 0)
                 
+                # 确定主要基因类型（出现次数最多）
+                gene_type = "gene"
+                if node_name in gene_type_map and gene_type_map[node_name]:
+                    gene_type = max(gene_type_map[node_name].items(), key=lambda x: x[1])[0]
+                
                 stats = GeneStats(
                     gene_name=node_name,
                     left=left,
                     right=right,
                     left_nodes=left_nodes,
                     right_nodes=right_nodes,
-                    taxon=taxon
+                    taxon=taxon,
+                    gene_type=gene_type
                 )
                 stats_list.append(stats)
         else:
@@ -434,6 +467,8 @@ class SeqDBGraphBuilder:
             entry_genes: Dict[str, List[Tuple[str, int]]] = {}  # {entry_id: [(gene_name, index), ...]}
             
             # 从所有节点中收集在过滤entries中的基因
+            gene_type_map: Dict[str, Dict[str, int]] = {}  # {node_name: {gene_type: count}}
+            entry_genes_full: Dict[str, List[GeneInfo]] = {}  # {entry_id: [GeneInfo, ...]} 存储完整基因信息
             for node_name, node in self.graph.nodes.items():
                 for genome_id, gene_infos in node.genomes.items():
                     for gene_info in gene_infos:
@@ -442,26 +477,19 @@ class SeqDBGraphBuilder:
                                 gene_in_entries[node_name] = []
                             gene_in_entries[node_name].append((gene_info.entry_id, gene_info.start))
                             
-                            if gene_info.entry_id not in entry_genes:
-                                entry_genes[gene_info.entry_id] = []
-                            entry_genes[gene_info.entry_id].append((node_name, gene_info.start))
+                            if gene_info.entry_id not in entry_genes_full:
+                                entry_genes_full[gene_info.entry_id] = []
+                            entry_genes_full[gene_info.entry_id].append(gene_info)
+                            
+                            # 收集基因类型信息
+                            gene_type = gene_info.gene_type or "gene"
+                            if node_name not in gene_type_map:
+                                gene_type_map[node_name] = {}
+                            if gene_type not in gene_type_map[node_name]:
+                                gene_type_map[node_name][gene_type] = 0
+                            gene_type_map[node_name][gene_type] += 1
             
-            # 对于每个entry中的基因，按位置排序并重建邻接关系
-            for entry_id, genes_with_pos in entry_genes.items():
-                # 按起始位置排序
-                genes_with_pos.sort(key=lambda x: x[1])
-                
-                # 构建该entry中的邻接关系
-                for i in range(len(genes_with_pos)):
-                    current_gene_name = genes_with_pos[i][0]
-                    
-                    # 统计该基因的出现次数
-                    if current_gene_name not in gene_in_entries:
-                        gene_in_entries[current_gene_name] = []
-                    if (entry_id, genes_with_pos[i][1]) not in gene_in_entries[current_gene_name]:
-                        gene_in_entries[current_gene_name].append((entry_id, genes_with_pos[i][1]))
-            
-            # 重新计算统计
+            # 重新计算统计（基于基因组坐标顺序）
             taxon_counts: Dict[str, int] = {}
             left_counts: Dict[str, int] = {}
             right_counts: Dict[str, int] = {}
@@ -471,31 +499,33 @@ class SeqDBGraphBuilder:
             for gene_name, occurrences in gene_in_entries.items():
                 taxon_counts[gene_name] = len(occurrences)
             
-            for entry_id, genes_with_pos in entry_genes.items():
-                genes_with_pos.sort(key=lambda x: x[1])
-                for i in range(len(genes_with_pos)):
-                    current_gene_name = genes_with_pos[i][0]
+            # 对于每个entry中的基因，按坐标顺序构建邻接关系
+            for entry_id, genes in entry_genes_full.items():
+                # 按起始位置排序
+                genes.sort(key=lambda x: x.start)
+                
+                # 构建邻接关系（基于基因组坐标顺序）
+                for i in range(len(genes) - 1):
+                    gene1 = genes[i]
+                    gene2 = genes[i + 1]
                     
-                    if i > 0:
-                        prev_gene_name = genes_with_pos[i - 1][0]
-                        
-                        # 左邻接
-                        if prev_gene_name not in left_counts:
-                            left_counts[prev_gene_name] = 0
-                        left_counts[prev_gene_name] += 1
-                        
-                        if prev_gene_name not in left_node_counts:
-                            left_node_counts[prev_gene_name] = set()
-                        left_node_counts[prev_gene_name].add(current_gene_name)
-                        
-                        # 右邻接
-                        if current_gene_name not in right_counts:
-                            right_counts[current_gene_name] = 0
-                        right_counts[current_gene_name] += 1
-                        
-                        if current_gene_name not in right_node_counts:
-                            right_node_counts[current_gene_name] = set()
-                        right_node_counts[current_gene_name].add(prev_gene_name)
+                    # 右邻接：gene1 -> gene2
+                    if gene1.normalized_name not in right_counts:
+                        right_counts[gene1.normalized_name] = 0
+                    right_counts[gene1.normalized_name] += 1
+                    
+                    if gene1.normalized_name not in right_node_counts:
+                        right_node_counts[gene1.normalized_name] = set()
+                    right_node_counts[gene1.normalized_name].add(gene2.normalized_name)
+                    
+                    # 左邻接：gene2 -> gene1
+                    if gene2.normalized_name not in left_counts:
+                        left_counts[gene2.normalized_name] = 0
+                    left_counts[gene2.normalized_name] += 1
+                    
+                    if gene2.normalized_name not in left_node_counts:
+                        left_node_counts[gene2.normalized_name] = set()
+                    left_node_counts[gene2.normalized_name].add(gene1.normalized_name)
             
             # 转换集合为计数
             left_node_counts_final = {k: len(v) if isinstance(v, set) else v for k, v in left_node_counts.items()}
@@ -509,13 +539,19 @@ class SeqDBGraphBuilder:
                 right_nodes = right_node_counts_final.get(gene_name, 0)
                 taxon = taxon_counts.get(gene_name, 0)
                 
+                # 确定主要基因类型（出现次数最多）
+                gene_type = "gene"
+                if gene_name in gene_type_map and gene_type_map[gene_name]:
+                    gene_type = max(gene_type_map[gene_name].items(), key=lambda x: x[1])[0]
+                
                 stats = GeneStats(
                     gene_name=gene_name,
                     left=left,
                     right=right,
                     left_nodes=left_nodes,
                     right_nodes=right_nodes,
-                    taxon=taxon
+                    taxon=taxon,
+                    gene_type=gene_type
                 )
                 stats_list.append(stats)
         
@@ -566,3 +602,49 @@ class SeqDBGraphBuilder:
             "right_adjacent": sorted(right_adjacent.items(), key=lambda x: -x[1]),
             "taxon_info": sorted(taxon_info.items(), key=lambda x: -x[1])
         }
+    
+    def get_gene_info_and_sequences(self, use_protein: bool = False) -> Tuple[Dict[str, Dict[str, GeneInfo]], Dict[str, Dict[str, List[SeqRecord]]], Dict[str, str]]:
+        """
+        获取所有基因的信息和序列数据
+        
+        Args:
+            use_protein: 已废弃，保留参数以兼容旧调用。现在总是返回所有序列。
+        
+        Returns:
+            (gene_info_data, sequence_data, gene_type_map)
+            - gene_info_data: {gene_name: {genome_id: GeneInfo}}
+            - sequence_data: {gene_name: {genome_id: [SeqRecord]}}  # 返回所有序列列表（DNA和蛋白质）
+            - gene_type_map: {gene_name: gene_type}
+        """
+        gene_info_data = {}
+        sequence_data = {}
+        gene_type_map = {}
+        
+        for node_name, node in self.graph.nodes.items():
+            # 收集基因信息
+            gene_info_data[node_name] = {}
+            for genome_id, gene_infos in node.genomes.items():
+                for gene_info in gene_infos:
+                    # 只保存第一个基因信息（避免重复）
+                    if genome_id not in gene_info_data[node_name]:
+                        gene_info_data[node_name][genome_id] = gene_info
+            
+            # 收集所有序列数据（包括DNA和蛋白质）
+            # 序列ID中的 _protein 后缀可用于区分序列类型
+            sequence_data[node_name] = {}
+            for genome_id, seq_records in node.sequences.items():
+                # 直接返回所有序列，让调用者根据需要过滤
+                sequence_data[node_name][genome_id] = seq_records.copy()
+            
+            # 收集基因类型
+            if node_name not in gene_type_map:
+                gene_type_map[node_name] = "gene"
+            
+            for genome_id, gene_infos in node.genomes.items():
+                for gene_info in gene_infos:
+                    if gene_info.gene_type and gene_info.gene_type != "gene":
+                        gene_type_map[node_name] = gene_info.gene_type
+                        break
+        
+        logger.info(f"收集了 {len(gene_info_data)} 个基因的信息和所有序列")
+        return gene_info_data, sequence_data, gene_type_map

@@ -26,6 +26,7 @@ class GeneInfo:
     strand: int                        # 链方向: 1 (正链) 或 -1 (负链)
     entry_id: str = ""                 # 所属的Entry ID
     normalized_name: str = ""          # 标准化后的名称
+    gene_type: str = ""                # 基因类型（CDS/rRNA/tRNA/gene/other）
     sequence: Optional[SeqRecord] = None  # 基因序列（可选，延迟加载）
     
     def __post_init__(self):
@@ -357,6 +358,7 @@ class GeneStats:
     left_nodes: int         # 左邻接节点数量（唯一的不同节点名）
     right_nodes: int        # 右邻接节点数量（唯一的不同节点名）
     taxon: int              # 包含此节点的Entry数量（taxa数量）
+    gene_type: str = "gene" # 基因类型（CDS/rRNA/tRNA/gene/other）
     
     def __str__(self) -> str:
         return f"GeneStats({self.gene_name}, L:{self.left}, R:{self.right}, LNodes:{self.left_nodes}, RNodes:{self.right_nodes}, T:{self.taxon})"
