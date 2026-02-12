@@ -255,7 +255,8 @@ class SeqDBGraphBuilder:
     def export_to_dataset_items(
         self, 
         selected_nodes: List[str],
-        dataset_id: str = ""
+        dataset_id: str = "",
+        is_amino_acid: bool = False
     ) -> List:
         """
         将选中的节点导出为DatasetItem
@@ -263,11 +264,14 @@ class SeqDBGraphBuilder:
         Args:
             selected_nodes: 选中的节点名称列表
             dataset_id: 数据集ID
+            is_amino_acid: 是否只导出氨基酸序列（带_protein后缀的序列）
             
         Returns:
             DatasetItem列表
         """
         from ..platforms.methods.dataset_models import DatasetItem, ITEM_TYPE_SEQUENCE
+        from Bio.SeqRecord import SeqRecord
+        from Bio.Seq import Seq
         
         items = []
         
@@ -283,25 +287,56 @@ class SeqDBGraphBuilder:
                 logger.warning(f"节点 {node_name} 没有序列数据")
                 continue
             
+            # 如果是氨基酸模式，过滤序列
+            filtered_sequences = []
+            if is_amino_acid:
+                # 只保留带有 _protein 后缀的序列
+                for seq_record in all_sequences:
+                    seq_id = seq_record.id
+                    if "_protein" in seq_id:
+                        # 去掉 _protein 后缀
+                        new_id = seq_id.replace("_protein", "")
+                        # 创建新的 SeqRecord
+                        new_seq_record = SeqRecord(
+                            seq=seq_record.seq,
+                            id=new_id,
+                            description=seq_record.description.replace("_protein", ""),
+                            name=seq_record.name
+                        )
+                        filtered_sequences.append(new_seq_record)
+                logger.info(f"氨基酸模式: {node_name} 从 {len(all_sequences)} 条序列中筛选出 {len(filtered_sequences)} 条蛋白质序列")
+            else:
+                # 核苷酸模式，跳过带有 _protein 后缀的序列
+                for seq_record in all_sequences:
+                    seq_id = seq_record.id
+                    if "_protein" not in seq_id:
+                        filtered_sequences.append(seq_record)
+                logger.info(f"核苷酸模式: {node_name} 从 {len(all_sequences)} 条序列中筛选出 {len(filtered_sequences)} 条核苷酸序列")
+            
+            if not filtered_sequences:
+                logger.warning(f"节点 {node_name} 筛选后没有序列数据")
+                continue
+            
             # 创建DatasetItem
             item = DatasetItem(item_type=ITEM_TYPE_SEQUENCE)
             item.dataset_id = dataset_id
             item.loci_name = node_name
-            item.sequences = all_sequences
-            item.sequence_count = len(all_sequences)
+            item.sequences = filtered_sequences
+            item.sequence_count = len(filtered_sequences)
             
-            if all_sequences:
-                item.length = len(all_sequences[0].seq)
+            if filtered_sequences:
+                item.length = len(filtered_sequences[0].seq)
             
             item.data = {
                 "annotation": node_name,
                 "genome_count": node.count,
                 "total_occurrences": node.occurrences,
-                "genomes": list(node.get_unique_genomes())
+                "genomes": list(node.get_unique_genomes()),
+                "sequence_type": "amino_acid" if is_amino_acid else "nucleotide"
             }
             
             items.append(item)
-            logger.info(f"导出节点: {node_name}, {len(all_sequences)} 条序列")
+            logger.info(f"导出节点: {node_name}, {len(filtered_sequences)} 条序列 ({'氨基酸' if is_amino_acid else '核苷酸'})")
         
         return items
     

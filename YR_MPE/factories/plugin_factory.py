@@ -92,3 +92,15 @@ class PluginFactory:
     def get_macse_plugin(self):
         """获取MACSE插件"""
         return self.load_plugin("YR_MPE.plugins.macse_plugin", "MACSEPluginEntry")
+    
+    def get_seqmatrix_plugin(self):
+        """获取SeqMatrix插件"""
+        return self.load_plugin("YR_MPE.plugins.seqmatrix", "SeqMatrixPluginEntry")
+    
+    def get_seqdbg_plugin(self):
+        """获取SeqDBG插件"""
+        return self.load_plugin("YR_MPE.plugins.seqdbg_plugin", "SeqDBGPlugin")
+    
+    def get_model_parameter_plugin(self):
+        """获取Model Parameter Estimation插件"""
+        return self.load_plugin("YR_MPE.plugins.model_parameter_plugin", "ModelParameterPluginEntry")

@@ -12,12 +12,13 @@ from typing import Optional, List, Dict
 from pathlib import Path
 
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QMessageBox
+    QMainWindow, QWidget, QVBoxLayout, QMessageBox, QProgressDialog
 )
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal, Qt
 
 from ..seqdbg import SeqDBGraphBuilder, AnnotationNormalizer
 from ..seqdbg.table_viewer import SeqDBGTableViewer
+from ..seqdbg.parser_thread import SeqDBGParserThread, SeqDBGIncrementalParserThread
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,10 @@ class SeqDBGWindow(QMainWindow):
         self.loaded_files: List[str] = []  # 已加载的文件列表
         self.entry_to_file_map: Dict[str, str] = {}  # {entry_id: file_path}
         
+        # 后台线程和进度对话框
+        self.parser_thread: Optional[SeqDBGParserThread] = None
+        self.progress_dialog: Optional[QProgressDialog] = None
+        
         # 初始化UI
         self.init_ui()
         
@@ -70,7 +75,7 @@ class SeqDBGWindow(QMainWindow):
         self.setCentralWidget(main_widget)
         
         # 创建表格查看器
-        self.table_viewer = SeqDBGTableViewer()
+        self.table_viewer = SeqDBGTableViewer(builder=self.builder)
         self.viewer_layout = QVBoxLayout()
         self.viewer_layout.setContentsMargins(0, 0, 0, 0)
         self.viewer_layout.addWidget(self.table_viewer)
@@ -79,6 +84,9 @@ class SeqDBGWindow(QMainWindow):
         # 连接信号
         self.table_viewer.taxon_manager.filesAdded.connect(self.on_files_added)
         self.table_viewer.taxon_manager.entriesRemoved.connect(self.on_entries_removed)
+        
+        # 连接 exportToDataset 信号到 import_dataset_signal（转发给YR-MPEA）
+        self.table_viewer.dataset_widget.exportToDataset.connect(self.import_dataset_signal)
     
     
     
@@ -105,45 +113,45 @@ class SeqDBGWindow(QMainWindow):
     
     def on_files_added(self, files: List[str]):
         """
-        处理添加的GenBank文件
+        处理添加的GenBank文件（使用后台线程）
         
         Args:
             files: 文件路径列表
         """
-        try:
-            # 存储文件
-            self.loaded_files.extend(files)
-            
-            # 构建图
-            self.builder.reset()
-            graph = self.builder.build_multi_genome_graph(
-                self.loaded_files,
-                extract_sequences=True  # 提取序列以支持导出功能
-            )
-            
-            # 统计信息
-            stats = self.builder.get_stats()
-            logger.info(f"Graph built: {stats}")
-            
-            # 更新查看器
-            self.update_viewer(graph)
-            
-            # 添加entries到列表和映射
-            for genome_id, entry_ids in graph.genome_entries.items():
-                file_path = next((f for f in files if Path(f).stem == genome_id), files[0])
-                for entry_id in entry_ids:
-                    self.entry_to_file_map[entry_id] = file_path
-                    self.table_viewer.taxon_manager.add_entry(entry_id)
-            
-            logger.info(f"成功加载 {len(files)} 个文件")
-            
-        except Exception as e:
-            logger.error(f"文件加载失败: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to load files:\n{e}")
+        # 如果已有线程在运行，不重复启动
+        if self.parser_thread and self.parser_thread.isRunning():
+            QMessageBox.warning(self, "警告", "正在解析文件，请稍候...")
+            return
+        
+        # 存储文件
+        self.loaded_files.extend(files)
+        
+        # 创建并启动后台线程
+        self.parser_thread = SeqDBGParserThread(
+            self.builder,
+            self.loaded_files,
+            extract_sequences=True,
+            filter_entries=None
+        )
+        
+        # 连接信号
+        self.parser_thread.progress.connect(self.on_parser_progress)
+        self.parser_thread.file_progress.connect(self.on_file_progress)
+        self.parser_thread.finished.connect(self.on_parser_finished)
+        self.parser_thread.error.connect(self.on_parser_error)
+        self.parser_thread.status.connect(self.on_parser_status)
+        
+        # 显示加载进度对话框
+        self.show_loading_dialog(len(self.loaded_files))
+        
+        # 启动线程
+        self.parser_thread.start()
+        
+        logger.info(f"启动后台解析任务: {len(files)} 个文件")
     
     def on_entries_removed(self, entry_ids: List[str]):
         """
-        处理移除的Entries
+        处理移除的Entries（使用后台线程）
         
         Args:
             entry_ids: Entry ID列表
@@ -164,22 +172,55 @@ class SeqDBGWindow(QMainWindow):
             self.table_viewer.sankey_canvas.clear_plot()
             return
         
-        # 重新构建图（只包含选中的entries）
-        try:
-            self.builder.reset()
-            graph = self.builder.build_multi_genome_graph(
-                self.loaded_files,
-                extract_sequences=True  # 提取序列以支持导出功能
+        # 重新构建图（只包含选中的entries）- 使用后台线程
+        if self.parser_thread and self.parser_thread.isRunning():
+            QMessageBox.warning(self, "警告", "正在处理数据，请稍候...")
+            return
+        
+        # 创建并启动后台线程
+        self.parser_thread = SeqDBGParserThread(
+            self.builder,
+            self.loaded_files,
+            extract_sequences=True,
+            filter_entries=current_entries
+        )
+        
+        # 连接信号
+        self.parser_thread.progress.connect(self.on_parser_progress)
+        self.parser_thread.file_progress.connect(self.on_file_progress)
+        self.parser_thread.finished.connect(lambda g, s: self.on_parser_finished_with_filter(g, s, current_entries))
+        self.parser_thread.error.connect(self.on_parser_error)
+        self.parser_thread.status.connect(self.on_parser_status)
+        
+        # 显示加载进度对话框
+        self.show_loading_dialog(len(self.loaded_files))
+        
+        # 启动线程
+        self.parser_thread.start()
+        
+        logger.info(f"启动后台重新解析任务: {len(self.loaded_files)} 个文件, 过滤 {len(current_entries)} 个entries")
+    
+    def on_parser_finished_with_filter(self, graph, stats, filter_entries):
+        """处理解析完成信号（带过滤）"""
+        self.hide_loading_dialog()
+        
+        # 更新查看器，只显示选中的entries
+        self.update_viewer(graph, filter_entries=filter_entries)
+        
+        # 添加entries到列表和映射
+        for genome_id, entry_ids in graph.genome_entries.items():
+            file_path = next(
+                (f for f in self.loaded_files if Path(f).stem == genome_id),
+                self.loaded_files[0] if self.loaded_files else ""
             )
-            
-            # 更新查看器，只显示选中的entries
-            self.update_viewer(graph, filter_entries=current_entries)
-            
-            logger.info(f"表格已更新，当前 {len(current_entries)} 个entries")
-            
-        except Exception as e:
-            logger.error(f"更新表格失败: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to update table:\n{e}")
+            for entry_id in entry_ids:
+                self.entry_to_file_map[entry_id] = file_path
+                self.table_viewer.taxon_manager.add_entry(entry_id)
+        
+        # 清理线程
+        self.parser_thread = None
+        
+        logger.info(f"重新解析完成: {len(stats)} 个基因, 过滤 {len(filter_entries)} 个entries")
     
     def update_viewer(self, graph, filter_entries: Optional[List[str]] = None):
         """
@@ -208,6 +249,91 @@ class SeqDBGWindow(QMainWindow):
         
         logger.info(f"查看器更新完成: {len(stats)} 个基因")
     
+    def show_loading_dialog(self, total_files: int):
+        """显示加载进度对话框"""
+        if self.progress_dialog:
+            self.progress_dialog.close()
+        
+        self.progress_dialog = QProgressDialog(
+            "正在解析 GenBank 文件...",
+            "取消",
+            0,
+            total_files,
+            self
+        )
+        self.progress_dialog.setWindowTitle("解析进度")
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.setAutoClose(False)
+        self.progress_dialog.setAutoReset(False)
+        self.progress_dialog.canceled.connect(self.on_progress_cancelled)
+        self.progress_dialog.show()
+        
+        logger.info(f"显示进度对话框: {total_files} 个文件")
+    
+    def hide_loading_dialog(self):
+        """隐藏加载进度对话框"""
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+    
+    def on_parser_progress(self, message: str, current: int, total: int):
+        """处理解析进度信号"""
+        if self.progress_dialog:
+            self.progress_dialog.setLabelText(message)
+            self.progress_dialog.setValue(current)
+        logger.debug(f"解析进度: {current}/{total} - {message}")
+    
+    def on_file_progress(self, file_name: str, current: int, total: int):
+        """处理文件处理进度信号"""
+        if self.progress_dialog:
+            self.progress_dialog.setLabelText(f"正在处理: {file_name}")
+            self.progress_dialog.setValue(current)
+    
+    def on_parser_finished(self, graph, stats):
+        """处理解析完成信号"""
+        self.hide_loading_dialog()
+        
+        # 更新查看器
+        self.update_viewer(graph)
+        
+        # 添加entries到列表和映射
+        for genome_id, entry_ids in graph.genome_entries.items():
+            file_path = next(
+                (f for f in self.loaded_files if Path(f).stem == genome_id),
+                self.loaded_files[0] if self.loaded_files else ""
+            )
+            for entry_id in entry_ids:
+                self.entry_to_file_map[entry_id] = file_path
+                self.table_viewer.taxon_manager.add_entry(entry_id)
+        
+        # 清理线程
+        self.parser_thread = None
+        
+        logger.info(f"解析完成: {len(stats)} 个基因")
+    
+    def on_parser_error(self, error_msg: str):
+        """处理解析错误信号"""
+        self.hide_loading_dialog()
+        
+        # 清理线程
+        self.parser_thread = None
+        
+        QMessageBox.critical(self, "解析错误", f"解析文件时发生错误:\n{error_msg}")
+        logger.error(f"解析错误: {error_msg}")
+    
+    def on_parser_status(self, status: str):
+        """处理解析状态信号"""
+        if self.progress_dialog:
+            self.progress_dialog.setLabelText(status)
+        logger.info(f"解析状态: {status}")
+    
+    def on_progress_cancelled(self):
+        """处理进度对话框取消信号"""
+        if self.parser_thread:
+            self.parser_thread.cancel()
+        logger.info("用户取消了解析任务")
+    
     
     
     
@@ -216,16 +342,33 @@ class SeqDBGWindow(QMainWindow):
     
     def closeEvent(self, event):
         """处理关闭事件"""
+        # 取消正在运行的线程
+        if self.parser_thread and self.parser_thread.isRunning():
+            self.parser_thread.cancel()
+            self.parser_thread.wait(3000)  # 等待最多3秒
+        
         # 对于新的表格查看器，暂时不处理选择导出
         # 正常关闭
         super().closeEvent(event)
     
     def cleanup(self):
         """清理资源"""
+        # 取消并清理线程
+        if self.parser_thread and self.parser_thread.isRunning():
+            self.parser_thread.cancel()
+            self.parser_thread.wait(3000)  # 等待最多3秒
+        
+        # 隐藏进度对话框
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+        
+        # 清理构建器和查看器
         if self.builder:
             self.builder.clear_cache()
         if self.table_viewer:
             self.table_viewer.clear_all()
+        
         logger.info("SeqDBG cleanup completed")
 
 
