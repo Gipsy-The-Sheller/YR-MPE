@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_1" data-name=" 图层 1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 45 45.7">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: none;
+        stroke: #4e6691;
+        stroke-linecap: round;
+        stroke-miterlimit: 10;
+        stroke-width: 3.7px;
+      }
+
+      .cls-2 {
+        fill: #4e6691;
+        opacity: 0;
+      }
+
+      .cls-2, .cls-3 {
+        stroke-width: 0px;
+      }
+
+      .cls-3 {
+        fill: #ba3e45;
+      }
+    </style>
+  </defs>
+  <g>
+    <circle class="cls-1" cx="22.5" cy="22.8" r="18.7"/>
+    <circle class="cls-2" cx="22.5" cy="22.8" r="18.7"/>
+  </g>
+  <g>
+    <circle class="cls-1" cx="22.5" cy="22.8" r="13"/>
+    <circle class="cls-2" cx="22.5" cy="22.8" r="13"/>
+  </g>
+  <g>
+    <circle class="cls-1" cx="22.5" cy="22.8" r="6.6"/>
+    <circle class="cls-2" cx="22.5" cy="22.8" r="6.6"/>
+  </g>
+  <line class="cls-1" x1="2.1" y1="22.8" x2="43" y2="22.8"/>
+  <line class="cls-1" x1="22.5" y1="2.4" x2="22.5" y2="43.2"/>
+  <circle class="cls-3" cx="32.6" cy="15.9" r="3.5"/>
+  <circle class="cls-3" cx="14.3" cy="9.4" r="2"/>
+  <circle class="cls-3" cx="14.3" cy="34.3" r="4.4"/>
+</svg>

@@ -1,0 +1,690 @@
+"""
+Dataset Manager Module
+实现多序列数据集的管理和批量处理功能
+"""
+import os
+import csv
+from typing import List, Dict, Optional
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, 
+                            QTableWidgetItem, QPushButton, QCheckBox, QLabel, 
+                            QFileDialog, QMessageBox, QMenuBar, QMenu, QAction,
+                            QRadioButton, QButtonGroup, QGroupBox, QWidget)
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QColor
+from Bio import SeqIO
+
+# 添加新的导入
+from .export_partitioned_nexus import export_partitioned_nexus
+
+
+class DatasetItem:
+    """Dataset数据项模型"""
+    
+    def __init__(self):
+        self.selected = False          # 是否选中
+        self.loci_name = ""           # 位点名称
+        self.length = 0               # 序列长度
+        self.sequence_count = 0       # 序列数量
+        self.is_aligned = False       # 是否已比对（可手动修改）
+        self.file_path = ""           # 原始文件路径
+        self.sequences = []           # 序列数据
+        self.name = ""                # 添加name属性以兼容Sequence Viewer
+        
+    def __str__(self):
+        return f"DatasetItem(loci_name={self.loci_name}, length={self.length}, count={self.sequence_count})"
+        
+    def set_name(self, name):
+        """设置name属性"""
+        self.name = name
+        self.loci_name = name  # 保持loci_name同步
+        
+    def get_name(self):
+        """获取name属性"""
+        return self.name
+
+
+class DatasetManager(QDialog):
+    """Dataset管理对话框"""
+    
+    # 信号定义
+    dataset_processed = pyqtSignal(list)  # 处理完成的dataset列表
+    
+    def __init__(self, dataset_name: str = "Default Dataset", plugin_factory=None, workspace=None):
+        super().__init__()
+        self.dataset_name = dataset_name
+        self.dataset_items: List[DatasetItem] = []
+        self.plugin_factory = plugin_factory  # 添加plugin_factory引用
+        self.workspace = workspace  # 添加workspace引用
+        self.plugin_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        self.init_ui()
+        
+    def init_ui(self):
+        """初始化UI"""
+        self.setWindowTitle(f"Dataset Manager - {self.dataset_name}")
+        self.setMinimumSize(800, 600)
+        
+        # 主布局
+        main_layout = QVBoxLayout()
+        self.setLayout(main_layout)
+        
+        # 菜单栏
+        menubar = QMenuBar()
+        file_menu = menubar.addMenu("&File")
+        
+        # 导出选项
+        export_fasta_action = QAction("Export (to multiple FASTA files)", self)
+        export_fasta_action.triggered.connect(self.export_to_multiple_fasta)
+        file_menu.addAction(export_fasta_action)
+        
+        export_nexus_action = QAction("Export (to partitioned NEXUS)", self)
+        export_nexus_action.triggered.connect(self.export_to_partitioned_nexus)
+        file_menu.addAction(export_nexus_action)
+        
+        export_summary_action = QAction("Export (Summary)", self)
+        export_summary_action.triggered.connect(self.export_summary)
+        file_menu.addAction(export_summary_action)
+        
+        # Batch Processing 菜单（独立顶级菜单）
+        batch_menu = menubar.addMenu("&Batch Processing")
+        
+        align_menu = QMenu("Align by...", self)
+        batch_menu.addMenu(align_menu)
+        
+        # 添加比对工具选项
+        clustal_omega_action = QAction("Clustal Omega", self)
+        clustal_omega_action.triggered.connect(self.batch_align_clustal_omega)
+        align_menu.addAction(clustal_omega_action)
+        
+        mafft_action = QAction("MAFFT", self)
+        mafft_action.triggered.connect(self.batch_align_mafft)
+        align_menu.addAction(mafft_action)
+        
+        muscle5_action = QAction("Muscle 5", self)
+        muscle5_action.triggered.connect(self.batch_align_muscle5)
+        align_menu.addAction(muscle5_action)
+        
+        macse2_action = QAction("MACSE 2", self)
+        macse2_action.triggered.connect(self.batch_align_macse2)
+        align_menu.addAction(macse2_action)
+        
+        trim_menu = QMenu("Trim by...", self)
+        batch_menu.addMenu(trim_menu)
+        
+        # 添加修剪工具选项
+        trimal_action = QAction("TrimAl", self)
+        trimal_action.triggered.connect(self.batch_trim_trimal)
+        trim_menu.addAction(trimal_action)
+        
+        gblocks_action = QAction("GBlocks", self)
+        gblocks_action.triggered.connect(self.batch_trim_gblocks)
+        trim_menu.addAction(gblocks_action)
+        
+        main_layout.setMenuBar(menubar)
+        
+        # 基础设置区域
+        settings_group = QGroupBox("Settings")
+        settings_layout = QHBoxLayout()
+        settings_group.setLayout(settings_layout)
+        
+        # Topology设置
+        topo_group = QButtonGroup(self)
+        self.topo_linked_radio = QRadioButton("Topo linked")
+        self.topo_unlinked_radio = QRadioButton("Topo unlinked")
+        self.topo_unlinked_radio.setChecked(True)
+        topo_group.addButton(self.topo_linked_radio)
+        topo_group.addButton(self.topo_unlinked_radio)
+        
+        settings_layout.addWidget(QLabel("Topology:"))
+        settings_layout.addWidget(self.topo_linked_radio)
+        settings_layout.addWidget(self.topo_unlinked_radio)
+        
+        # Edge设置（仅在Topo linked时启用）
+        edge_group = QButtonGroup(self)
+        self.edge_linked_radio = QRadioButton("Edge linked")
+        self.edge_unlinked_radio = QRadioButton("Edge unlinked")
+        self.edge_unlinked_radio.setChecked(True)
+        edge_group.addButton(self.edge_linked_radio)
+        edge_group.addButton(self.edge_unlinked_radio)
+        
+        self.edge_settings_widget = QWidget()
+        edge_layout = QHBoxLayout()
+        self.edge_settings_widget.setLayout(edge_layout)
+        edge_layout.addWidget(QLabel("Edge:"))
+        edge_layout.addWidget(self.edge_linked_radio)
+        edge_layout.addWidget(self.edge_unlinked_radio)
+        edge_layout.addStretch()
+        
+        # 默认禁用Edge设置
+        self.edge_settings_widget.setEnabled(False)
+        
+        # 连接Topology选择信号
+        self.topo_linked_radio.toggled.connect(self.on_topo_linked_toggled)
+        
+        settings_layout.addWidget(self.edge_settings_widget)
+        settings_layout.addStretch()
+        
+        main_layout.addWidget(settings_group)
+        
+        # 表格区域
+        table_layout = QVBoxLayout()
+        
+        # "+"按钮
+        add_button = QPushButton("+")
+        add_button.clicked.connect(self.add_datasets)
+        table_layout.addWidget(add_button)
+        
+        # 数据表格
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels([
+            "Selected", "Loci Name", "Length", "Sequence Count", 
+            "Aligned", "View"
+        ])
+        self.table.horizontalHeader().setStretchLastSection(True)
+        # 启用右键菜单
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_table_context_menu)
+        table_layout.addWidget(self.table)
+        
+        main_layout.addLayout(table_layout)
+        
+    def on_topo_linked_toggled(self, checked: bool):
+        """Topology链接状态切换时的处理"""
+        self.edge_settings_widget.setEnabled(checked)
+        
+    def add_datasets(self):
+        """添加新的序列数据集"""
+        file_dialog = QFileDialog()
+        file_dialog.setFileMode(QFileDialog.ExistingFiles)
+        file_dialog.setNameFilter(
+            "Sequence files (*.fas *.fasta *.fa *.fna *.phy *.nex *.nexus)"
+        )
+        
+        if file_dialog.exec_():
+            selected_files = file_dialog.selectedFiles()
+            for file_path in selected_files:
+                try:
+                    dataset_item = self.parse_sequence_file(file_path)
+                    if dataset_item:
+                        self.dataset_items.append(dataset_item)
+                        self.add_dataset_to_table(dataset_item)
+                except Exception as e:
+                    QMessageBox.warning(
+                        self, "Error", 
+                        f"Failed to parse file {os.path.basename(file_path)}: {str(e)}"
+                    )
+                    
+    def parse_sequence_file(self, file_path: str) -> Optional[DatasetItem]:
+        """解析序列文件并创建DatasetItem"""
+        # 确定文件格式
+        file_ext = os.path.splitext(file_path)[1].lower()
+        format_map = {
+            '.fas': 'fasta', '.fasta': 'fasta', '.fa': 'fasta', '.fna': 'fasta',
+            '.phy': 'phylip', '.nex': 'nexus', '.nexus': 'nexus'
+        }
+        
+        if file_ext not in format_map:
+            raise ValueError(f"Unsupported file format: {file_ext}")
+            
+        file_format = format_map[file_ext]
+        
+        # 读取序列
+        sequences = list(SeqIO.parse(file_path, file_format))
+        if not sequences:
+            raise ValueError("No sequences found in file")
+            
+        # 创建DatasetItem
+        item = DatasetItem()
+        item.file_path = file_path
+        item.loci_name = os.path.splitext(os.path.basename(file_path))[0]
+        item.sequences = sequences
+        item.sequence_count = len(sequences)
+        item.length = len(str(sequences[0].seq))
+        
+        # 检查是否可能已比对（所有序列长度相同）
+        lengths = [len(str(seq.seq)) for seq in sequences]
+        all_same_length = len(set(lengths)) == 1
+        
+        # 如果所有序列长度相同，询问用户是否已比对
+        if all_same_length:
+            reply = QMessageBox.question(
+                self, "Alignment Status", 
+                f"All sequences in '{item.loci_name}' have the same length.\n"
+                "Is this dataset already aligned?",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+            )
+            if reply == QMessageBox.Yes:
+                item.is_aligned = True
+            elif reply == QMessageBox.No:
+                item.is_aligned = False
+            else:  # Cancel
+                return None
+        else:
+            # 长度不同，肯定未比对
+            item.is_aligned = False
+        
+        return item
+        
+    def add_dataset_to_table(self, item: DatasetItem):
+        """将DatasetItem添加到表格中"""
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        
+        # Selected checkbox
+        selected_checkbox = QCheckBox()
+        selected_checkbox.setChecked(item.selected)
+        selected_checkbox.stateChanged.connect(
+            lambda state, r=row: self.on_selected_changed(r, state)
+        )
+        self.table.setCellWidget(row, 0, selected_checkbox)
+        
+        # Loci Name
+        loci_label = QLabel(item.loci_name)
+        self.table.setCellWidget(row, 1, loci_label)
+        
+        # Length
+        length_label = QLabel(str(item.length))
+        self.table.setCellWidget(row, 2, length_label)
+        
+        # Sequence Count (带颜色)
+        count_label = QLabel(str(item.sequence_count))
+        self.colorize_sequence_count(count_label, item.sequence_count)
+        self.table.setCellWidget(row, 3, count_label)
+        
+        # Aligned status
+        aligned_label = QLabel("✓" if item.is_aligned else "✗")
+        self.table.setCellWidget(row, 4, aligned_label)
+        
+        # View button
+        view_button = QPushButton("View")
+        view_button.clicked.connect(lambda _, r=row: self.view_dataset(r))
+        self.table.setCellWidget(row, 5, view_button)
+        
+    def colorize_sequence_count(self, label: QLabel, count: int):
+        """根据序列数量着色"""
+        if not self.dataset_items:
+            return
+            
+        # 计算平均值和标准差
+        counts = [item.sequence_count for item in self.dataset_items]
+        mean_count = sum(counts) / len(counts)
+        std_count = (sum((x - mean_count) ** 2 for x in counts) / len(counts)) ** 0.5
+        
+        # 设置颜色
+        if std_count == 0:
+            # 所有值相同
+            label.setStyleSheet("color: black;")
+        elif count < mean_count - std_count:
+            # 异常低值
+            label.setStyleSheet("background-color: #ffcccc; color: black;")
+        elif count > mean_count + std_count:
+            # 异常高值
+            label.setStyleSheet("background-color: #cce6ff; color: black;")
+        else:
+            # 正常范围
+            label.setStyleSheet("color: black;")
+            
+    def on_selected_changed(self, row: int, state: int):
+        """选中状态改变时的处理"""
+        if 0 <= row < len(self.dataset_items):
+            self.dataset_items[row].selected = (state == Qt.Checked)
+            
+    def view_dataset(self, row: int):
+        """查看数据集"""
+        try:
+            if 0 <= row < len(self.dataset_items):
+                dataset = self.dataset_items[row]
+                # 确保dataset有name属性
+                if not dataset.name:
+                    dataset.name = dataset.loci_name
+                
+                # 转换SeqRecord对象为SequenceAlignmentViewer期望的字典格式
+                sequences_for_viewer = []
+                for seq_record in dataset.sequences:
+                    seq_dict = {
+                        'header': getattr(seq_record, 'id', getattr(seq_record, 'name', 'Unknown')),
+                        'sequence': str(seq_record.seq) if hasattr(seq_record, 'seq') else str(seq_record)
+                    }
+                    sequences_for_viewer.append(seq_dict)
+                
+                # 使用PluginFactory获取序列查看器
+                from YR_MPE.sequence_editor import SequenceAlignmentViewer
+                viewer = SequenceAlignmentViewer(sequences_for_viewer)
+                viewer.show()
+                
+                # 保存viewer引用以防被垃圾回收
+                if not hasattr(self, 'viewers'):
+                    self.viewers = []
+                self.viewers.append(viewer)
+        except Exception as e:
+            QMessageBox.critical(None, "Error", f"Failed to open sequence viewer:\n{str(e)}")
+            
+    def export_to_multiple_fasta(self):
+        """导出为多个FASTA文件"""
+        # 获取选中的datasets
+        selected_items = [item for item in self.dataset_items if item.selected]
+        if not selected_items:
+            QMessageBox.warning(self, "Warning", "No datasets selected for export.")
+            return
+            
+        # 选择导出目录
+        export_dir = QFileDialog.getExistingDirectory(
+            self, "Select Export Directory"
+        )
+        if not export_dir:
+            return
+            
+        try:
+            for item in selected_items:
+                export_path = os.path.join(export_dir, f"{item.loci_name}.fasta")
+                with open(export_path, 'w') as f:
+                    SeqIO.write(item.sequences, f, 'fasta')
+                    
+            QMessageBox.information(
+                self, "Success", 
+                f"Successfully exported {len(selected_items)} datasets to {export_dir}"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error", f"Failed to export datasets: {str(e)}"
+            )
+            
+    def export_to_partitioned_nexus(self):
+        """导出为分区NEXUS格式 - 使用改进的实现"""
+        # 获取选中的datasets
+        selected_items = [item for item in self.dataset_items if item.selected]
+        if not selected_items:
+            QMessageBox.warning(self, "Warning", "No loci selected for export.")
+            return
+            
+        # 选择导出文件
+        export_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Partitioned NEXUS File", "", "NEXUS Files (*.nex)"
+        )
+        if not export_path:
+            return
+            
+        try:
+            # 准备数据格式：转换为新函数需要的格式
+            loci = []
+            loci_names = []
+            
+            for item in selected_items:
+                locus = []
+                for seq_record in item.sequences:
+                    # 获取序列名称和序列内容
+                    seq_name = getattr(seq_record, 'id', getattr(seq_record, 'name', 'Unknown'))
+                    seq_content = str(seq_record.seq) if hasattr(seq_record, 'seq') else str(seq_record)
+                    locus.append([seq_name, seq_content])
+                loci.append(locus)
+                loci_names.append(item.loci_name)
+            
+            # 调用新的export_partitioned_nexus函数
+            nexus_content, partition_scheme, missing_info = export_partitioned_nexus(loci, loci_names)
+            
+            # 写入NEXUS文件
+            with open(export_path, 'w') as f:
+                f.write(nexus_content)
+                
+            # 显示成功消息
+            total_taxa = len(missing_info) if missing_info else 0
+            total_loci = len(selected_items)
+            QMessageBox.information(
+                self, "Success", 
+                f"Successfully exported partitioned NEXUS file to {export_path}\n"
+                f"Taxa: {total_taxa}, Loci: {total_loci}"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error", f"Failed to export partitioned NEXUS: {str(e)}"
+            )
+            
+    def export_summary(self):
+        """导出摘要信息"""
+        if not self.dataset_items:
+            QMessageBox.warning(self, "Warning", "No datasets to export summary.")
+            return
+            
+        export_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Summary CSV", "", "CSV Files (*.csv)"
+        )
+        if not export_path:
+            return
+            
+        try:
+            with open(export_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "Loci Name", "Length", "Sequence Count", 
+                    "Aligned", "File Path"
+                ])
+                
+                for item in self.dataset_items:
+                    writer.writerow([
+                        item.loci_name,
+                        item.length,
+                        item.sequence_count,
+                        "Yes" if item.is_aligned else "No",
+                        item.file_path
+                    ])
+                    
+            QMessageBox.information(
+                self, "Success", 
+                f"Successfully exported summary to {export_path}"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error", f"Failed to export summary: {str(e)}"
+            )
+            
+    def batch_align_mafft(self):
+        """批量执行MAFFT比对"""
+        self._batch_align_with_tool("mafft")
+    
+    def batch_align_clustal_omega(self):
+        """批量执行Clustal Omega比对"""
+        self._batch_align_with_tool("clustal_omega")
+    
+    def batch_align_muscle5(self):
+        """批量执行MUSCLE5比对"""
+        self._batch_align_with_tool("muscle5")
+    
+    def batch_align_macse2(self):
+        """批量执行MACSE2比对"""
+        self._batch_align_with_tool("macse2")
+    
+    def batch_trim_gblocks(self):
+        """批量执行GBlocks修剪"""
+        self._batch_align_with_tool("gblocks")
+    
+    def batch_trim_trimal(self):
+        """批量执行TrimAl修剪"""
+        self._batch_align_with_tool("trimal")
+        
+    def _batch_align_with_tool(self, tool_name: str):
+        """使用指定工具批量执行比对"""
+        # 获取选中的数据集（不限制是否已比对，由用户决定）
+        selected_items = [item for item in self.dataset_items if item.selected]
+        if not selected_items:
+            QMessageBox.warning(self, "Warning", f"No datasets selected for {tool_name} alignment.")
+            return
+            
+        try:
+            # 准备批量输入数据：[[SeqRecord, ...], [SeqRecord, ...]]
+            batch_input_data = []
+            for item in selected_items:
+                batch_input_data.append(item.sequences)
+                
+            # 使用PluginFactory获取插件实例
+            if tool_name == "mafft":
+                plugin_instance = self.plugin_factory.get_mafft_plugin()
+            elif tool_name == "clustal_omega":
+                plugin_instance = self.plugin_factory.get_clustal_omega_plugin()
+            elif tool_name == "muscle5":
+                plugin_instance = self.plugin_factory.get_muscle5_plugin()
+            elif tool_name == "trimal":
+                plugin_instance = self.plugin_factory.get_trimal_plugin()
+            elif tool_name == "gblocks":
+                plugin_instance = self.plugin_factory.get_gblocks_plugin()
+            elif tool_name == "macse2":
+                plugin_instance = self.plugin_factory.get_macse_plugin()
+            else:
+                QMessageBox.critical(self, "Error", f"Plugin {tool_name} not available.")
+                return
+                
+            # 创建插件对话框并传递批量数据
+            dialog = QDialog()
+            dialog.setWindowTitle(f"Batch {tool_name.upper()} Alignment")
+            dialog.setMinimumSize(800, 600)
+            dialog.setLayout(QVBoxLayout())
+            
+            # 运行插件（关键：传递批量数据，来源标识为DATASET_MANAGER）
+            plugin_widget = plugin_instance.run(
+                import_from="DATASET_MANAGER", 
+                import_data=batch_input_data
+            )
+            
+            # 连接批量信号（关键：连接到Dataset Manager自身的方法）
+            if hasattr(plugin_widget, 'batch_import_alignment_signal'):
+                plugin_widget.batch_import_alignment_signal.connect(
+                    self.handle_batch_alignment_results
+                )
+                
+            # 连接单文件信号（向后兼容，但批量场景不会触发）
+            plugin_widget.import_alignment_signal.connect(
+                self.handle_single_alignment_result
+            )
+            
+            dialog.layout().addWidget(plugin_widget)
+            dialog.exec_()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to start batch alignment: {str(e)}")
+    
+    def handle_batch_alignment_results(self, batch_results):
+        """处理批量比对结果（在Dataset Manager内部完成）"""
+        if not batch_results or not isinstance(batch_results, list):
+            return
+            
+        try:
+            # 更新Dataset Items的状态
+            selected_items = [item for item in self.dataset_items if item.selected]
+            if len(batch_results) != len(selected_items):
+                QMessageBox.warning(self, "Warning", "Result count mismatch!")
+                return
+                
+            for i, (item, result_sequences) in enumerate(zip(selected_items, batch_results)):
+                # 更新序列数据
+                item.sequences = result_sequences
+                item.is_aligned = True
+                item.length = len(result_sequences[0].seq) if result_sequences else 0
+                item.sequence_count = len(result_sequences)
+                
+            # 刷新表格显示
+            self.refresh_table_display()
+            
+            # 注意：这里不再发送信号到主平台！
+            # 用户需要手动选择"Export to Platform"来导出数据
+            
+            QMessageBox.information(
+                self, "Success", 
+                f"Successfully completed batch alignment for {len(batch_results)} datasets!"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to process batch results: {str(e)}")
+
+    def handle_single_alignment_result(self, single_result):
+        """处理单文件比对结果（向后兼容，但批量场景不会调用）"""
+        pass
+    
+    def refresh_table_display(self):
+        """刷新表格显示"""
+        # 清空现有行
+        self.table.setRowCount(0)
+        
+        # 重新填充数据
+        for item in self.dataset_items:
+            self.add_dataset_to_table(item)
+            
+    def _batch_trim_with_tool(self, tool_name: str):
+        """使用指定工具批量执行修剪"""
+        # 获取选中的且已比对的数据集
+        selected_items = [item for item in self.dataset_items if item.selected and item.is_aligned]
+        if not selected_items:
+            QMessageBox.warning(self, "Warning", f"No aligned datasets selected for {tool_name} trimming.")
+            return
+            
+        try:
+            # 获取插件管理器
+            from ..methods import PluginManager, WorkspaceManager
+            workspace_manager = WorkspaceManager()
+            plugin_manager = PluginManager(workspace_manager)
+            plugin_manager.register_all_plugins()
+            
+            # 创建插件实例
+            plugin_instance = plugin_manager.create_plugin_instance(tool_name)
+            if not plugin_instance:
+                QMessageBox.critical(self, "Error", f"Plugin {tool_name} not available.")
+                return
+                
+            # TODO: 实现批量修剪逻辑
+            QMessageBox.information(
+                self, "Batch Trimming", 
+                f"Starting batch trimming with {tool_name} for {len(selected_items)} datasets.\n"
+                "Note: Full implementation requires integration with PluginExecutor."
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to start batch trimming: {str(e)}")
+
+    def show_table_context_menu(self, position):
+        """显示表格右键菜单"""
+        row = self.table.rowAt(position.y())
+        if row < 0 or row >= len(self.dataset_items):
+            return
+            
+        menu = QMenu()
+        item = self.dataset_items[row]
+        
+        if item.is_aligned:
+            mark_unaligned_action = QAction("Mark as Unaligned", self)
+            mark_unaligned_action.triggered.connect(lambda: self.mark_dataset_unaligned(row))
+            menu.addAction(mark_unaligned_action)
+        else:
+            mark_aligned_action = QAction("Mark as Aligned", self)
+            mark_aligned_action.triggered.connect(lambda: self.mark_dataset_aligned(row))
+            menu.addAction(mark_aligned_action)
+            
+        remove_action = QAction("Remove Dataset", self)
+        remove_action.triggered.connect(lambda: self.remove_dataset(row))
+        menu.addAction(remove_action)
+        
+        menu.exec_(self.table.mapToGlobal(position))
+        
+    def mark_dataset_aligned(self, row: int):
+        """标记数据集为已比对"""
+        if 0 <= row < len(self.dataset_items):
+            self.dataset_items[row].is_aligned = True
+            aligned_label = QLabel("✓")
+            self.table.setCellWidget(row, 4, aligned_label)
+            
+    def mark_dataset_unaligned(self, row: int):
+        """标记数据集为未比对"""
+        if 0 <= row < len(self.dataset_items):
+            self.dataset_items[row].is_aligned = False
+            aligned_label = QLabel("✗")
+            self.table.setCellWidget(row, 4, aligned_label)
+            
+    def remove_dataset(self, row: int):
+        """移除数据集"""
+        if 0 <= row < len(self.dataset_items):
+            del self.dataset_items[row]
+            self.table.removeRow(row)
+            
+    def closeEvent(self, event):
+        """关闭事件处理"""
+        # 不再自动添加到workspace，因为现在是在创建时就添加
+        # 继续正常的关闭流程
+        super().closeEvent(event)

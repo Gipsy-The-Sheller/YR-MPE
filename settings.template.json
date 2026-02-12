@@ -1,0 +1,165 @@
+
+
+{
+  "version": "%version%",
+  "plugin_group": "YR-MPE",
+  "plugins": [
+    {
+      "name": "YR-MPEA",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "A platform plugin for molecular evolution analysis (resemble MEGA).",
+      "category": "Molecular Evolution",
+      "placement": { "path": "%MPEPATH%", "priority": 0 ,"favicon": "YR_MPE/icons/yr-mpea.svg"},
+      "entry_point": "YR_MPE.platforms:YR_MPEA_entry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "Muscle5",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "A wrapper for MUSCLE5 aligner.",
+      "category": "Molecular Evolution",
+      "placement": { "path": "%MPEPATH%/Alignment", "priority": 1 ,"favicon": "YR_MPE/icons/software/muscle.svg"},
+      "entry_point": "YR_MPE.plugins.muscle5_plugin:Muscle5PluginEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "MAFFT",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "A wrapper for MAFFT aligner.",
+      "category": "Molecular Evolution",
+      "placement": { "path": "%MPEPATH%/Alignment", "priority": 1 ,"favicon": "YR_MPE/icons/software/mafft.svg"},
+      "entry_point": "YR_MPE.plugins.mafft_plugin:MAFFTPluginEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "Clustal Omega",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "A wrapper for Clustal Omega aligner.",
+      "category": "Molecular Evolution",
+      "placement": { "path": "%MPEPATH%/Alignment", "priority": 1 ,"favicon": "YR_MPE/icons/software/clustalo.svg"},
+      "entry_point": "YR_MPE.plugins.clustal_omega_plugin:ClustalOmegaPluginEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "TrimAl",
+      "version": "1.2rev57",
+      "author": "YRTools Official Plugin Base",
+      "description": "A wrapper for TrimAl aligner.",
+      "category": "Molecular Evolution",
+      "placement": { "path": "%MPEPATH%/Alignment", "priority": 1 ,"favicon": "YR_MPE/icons/software/trimal.svg"},
+      "entry_point": "YR_MPE.plugins.trimal_plugin:TrimAlPluginEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "GBlocks",
+      "version": "0.91b",
+      "author": "YRTools Official Plugin Base",
+      "description": "A wrapper for GBlocks.",
+      "category": "Molecular Evolution",
+      "placement": { "path": "%MPEPATH%/Alignment", "priority": 1 ,"favicon": "YR_MPE/icons/software/gblocks.svg"},
+      "entry_point": "YR_MPE.plugins.gblocks_plugin:GBlocksPluginEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "IQ-Tree 3",
+      "version": "3.0.6",
+      "author": "YRTools Official Plugin Base",
+      "description": "A wrapper for IQ-Tree 3.",
+      "category": "Molecular Evolution",
+      "placement": { "path": "%MPEPATH%/Phylogeny", "priority": 1 ,"favicon": "YR_MPE/icons/software/iqtree.svg"},
+      "entry_point": "YR_MPE.plugins.iqtree_plugin:IQTreePluginEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "ModelFinder",
+      "version": "2.2",
+      "author": "YRTools Official Plugin Base",
+      "description": "A wrapper for IQ-Tree ModelFinder.",
+      "category": "Molecular Evolution",
+      "placement": { "path": "%MPEPATH%/Phylogeny", "priority": 1 ,"favicon": "YR_MPE/icons/find_model.svg"},
+      "entry_point": "YR_MPE.plugins.model_finder_plugin:ModelFinderPluginEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "MrBayes",
+      "version": "3.2.7a",
+      "author": "YRTools Official Plugin Base",
+      "description": "A wrapper for MrBayes.",
+      "category": "Molecular Evolution",
+      "placement": { "path": "%MPEPATH%/Phylogeny", "priority": 1 ,"favicon": "YR_MPE/icons/software/mrbayes.svg"},
+      "entry_point": "YR_MPE.phylogenies:MrBayes_entry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "IcyTree",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "A QWebEngine-based phylogenetic tree viewer using IcyTree.",
+      "category": "Phylogeny",
+      "placement": { "path": "%MPEPATH%/Phylogeny", "priority": 1 ,"favicon": "YR_MPE/icons/software/icytree.svg"},
+      "entry_point": "YR_MPE.icytree:IcyTreePluginEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "Sequence Viewer",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "A QTableWidget-based sequence viewer.",
+      "category": "Sequence Analysis",
+      "placement": { "path": "%MPEPATH%/Alignment", "priority": 1 ,"favicon": "YR_MPE/icons/file/sequence.svg"},
+      "entry_point": "YR_MPE.sequence_editor:SequenceEditorEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    },
+    {
+      "name": "About YR-MPE",
+      "version": "0.1.0",
+      "author": "YRTools Official Plugin Base",
+      "description": "",
+      "category": "Miscellaneous",
+      "placement": { "path": "%MPEPATH%", "priority": 0 ,"favicon": "YR_MPE/icons/miscellaneous/about.svg"},
+      "entry_point": "YR_MPE.about:AboutPluginEntry",
+      "runtime": {
+        "type": "polypyplug",
+        "dependencies": []
+      }
+    }
+  ]
+}
+

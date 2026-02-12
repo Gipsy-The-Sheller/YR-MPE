@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_1" data-name=" 图层 1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 45 45.7">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #b88184;
+      }
+
+      .cls-1, .cls-2, .cls-3, .cls-4 {
+        stroke-width: 2px;
+      }
+
+      .cls-1, .cls-3, .cls-4 {
+        stroke-miterlimit: 10;
+      }
+
+      .cls-1, .cls-4 {
+        stroke: #8995a8;
+      }
+
+      .cls-2 {
+        fill: none;
+        stroke: #4e6691;
+        stroke-linejoin: round;
+      }
+
+      .cls-2, .cls-3 {
+        stroke-linecap: round;
+      }
+
+      .cls-3 {
+        stroke: #ba3e45;
+      }
+
+      .cls-3, .cls-4 {
+        fill: #f0f0f0;
+      }
+    </style>
+  </defs>
+  <g>
+    <path class="cls-1" d="M16.1,2.1c-.2,0-1.1,0-1.1,1.3v7.3c0,.9-.7,1.6-1.6,1.6h-6.4c-1,0-1.1.7-1.1,1v-1.4c0-.5.2-1,.5-1.4l6.9-7.7c.4-.5,1-.7,1.6-.7,0,0,1.2,0,1.2,0Z"/>
+    <path class="cls-4" d="M39,4.4v36.9c0,1.3-1,2.3-2.3,2.3H8.2c-1.3,0-2.3-1-2.3-2.3V13.3c0-.3,0-1,1.1-1h6.4c.9,0,1.6-.7,1.6-1.6V3.4c0-1.3.8-1.3,1.1-1.3h20.7c1.3,0,2.3,1,2.3,2.3h-.1Z"/>
+  </g>
+  <g>
+    <g>
+      <rect class="cls-2" x="18" y="17.9" width="11.7" height="11.7"/>
+      <line class="cls-2" x1="18" y1="17.9" x2="29.7" y2="29.6"/>
+      <line class="cls-2" x1="29.7" y1="17.9" x2="18" y2="29.6"/>
+    </g>
+    <polyline class="cls-2" points="15.3 26.8 15.3 15.1 26.9 15.1"/>
+  </g>
+  <polyline class="cls-2" points="27.4 33.2 27.4 33.2 28.8 33.2 28.8 38.5 27.5 38.5"/>
+  <polyline class="cls-2" points="17.6 33.2 17.6 33.2 16.2 33.2 16.2 38.5 17.5 38.5"/>
+  <line class="cls-3" x1="19.8" y1="33.1" x2="25.2" y2="38.5"/>
+  <line class="cls-3" x1="25.2" y1="33.1" x2="19.8" y2="38.5"/>
+</svg>

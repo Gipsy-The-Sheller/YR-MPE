@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_1" data-name=" 图层 1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 45 45.7">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #a83c41;
+      }
+
+      .cls-1, .cls-2 {
+        stroke-width: 0px;
+      }
+
+      .cls-2 {
+        fill: #4b6187;
+      }
+    </style>
+  </defs>
+  <path class="cls-2" d="M32,2.8h-2.1v10.3h-15.1V2.8H6.6c-2.3,0-4.2,1.9-4.2,4.2v31.8c0,2.3,1.9,4.2,4.2,4.2h31.8c2.3,0,4.2-1.9,4.2-4.2V13l-10.6-10.2ZM36.5,38.4c0,.6-.5,1-1,1H8.9c-.6,0-1-.5-1-1v-15.4c0-.6.5-1,1-1h26.5c.6,0,1,.5,1,1v15.4h0Z"/>
+  <rect class="cls-1" x="23.8" y="2.8" width="4.7" height="8.9"/>
+</svg>

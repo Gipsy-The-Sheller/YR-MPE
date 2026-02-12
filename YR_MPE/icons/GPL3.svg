@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_1" data-name="图层 1" xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 152.913 39.209">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #010101;
+      }
+
+      .cls-1, .cls-2 {
+        font-family: Verdana, Verdana;
+        font-size: 21.565px;
+      }
+
+      .cls-3, .cls-2 {
+        isolation: isolate;
+      }
+
+      .cls-4 {
+        fill: url(#_未命名的渐变);
+      }
+
+      .cls-4, .cls-5, .cls-6, .cls-7 {
+        stroke-width: 0px;
+      }
+
+      .cls-5 {
+        fill: #97ca00;
+      }
+
+      .cls-6 {
+        fill: none;
+      }
+
+      .cls-2 {
+        fill: #fff;
+      }
+
+      .cls-7 {
+        fill: #555;
+      }
+
+      .cls-8 {
+        clip-path: url(#clippath);
+      }
+    </style>
+    <clipPath id="clippath">
+      <rect class="cls-6" x="0" y="0" width="152.913" height="39.209" rx="5.881" ry="5.881"/>
+    </clipPath>
+    <linearGradient id="_未命名的渐变" data-name="未命名的渐变" x1="-216.736" y1="420.424" x2="-216.736" y2="418.464" gradientTransform="translate(16981.833 8408.49) scale(78 -20)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".1"/>
+    </linearGradient>
+  </defs>
+  <g class="cls-8">
+    <g>
+      <rect class="cls-7" x="0" y="0" width="92.14" height="39.209"/>
+      <rect class="cls-5" x="92.14" y="0" width="60.773" height="39.209"/>
+      <rect class="cls-4" x="0" y="0" width="152.913" height="39.209"/>
+    </g>
+  </g>
+  <g text-rendering="geometricPrecision">
+    <g class="cls-3">
+      <text class="cls-1" transform="translate(11.209 29.408)"><tspan x="0" y="0">license</tspan></text>
+    </g>
+    <text class="cls-2" transform="translate(11.209 27.447)"><tspan x="0" y="0">license</tspan></text>
+    <g class="cls-3">
+      <text class="cls-1" transform="translate(99.702 29.408)"><tspan x="0" y="0">GPL</tspan></text>
+    </g>
+    <text class="cls-2" transform="translate(99.702 27.447)"><tspan x="0" y="0">GPL</tspan></text>
+  </g>
+</svg>

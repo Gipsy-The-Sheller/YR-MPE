@@ -1,0 +1,38 @@
+[
+    {
+        "name": "Muscle5",
+        "cmd": ["muscle","muscle5"],
+        "website": "https://www.drive5.com/muscle5/",
+        "path": ""
+    },
+    {
+        "name": "Clustal Omega",
+        "cmd": ["clustalo","clustalomega"],
+        "website": "http://www.clustal.org/omega/",
+        "path": ""
+    },
+    {
+        "name": "MAFFT",
+        "cmd": ["mafft"],
+        "website": "http://mafft.cbrc.jp/alignment/software/",
+        "path": ""
+    },
+    {
+        "name": "IQ-Tree 3",
+        "cmd": ["iqtree"],
+        "website": "https://iqtree.github.io/",
+        "path": ""
+    },
+    {
+        "name": "TrimAl",
+        "cmd": ["trimal"],
+        "website": "https://vicfero.github.io/trimal/",
+        "path": ""
+    },
+    {
+        "name": "GBlocks",
+        "cmd": ["gblocks"],
+        "website": "https://molevol-ibe.csic.es/Gblocks.html",
+        "path": ""
+    }
+]
