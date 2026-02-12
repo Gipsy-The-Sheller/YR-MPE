@@ -129,6 +129,7 @@ class YR_MPEA_Widget(QWidget):
         dataset_menu.addAction(create_seqmatrix_action)
         
         create_seqdbg_action = QAction("Create by SeqDBG", dataset_menu)
+        create_seqdbg_action.setIcon(self.resource_factory.get_icon("seqdbg/seqdbg.svg"))
         create_seqdbg_action.triggered.connect(self.create_dataset_by_seqdbg)
         dataset_menu.addAction(create_seqdbg_action)
         
@@ -1093,6 +1094,8 @@ class YR_MPEA_Widget(QWidget):
             QTimer.singleShot(100, lambda: self._show_export_error_message(str(e)))
     
     def _show_export_success_message(self, dataset):
+        import logging
+        logger = logging.getLogger(__name__)        
         """显示导出成功消息"""
         try:
             summary = getattr(dataset, 'summary', {})
@@ -1114,6 +1117,8 @@ class YR_MPEA_Widget(QWidget):
             logger.error(f"Error showing success message: {e}", exc_info=True)
     
     def _show_export_error_message(self, error_msg):
+        import logging
+        logger = logging.getLogger(__name__)  
         """显示导出错误消息"""
         try:
             QMessageBox.critical(
@@ -1125,6 +1130,8 @@ class YR_MPEA_Widget(QWidget):
             logger.error(f"Error showing error message: {e}", exc_info=True)
     
     def _show_export_error_message(self, error_msg):
+        import logging
+        logger = logging.getLogger(__name__)  
         """显示导出错误消息"""
         try:
             QMessageBox.critical(
