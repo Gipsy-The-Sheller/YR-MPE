@@ -69,19 +69,21 @@ def export_partitioned_nexus(loci, loci_names = None):
     NEXUS_file = f"""#NEXUS
 begin data;
     dimensions ntax={ntax} nchar={nchars};
-    format missing=?
-    datatype=DNA gap= - ;
-
+    format datatype=DNA missing=? gap=-;
     matrix
-    """ + "\n    ".join(f"{name}{' '*(mxlength_name-len(name))} {seq}" for name, seq in superseqs.items())+ "\nend;"
+""" + "\n".join(f"{name}{' '*(mxlength_name-len(name))} {seq}" for name, seq in superseqs.items())+ """
+;
+end;"""
     # print(NEXUS_file)
 
     partition_scheme = "begin sets;\n"
     for index, length in enumerate(lengths):
+        start_pos = sum(lengths[:index]) + 1  # 1-based索引
+        end_pos = sum(lengths[:index+1])
         if loci_names:
-            partition_scheme += f"    charset {loci_names[index]} = {sum(lengths[:index])}-{sum(lengths[:index+1])};\n"
+            partition_scheme += f"    charset {loci_names[index]} = {start_pos}-{end_pos};\n"
         else:
-            partition_scheme += f"    charset set{index+1} = {sum(lengths[:index])}-{sum(lengths[:index+1])};\n"
+            partition_scheme += f"    charset set{index+1} = {start_pos}-{end_pos};\n"
     partition_scheme += "end;"
 
     NEXUS_file += ("\n" + partition_scheme)
