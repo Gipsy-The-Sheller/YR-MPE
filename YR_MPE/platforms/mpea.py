@@ -206,6 +206,12 @@ class YR_MPEA_Widget(QWidget):
         find_best_model_action.setIcon(self.resource_factory.get_icon("find_model.svg"))
         find_best_model_action.triggered.connect(self.open_modelfinder_wrapper)
         models_menu.addAction(find_best_model_action)
+        
+        estimate_model_params_action = QAction("Estimate Model Parameters (DNA, ML)", model_button)
+        estimate_model_params_action.setIcon(self.resource_factory.get_icon("find_model.svg"))
+        estimate_model_params_action.triggered.connect(self.open_model_parameter_wrapper)
+        models_menu.addAction(estimate_model_params_action)
+        
         model_button.setMenu(models_menu)
 
         distance_button = QToolButton()
@@ -372,22 +378,6 @@ class YR_MPEA_Widget(QWidget):
         pdguide_action.setIcon(self.resource_factory.get_icon("software/pdguide.svg"))
         pdguide_action.triggered.connect(self.open_pdguide_wrapper)
         clock_button_menu.addAction(pdguide_action)
-
-        # TOOLS button
-        tools_button = QToolButton()
-        tools_button.setText("TOOLS")
-        tools_button.setIcon(self.resource_factory.get_icon("new.svg"))  # Using new.svg as a temporary icon
-        tools_button.setPopupMode(QToolButton.InstantPopup)
-        tools_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        tools_button_menu = QMenu()
-        tools_button.setMenu(tools_button_menu)
-        main_toolbar.addWidget(tools_button)
-
-        # Add SeqDBG action
-        seqdbg_action = QAction("SeqDBG - Annotation Graph", tools_button)
-        seqdbg_action.setIcon(self.resource_factory.get_icon("seqdbg/seqdbg.svg"))
-        seqdbg_action.triggered.connect(self.open_seqdbg_wrapper)
-        tools_button_menu.addAction(seqdbg_action)
 
         # mainworkspace_group = QGroupBox("Workspace")
         # # mainworkspace_layout = QGridLayout(10,4)
@@ -617,6 +607,32 @@ class YR_MPEA_Widget(QWidget):
         modelfinder_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
         modelfinder_wrapper.export_model_result_signal.connect(self.add_model_to_workspace)
         dialog.layout().addWidget(modelfinder_wrapper)
+        dialog.exec_()
+    
+    def open_model_parameter_wrapper(self):
+        """打开Model Parameter Estimation进行模型参数估计"""
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle("Model Parameter Estimation - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("find_model.svg"))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+        
+        # use PluginFactory to get the plugin
+        model_parameter_entry = self.plugin_factory.get_model_parameter_plugin()
+        model_parameter_wrapper = model_parameter_entry.run(import_from=import_from, import_data=import_data)
+        model_parameter_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        model_parameter_wrapper.export_model_result_signal.connect(self.add_model_to_workspace)
+        dialog.layout().addWidget(model_parameter_wrapper)
         dialog.exec_()
     
     def open_minitracer_wrapper(self):
@@ -986,41 +1002,138 @@ class YR_MPEA_Widget(QWidget):
     def open_seqdbg_wrapper(self):
         """Open SeqDBG plugin for annotation graph visualization"""
         from PyQt5.QtWidgets import QDialog
-        from ..plugins.seqdbg_plugin import SeqDBGPlugin
-        dialog = QDialog()
-        dialog.setWindowTitle(f"SeqDBG - Annotation Graph - YR-MPEA")
-        dialog.setWindowIcon(self.resource_factory.get_icon("seqdbg/seqdbg.svg"))
-        dialog.setMinimumSize(1200, 800)
-        dialog.setLayout(QVBoxLayout())
-
-        # Create SeqDBG plugin instance
-        plugin = SeqDBGPlugin()
-        plugin.setup_ui()
+        from ..plugins.seqdbg_plugin import SeqDBGPluginEntry
         
-        # Connect export signal to workspace
-        plugin.export_to_dataset_signal.connect(self.add_seqdbg_export_to_workspace)
+        # Create SeqDBG plugin instance using the entry point
+        plugin_entry = SeqDBGPluginEntry()
+        plugin_window = plugin_entry.run(import_from="YR_MPEA")
         
-        dialog.layout().addWidget(plugin)
-        dialog.exec_()
+        # Connect import signal to workspace
+        plugin_window.import_dataset_signal.connect(self.add_seqdbg_export_to_workspace)
+        
+        # Show the window (it's a QMainWindow, not a dialog)
+        plugin_window.show()
+        
+        # Keep reference to prevent garbage collection
+        if not hasattr(self, 'seqdbg_windows'):
+            self.seqdbg_windows = []
+        self.seqdbg_windows.append(plugin_window)
     
     def add_seqdbg_export_to_workspace(self, dataset_items):
-        """Add exported items from SeqDBG to workspace"""
+        """Add exported items from SeqDBG to workspace as a Dataset"""
+        import logging
+        from PyQt5.QtCore import QTimer
+        logger = logging.getLogger(__name__)
+        
         if not dataset_items:
+            logger.warning("add_seqdbg_export_to_workspace: dataset_items is empty")
             return
         
-        # Add sequences to workspace
-        for item in dataset_items:
-            if item.item_type == "sequence":
-                self.workspace.add_sequence(item.sequences)
-                self.workspace_hint.setText("Single Gene Workspace")
-                self.workspace_hint.hide()
-        
-        QMessageBox.information(
-            self,
-            "Export Successful",
-            f"Exported {len(dataset_items)} items from SeqDBG to workspace.\n\n"
-            "Sequences are now available for alignment and phylogenetic analysis."
-        )
+        try:
+            logger.info(f"add_seqdbg_export_to_workspace: received {len(dataset_items)} items")
+            
+            # 创建Dataset对象（按照SeqMatrix的方式）
+            class DatasetObject:
+                def __init__(self, name, items=None, partition_scheme=None):
+                    self.dataset_name = name
+                    self.items = items if items else []
+                    self.partition_scheme = partition_scheme
+                    self.summary = {}
+            
+            # 收集所有有效的dataset_items
+            valid_items = []
+            for i, item in enumerate(dataset_items):
+                try:
+                    logger.info(f"Processing item {i}: item_type={getattr(item, 'item_type', 'N/A')}, "
+                               f"loci_name={getattr(item, 'loci_name', 'N/A')}, "
+                               f"sequence_count={getattr(item, 'sequence_count', 'N/A')}")
+                    
+                    if item.item_type == "sequence" and item.sequences:
+                        logger.info(f"Adding {len(item.sequences)} sequences to dataset")
+                        valid_items.append(item)
+                    else:
+                        logger.warning(f"Item {i} skipped: no sequences or wrong type")
+                except Exception as e:
+                    logger.error(f"Error processing item {i}: {e}", exc_info=True)
+            
+            if not valid_items:
+                logger.warning("No valid items to export")
+                QTimer.singleShot(100, lambda: QMessageBox.warning(
+                    self, "Export Warning",
+                    "No valid sequences found to export."
+                ))
+                return
+            
+            # 创建Dataset
+            dataset_name = "SeqDBG_Export"
+            dataset = DatasetObject(
+                name=dataset_name,
+                items=valid_items
+            )
+            
+            # 计算摘要信息
+            total_sequences = sum(item.sequence_count for item in valid_items)
+            total_loci = len(valid_items)
+            dataset.summary = {
+                'total_sequences': total_sequences,
+                'total_loci': total_loci,
+                'loci_names': [item.loci_name for item in valid_items]
+            }
+            
+            # 添加到工作区
+            self.workspace.add_dataset(dataset)
+            
+            logger.info(f"Successfully added dataset with {total_loci} loci and {total_sequences} sequences")
+            
+            # 延迟显示成功消息
+            QTimer.singleShot(100, lambda: self._show_export_success_message(dataset))
+            
+        except Exception as e:
+            logger.error(f"Error in add_seqdbg_export_to_workspace: {e}", exc_info=True)
+            QTimer.singleShot(100, lambda: self._show_export_error_message(str(e)))
+    
+    def _show_export_success_message(self, dataset):
+        """显示导出成功消息"""
+        try:
+            summary = getattr(dataset, 'summary', {})
+            message = f"Exported dataset from SeqDBG to workspace.\n\n"
+            message += f"Dataset Name: {getattr(dataset, 'dataset_name', 'Unnamed')}\n"
+            message += f"Loci: {summary.get('total_loci', 0)}\n"
+            message += f"Total Sequences: {summary.get('total_sequences', 0)}\n"
+            
+            loci_names = summary.get('loci_names', [])
+            if loci_names:
+                message += f"Loci Names: {', '.join(loci_names[:5])}"
+                if len(loci_names) > 5:
+                    message += f" ... ({len(loci_names)} total)"
+            
+            message += "\n\nThe dataset is now available for alignment and phylogenetic analysis."
+            
+            QMessageBox.information(self, "Export Successful", message)
+        except Exception as e:
+            logger.error(f"Error showing success message: {e}", exc_info=True)
+    
+    def _show_export_error_message(self, error_msg):
+        """显示导出错误消息"""
+        try:
+            QMessageBox.critical(
+                self,
+                "Export Error",
+                f"Failed to add SeqDBG export to workspace:\n{error_msg}"
+            )
+        except Exception as e:
+            logger.error(f"Error showing error message: {e}", exc_info=True)
+    
+    def _show_export_error_message(self, error_msg):
+        """显示导出错误消息"""
+        try:
+            QMessageBox.critical(
+                self,
+                "Export Error",
+                f"Failed to add SeqDBG export to workspace:\n{error_msg}"
+            )
+        except Exception as e:
+            logger.error(f"Error showing error message: {e}", exc_info=True)
 
     def create_new_dataset(self):
         """创建新的Dataset - 只创建空对象和ToolButton，不打开对话框"""
@@ -1202,12 +1315,8 @@ class YR_MPEA_Widget(QWidget):
     def create_dataset_by_seqdbg(self):
         """通过SeqDBG创建Dataset"""
         try:
-            # TODO: 实现SeqDBG插件调用
-            QMessageBox.information(
-                self, "Create Dataset", 
-                "Creating dataset using SeqDBG plugin...\n"
-                "Note: SeqDBG plugin integration pending."
-            )
+            # 调用SeqDBG插件
+            self.open_seqdbg_wrapper()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create dataset by SeqDBG: {str(e)}")
 

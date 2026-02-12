@@ -24,7 +24,7 @@ from PyQt5.QtWidgets import (
     QListWidget, QFileDialog, QTabWidget, QComboBox, QLineEdit, QStyledItemDelegate,
     QRadioButton, QCheckBox, QDialog, QDialogButtonBox, QAbstractItemView, QListWidgetItem
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QSize
+from PyQt5.QtCore import Qt, pyqtSignal, QSize, QTimer
 from PyQt5.QtGui import QColor, QFont, QBrush
 
 from .models import GeneStats, GeneInfo
@@ -915,8 +915,10 @@ class SeqDBGTableViewer(QWidget):
     # 信号定义
     geneSelected = pyqtSignal(str)  # gene_name
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, builder=None):
         super().__init__(parent)
+        
+        self.builder = builder  # SeqDBGraphBuilder 实例
         
         self.stats_data: List[GeneStats] = []
         self.adjacency_data: Dict[str, Dict] = {}
@@ -1053,7 +1055,7 @@ class SeqDBGTableViewer(QWidget):
         self.tab_widget.addTab(std_container, "Standardization")
         
         # Dataset 标签页：Dataset 导出
-        self.dataset_widget = DatasetExportWidget()
+        self.dataset_widget = DatasetExportWidget(builder=self.builder)
         self.tab_widget.addTab(self.dataset_widget, "Dataset")
         
         main_splitter.addWidget(self.tab_widget)
@@ -1591,14 +1593,16 @@ class DatasetExportWidget(QWidget):
     """
     Dataset 导出组件
     
-    支持将基因组导出为 FASTA 格式的 dataset
+    支持将基因组导出为 FASTA 格式的 dataset 或导出到 YR-MPEA
     """
     
     # 信号定义
     exportToDataset = pyqtSignal(list)  # 发送 dataset 到 YR-MPEA
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, builder=None):
         super().__init__(parent)
+        
+        self.builder = builder  # SeqDBGraphBuilder 实例，用于导出到 YR-MPEA
         
         self.stats_data: List[GeneStats] = []
         self.available_loci: List[str] = []
@@ -1607,8 +1611,8 @@ class DatasetExportWidget(QWidget):
         
         # 基因信息和序列数据 {gene_name: {genome_id: GeneInfo}}
         self.gene_info_data: Dict[str, Dict[str, GeneInfo]] = {}
-        # 序列数据 {gene_name: {genome_id: SeqRecord}}
-        self.sequence_data: Dict[str, Dict[str, SeqRecord]] = {}
+        # 序列数据 {gene_name: {genome_id: [SeqRecord]}}
+        self.sequence_data: Dict[str, Dict[str, List[SeqRecord]]] = {}
         
         # 基因类型映射 {gene_name: gene_type}
         self.gene_type_map: Dict[str, str] = {}
@@ -1729,7 +1733,7 @@ class DatasetExportWidget(QWidget):
     
     def set_data(self, stats: List[GeneStats], loaded_files: List[str],
                 gene_info_data: Optional[Dict[str, Dict[str, GeneInfo]]] = None,
-                sequence_data: Optional[Dict[str, Dict[str, SeqRecord]]] = None,
+                sequence_data: Optional[Dict[str, Dict[str, List[SeqRecord]]]] = None,
                 gene_type_map: Optional[Dict[str, str]] = None):
         """
         设置数据
@@ -1738,7 +1742,7 @@ class DatasetExportWidget(QWidget):
             stats: GeneStats 列表
             loaded_files: 加载的文件列表
             gene_info_data: 基因信息数据 {gene_name: {genome_id: GeneInfo}}
-            sequence_data: 序列数据 {gene_name: {genome_id: SeqRecord}}
+            sequence_data: 序列数据 {gene_name: {genome_id: [SeqRecord]}}
             gene_type_map: 基因类型映射 {gene_name: gene_type}
         """
         self.stats_data = stats
@@ -1940,23 +1944,104 @@ class DatasetExportWidget(QWidget):
             QMessageBox.warning(self, "Warning", "No data to export")
             return
         
+        # 检查是否有 builder 引用
+        if not self.builder:
+            QMessageBox.warning(
+                self,
+                "Export Error",
+                "Builder reference not available. Cannot export to YR-MPEA."
+            )
+            logger.warning("Builder reference not available for export")
+            return
+        
         try:
-            # TODO: 实现实际的导出到 YR-MPEA 的逻辑
-            # 这里发送信号到 YR-MPEA
-            dataset_items = []  # TODO: 构建 DatasetItem 列表
+            # 获取选中的基因类型和 loci
+            gene_types = self.get_selected_gene_types()
+            loci = self.get_selected_loci_for_export()
+            
+            # 判断是氨基酸模式还是核苷酸模式
+            is_amino_acid = self.amino_acid_radio.isChecked()
+            
+            logger.info(f"on_export_to_dataset: gene_types={gene_types}, loci={loci}, is_amino_acid={is_amino_acid}")
+            
+            if not gene_types:
+                QMessageBox.warning(self, "Warning", "Please select at least one gene type")
+                return
+            
+            if not loci:
+                QMessageBox.warning(self, "Warning", f"No loci match the selected gene types: {', '.join(gene_types)}")
+                return
+            
+            logger.info(f"Calling builder.export_to_dataset_items with {len(loci)} loci, is_amino_acid={is_amino_acid}")
+            
+            # 使用 builder 的 export_to_dataset_items 方法导出
+            dataset_items = self.builder.export_to_dataset_items(
+                selected_nodes=loci,
+                dataset_id="seqdbg_export",
+                is_amino_acid=is_amino_acid
+            )
+            
+            logger.info(f"builder.export_to_dataset_items returned {len(dataset_items)} items")
+            
+            if not dataset_items:
+                QMessageBox.warning(
+                    self,
+                    "Export Warning",
+                    "No sequences found for the selected loci.\n\n"
+                    "Possible reasons:\n"
+                    "1. Make sure 'extract_sequences' is enabled when loading GenBank files\n"
+                    f"2. For Amino Acid mode, ensure CDS features have /translation fields\n"
+                    f"3. Check if the selected loci have {'protein sequences' if is_amino_acid else 'nucleotide sequences'}"
+                )
+                return
+            
+            # 验证 dataset_items 的内容
+            for i, item in enumerate(dataset_items):
+                logger.info(f"Dataset item {i}: item_type={item.item_type}, loci_name={item.loci_name}, "
+                           f"sequence_count={item.sequence_count}, length={item.length}")
+                if not hasattr(item, 'item_type'):
+                    logger.error(f"Dataset item {i} missing item_type attribute")
+                if not hasattr(item, 'sequences'):
+                    logger.error(f"Dataset item {i} missing sequences attribute")
+                if not hasattr(item, 'sequence_count'):
+                    logger.error(f"Dataset item {i} missing sequence_count attribute")
+            
+            logger.info(f"Emitting exportToDataset signal with {len(dataset_items)} items")
+            
+            # 发送信号到 YR-MPEA
             self.exportToDataset.emit(dataset_items)
             
+            # 延迟显示成功消息
+            total_seqs = sum(item.sequence_count for item in dataset_items)
+            QTimer.singleShot(100, lambda: self._show_export_complete_message(len(dataset_items), total_seqs, is_amino_acid))
+            
+            logger.info(f"导出 {len(dataset_items)} 个 dataset 到 YR-MPEA，总共 {total_seqs} 条序列 ({'氨基酸' if is_amino_acid else '核苷酸'})")
+            
+        except Exception as e:
+            logger.error(f"导出到 YR-MPEA 失败: {e}", exc_info=True)
+            QTimer.singleShot(100, lambda: self._show_export_error_message(str(e)))
+    
+    def _show_export_complete_message(self, item_count, seq_count, is_amino_acid=False):
+        """显示导出完成消息"""
+        try:
             QMessageBox.information(
                 self,
                 "Export Complete",
-                "Dataset exported to YR-MPEA"
+                f"Successfully exported {item_count} datasets to YR-MPEA.\n\n"
+                f"Total sequences: {seq_count}\n"
+                f"Sequence type: {'Amino Acid (Protein)' if is_amino_acid else 'Nucleotide (DNA/RNA)'}\n"
+                f"Dataset ID: seqdbg_export"
             )
-            logger.info("导出 dataset 到 YR-MPEA")
-            
         except Exception as e:
-            logger.error(f"导出到 YR-MPEA 失败: {e}")
+            logger.error(f"Error showing export complete message: {e}", exc_info=True)
+    
+    def _show_export_error_message(self, error_msg):
+        """显示导出错误消息"""
+        try:
             QMessageBox.critical(
                 self,
                 "Export Error",
-                f"Failed to export to YR-MPEA:\n{e}"
+                f"Failed to export to YR-MPEA:\n{error_msg}"
             )
+        except Exception as e:
+            logger.error(f"Error showing export error message: {e}", exc_info=True)
