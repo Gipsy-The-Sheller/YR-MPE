@@ -1749,6 +1749,7 @@ class YR_MPEA_Widget(QWidget):
         # 连接信号
         phylobayes_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
         phylobayes_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
+        phylobayes_wrapper.export_chain_result_signal.connect(self.add_chain_to_workspace)
         
         dialog.layout().addWidget(phylobayes_wrapper)
         # 保存到实例变量，防止被垃圾回收
