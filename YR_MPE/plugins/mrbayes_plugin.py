@@ -9,19 +9,122 @@ from PyQt5.QtCore import Qt, pyqtSignal, QRegExp
 from PyQt5.QtGui import QFont, QTextCursor, QSyntaxHighlighter, QTextCharFormat, QColor, QPalette
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
+from ..platforms.methods.dataset_models import ChainItem
+from .partition_mode import PartitionMode, MrBayesPartitionDefinition, MrBayesModelConverter
+from .mrbayes_partition_ui import MrBayesPartitionDialog
 import os
 import tempfile
 import json
 from Bio import SeqIO
 import re
 
+class MPIBeagleSettingsDialog(QDialog):
+    """MPI & BEAGLE Settings Dialog"""
+    
+    def __init__(self, parent=None, use_mpi=True, 
+                 use_beagle=True, beagle_device='CPU', 
+                 beagle_precision='Double', beagle_scaling='Dynamic'):
+        super().__init__(parent)
+        self.setWindowTitle("MPI & BEAGLE Settings")
+        self.setMinimumSize(400, 300)
+        
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+        
+        # MPI Settings
+        mpi_group = QGroupBox("MPI Settings")
+        mpi_layout = QVBoxLayout()
+        mpi_group.setLayout(mpi_layout)
+        
+        self.use_mpi = QCheckBox("Use MPI")
+        self.use_mpi.setChecked(use_mpi)
+        mpi_layout.addWidget(self.use_mpi)
+        
+        # 添加说明文本
+        mpi_info = QLabel("MPI will use (Runs × Chains) processors")
+        mpi_info.setStyleSheet("color: #666; font-size: 11px;")
+        mpi_layout.addWidget(mpi_info)
+        
+        layout.addWidget(mpi_group)
+        
+        # BEAGLE Settings
+        beagle_group = QGroupBox("BEAGLE Settings")
+        beagle_layout = QVBoxLayout()
+        beagle_group.setLayout(beagle_layout)
+        
+        self.use_beagle = QCheckBox("Use BEAGLE")
+        self.use_beagle.setChecked(use_beagle)
+        self.use_beagle.stateChanged.connect(self.on_beagle_toggled)
+        beagle_layout.addWidget(self.use_beagle)
+        
+        beagle_form_layout = QFormLayout()
+        
+        self.beagle_device_combo = QComboBox()
+        self.beagle_device_combo.addItems(["CPU", "GPU"])
+        self.beagle_device_combo.setCurrentText(beagle_device)
+        beagle_form_layout.addRow("Device:", self.beagle_device_combo)
+        
+        self.beagle_precision_combo = QComboBox()
+        self.beagle_precision_combo.addItems(["Double", "Single"])
+        self.beagle_precision_combo.setCurrentText(beagle_precision)
+        beagle_form_layout.addRow("Precision:", self.beagle_precision_combo)
+        
+        self.beagle_scaling_combo = QComboBox()
+        self.beagle_scaling_combo.addItems(["Dynamic", "Always"])
+        self.beagle_scaling_combo.setCurrentText(beagle_scaling)
+        beagle_form_layout.addRow("Scaling:", self.beagle_scaling_combo)
+        
+        beagle_layout.addLayout(beagle_form_layout)
+        
+        layout.addWidget(beagle_group)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        button_layout.addWidget(ok_button)
+        
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+        
+        layout.addLayout(button_layout)
+        
+        # Initial state
+        self.on_beagle_toggled()
+    
+    def on_beagle_toggled(self):
+        """BEAGLE复选框状态改变时处理"""
+        enabled = self.use_beagle.isChecked()
+        self.beagle_device_combo.setEnabled(enabled)
+        self.beagle_precision_combo.setEnabled(enabled)
+        self.beagle_scaling_combo.setEnabled(enabled)
+    
+    def get_settings(self):
+        """获取设置值"""
+        return {
+            'use_mpi': self.use_mpi.isChecked(),
+            'use_beagle': self.use_beagle.isChecked(),
+            'beagle_device': self.beagle_device_combo.currentText(),
+            'beagle_precision': self.beagle_precision_combo.currentText(),
+            'beagle_scaling': self.beagle_scaling_combo.currentText()
+        }
+
 class MrBayesThread(BaseProcessThread):
     """MrBayes系统发育推断线程类"""
     
-    def __init__(self, tool_path, mpirun_path, input_files, parameters, imported_files=None, run_data_block_checked=True):
-        super().__init__(tool_path, input_files, parameters, imported_files)
+    def __init__(self, tool_path, mpirun_path, input_files, parameters, imported_files=None, run_data_block_checked=True, 
+                 use_partition_mode=False, partition_definitions=None, partition_mode=None, workdir=None, use_mpi=False):
+        super().__init__(tool_path, input_files, parameters, imported_files, workdir=workdir)
         self.mpirun_path = mpirun_path
         self.run_data_block_checked = run_data_block_checked
+        self.use_mpi = use_mpi
+        # 分区模式相关
+        self.use_partition_mode = use_partition_mode
+        self.partition_definitions = partition_definitions or []
+        self.partition_mode = partition_mode
     
     def get_tool_name(self):
         """返回工具名称"""
@@ -44,23 +147,28 @@ class MrBayesThread(BaseProcessThread):
                 # 获取参数
                 params = self.parameters.copy()
                 
-                # 获取MPI并行数
-                mpi_parallel = params.pop(0)  # 第一个参数是并行数
+                # 获取MCMC参数
+                if len(params) > 0 and isinstance(params[0], dict):
+                    param_dict = params[0]
+                    nchains = param_dict.get('nchains', 4)
+                    nruns = param_dict.get('nruns', 2)
+                else:
+                    nchains = 4
+                    nruns = 2
                 
-                # 构建MrBayes命令脚本
-                mb_script = self._generate_mrbayes_script(input_file, params)
+                # 计算MPI进程数
+                # MPI进程数 = nchains * nruns（每个进程处理一条链）
+                total_threads = nchains * nruns
                 
-                # 创建临时脚本文件
-                script_file = self.create_temp_file(suffix='.nexus')
-                with open(script_file, 'w') as f:
-                    f.write(mb_script)
+                # 生成MrBayes NEXUS文件
+                nexus_file = self._generate_mrbayes_script(input_file, params)
                 
                 # 构建命令
-                if mpi_parallel > 1:
+                if self.use_mpi and total_threads > 1 and self.mpirun_path:
                     # 使用MPI并行版本
                     cmd = [
                         self.mpirun_path,
-                        "-np", str(mpi_parallel),
+                        "-np", str(total_threads),
                         self.tool_path
                     ]
                 else:
@@ -68,7 +176,7 @@ class MrBayesThread(BaseProcessThread):
                     cmd = [self.tool_path]
                 
                 # 添加输入文件
-                cmd.append(script_file)
+                cmd.append(nexus_file)
                 
                 # 执行命令
                 result = self.execute_command(cmd)
@@ -77,24 +185,24 @@ class MrBayesThread(BaseProcessThread):
                     self.error.emit(f"MrBayes execution failed for file {i+1}: {result.stderr}")
                     return
                 
-                # 查找生成的输出文件
-                input_dir = os.path.dirname(input_file)
-                input_name = os.path.splitext(os.path.basename(input_file))[0]
+                # 查找生成的输出文件（在nexus_file所在目录）
+                nexus_dir = os.path.dirname(nexus_file)
+                nexus_name = os.path.splitext(os.path.basename(nexus_file))[0]
                 
                 # 查找.con.tre文件
-                con_tre_files = [f for f in os.listdir(input_dir) if f.startswith(input_name) and f.endswith('.con.tre')]
+                con_tre_files = [f for f in os.listdir(nexus_dir) if f.startswith(nexus_name) and f.endswith('.con.tre')]
                 for f in con_tre_files:
-                    output_files.append(os.path.join(input_dir, f))
+                    output_files.append(os.path.join(nexus_dir, f))
                 
-                # 查找.chain文件
-                chain_files = [f for f in os.listdir(input_dir) if f.startswith(input_name) and '.run' in f and f.endswith('.p')]
+                # 查找.p文件（chain文件）
+                chain_files = [f for f in os.listdir(nexus_dir) if f.startswith(nexus_name) and '.run' in f and f.endswith('.p')]
                 for f in chain_files:
-                    output_files.append(os.path.join(input_dir, f))
+                    output_files.append(os.path.join(nexus_dir, f))
                 
                 # 查找.t文件
-                t_files = [f for f in os.listdir(input_dir) if f.startswith(input_name) and '.run' in f and f.endswith('.t')]
+                t_files = [f for f in os.listdir(nexus_dir) if f.startswith(nexus_name) and '.run' in f and f.endswith('.t')]
                 for f in t_files:
-                    output_files.append(os.path.join(input_dir, f))
+                    output_files.append(os.path.join(nexus_dir, f))
                         
             self.progress.emit("Phylogenetic inference completed")
             self.finished.emit(output_files, [])
@@ -103,8 +211,7 @@ class MrBayesThread(BaseProcessThread):
             self.error.emit(f"Phylogenetic inference exception: {str(e)}")
     
     def _generate_mrbayes_script(self, input_file, params):
-        """生成MrBayes命令脚本"""
-        script = []
+        """生成MrBayes命令脚本（完整的NEXUS文件）"""
         
         # 检查输入文件格式
         file_ext = os.path.splitext(input_file)[1].lower()
@@ -113,45 +220,74 @@ class MrBayesThread(BaseProcessThread):
             has_mrbayes_block = self._check_nexus_for_mrbayes_block(input_file)
             
             if has_mrbayes_block and self.run_data_block_checked:
-                # 如果文件包含MrBayes块且checkbox被选中，直接运行
-                script.append(f"execute {input_file};")
-                # 结束，因为我们不需要添加额外的MrBayes命令
-                script.append("quit;")
-                return "\n".join(script)
+                # 如果文件包含MrBayes块且checkbox被选中，直接使用原文件
+                return input_file
             elif has_mrbayes_block and not self.run_data_block_checked:
                 # 如果文件包含MrBayes块但checkbox未被选中，移除原有的MrBayes块
-                input_file = self._remove_mrbayes_block_from_nexus(input_file)
-                script.append(f"execute {input_file};")
+                nexus_file = self._remove_mrbayes_block_from_nexus(input_file)
+                # 在这个文件后面添加我们的MrBayes命令块
+                return self._add_mrbayes_block_to_nexus(nexus_file, params)
             else:
-                # 文件不包含MrBayes块，使用我们的配置
-                script.append(f"execute {input_file};")
+                # 文件不包含MrBayes块，添加我们的MrBayes命令块
+                return self._add_mrbayes_block_to_nexus(input_file, params)
         else:
-            # 非NEXUS格式，需要转换
+            # 非NEXUS格式，转换为NEXUS格式
             nexus_file = self._convert_to_nexus(input_file)
-            script.append(f"execute {nexus_file};")
-        
-        # 添加MrBayes命令块
-        script.append("begin mrbayes;")
-        
-        # 设置模型参数
-        script.extend(self._get_model_commands(params))
-        
-        # 设置MCMC参数
-        script.extend(self._get_mcmc_commands(params))
-        
-        # 运行MCMC
-        script.append("mcmc;")
-        
-        # 总结结果
-        script.extend(self._get_summary_commands(params))
-        
-        # 结束MrBayes块
-        script.append("end;")
-        
-        # 添加退出命令
-        script.append("quit;")
-        
-        return "\n".join(script)
+            # 添加MrBayes命令块
+            return self._add_mrbayes_block_to_nexus(nexus_file, params)
+    
+    def _add_mrbayes_block_to_nexus(self, nexus_file, params):
+        """向NEXUS文件添加MrBayes命令块"""
+        try:
+            # 读取原NEXUS文件内容
+            with open(nexus_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 生成MrBayes命令块
+            mrbayes_commands = []
+            mrbayes_commands.append("begin mrbayes;")
+            
+            # 检查是否启用分区模式
+            if self.use_partition_mode and self.partition_definitions:
+                # 分区模式
+                partition_commands = MrBayesModelConverter.generate_partition_commands(
+                    self.partition_definitions, 
+                    self.partition_mode
+                )
+                mrbayes_commands.extend(partition_commands)
+            else:
+                # 单一模型模式
+                # 设置模型参数
+                mrbayes_commands.extend(self._get_model_commands(params))
+            
+            # 设置MCMC参数
+            mrbayes_commands.extend(self._get_mcmc_commands(params))
+            
+            # 运行MCMC
+            mrbayes_commands.append("mcmc;")
+            
+            # 总结结果
+            mrbayes_commands.extend(self._get_summary_commands(params))
+            
+            # 结束MrBayes块
+            mrbayes_commands.append("end;")
+            
+            # 添加退出命令
+            mrbayes_commands.append("quit;")
+            
+            # 将MrBayes命令块添加到NEXUS文件末尾
+            mrbayes_block = "\n".join(mrbayes_commands)
+            new_content = content + "\n" + mrbayes_block
+            
+            # 创建临时文件保存新内容
+            output_file = self.create_temp_file(suffix='.nex')
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            
+            return output_file
+        except Exception as e:
+            self.error.emit(f"Error adding MrBayes block to NEXUS file: {str(e)}")
+            return nexus_file
     
     def _check_nexus_for_mrbayes_block(self, nexus_file):
         """检查NEXUS文件是否包含MrBayes块"""
@@ -208,7 +344,7 @@ class MrBayesThread(BaseProcessThread):
             return nexus_file
     
     def _convert_to_nexus(self, input_file):
-        """将输入文件转换为NEXUS格式"""
+        """将输入文件转换为NEXUS格式（interleave格式）"""
         # 确定输入文件格式
         file_ext = os.path.splitext(input_file)[1].lower()
         if file_ext in ['.fas', '.fasta', '.fa', '.fna']:
@@ -216,8 +352,15 @@ class MrBayesThread(BaseProcessThread):
         elif file_ext in ['.phy', '.phylip']:
             input_format = 'phylip'
         elif file_ext in ['.nex', '.nexus']:
-            # 如果已经是NEXUS格式，直接返回
-            return input_file
+            # 如果已经是NEXUS格式，检查是否是interleave格式
+            # 如果不是interleave格式，需要重新转换
+            with open(input_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # 检查是否是interleave格式（检查matrix块的格式）
+                if 'interleave' in content.lower() or 'interleaved' in content.lower():
+                    return input_file
+            # 如果不是interleave格式，继续转换
+            input_format = 'nexus'
         else:
             # 默认尝试fasta格式
             input_format = 'fasta'
@@ -228,29 +371,88 @@ class MrBayesThread(BaseProcessThread):
         try:
             # 使用BioPython进行格式转换
             sequences = list(SeqIO.parse(input_file, input_format))
+            
+            # 清理分类名称中的特殊字符
+            for seq in sequences:
+                seq.id = self._clean_taxon_name(seq.id)
+                if seq.name:
+                    seq.name = self._clean_taxon_name(seq.name)
+                if hasattr(seq, 'description') and seq.description:
+                    seq.description = self._clean_taxon_name(seq.description)
+            
+            # 为序列添加分子类型（默认DNA）
+            for seq in sequences:
+                seq.annotations['molecule_type'] = 'DNA'
+            
+            # 使用'nexus'格式写入
             SeqIO.write(sequences, output_file, 'nexus')
+            
+            # 手动转换为interleave格式
+            self._convert_to_interleave_format(output_file)
+            
             return output_file
         except Exception as e:
             self.error.emit(f"Error converting file to NEXUS format: {str(e)}")
             # 如果转换失败，返回原始文件
             return input_file
     
+    def _clean_taxon_name(self, name):
+        """清理分类名称中的特殊字符，替换为下划线"""
+        if not name:
+            return name
+        
+        # 将空格和标点符号替换为下划线
+        import string
+        # 允许的字符：字母、数字、下划线
+        allowed_chars = set(string.ascii_letters + string.digits + '_')
+        
+        cleaned = []
+        for char in name:
+            if char in allowed_chars:
+                cleaned.append(char)
+            else:
+                cleaned.append('_')  # 将其他字符替换为下划线
+        
+        # 避免连续的下划线
+        result = ''.join(cleaned)
+        while '__' in result:
+            result = result.replace('__', '_')
+        
+        # 避免以非字母开头
+        if result and result[0] not in string.ascii_letters:
+            result = 'T_' + result
+        
+        return result
+    
+    def _convert_to_interleave_format(self, nexus_file):
+        """将sequential NEXUS文件转换为interleave格式"""
+        try:
+            with open(nexus_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 检查format行中是否已经有interleave关键字
+            if 'interleave' not in content.lower():
+                # 如果没有，在format行中添加interleave关键字
+                content = content.replace('format datatype=', 'format datatype=')
+                # 在format行的末尾添加interleave关键字（在分号之前）
+                content = re.sub(r'(format\s+datatype=\w+\s+missing=\?\s+gap=-\s*)(;)', r'\1interleave \2', content)
+            
+            with open(nexus_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+        except Exception as e:
+            print(f"Warning: Failed to convert to interleave format: {e}")
+    
     def _get_model_commands(self, params):
         """获取模型设置命令"""
         commands = []
         
-        # 数据类型 - params可能是列表或字典，如果是列表则取第一个元素之后的字典
-        if isinstance(params, list) and len(params) > 0:
-            # 如果是列表，取第一个参数（MPI并行数）之后的参数字典
-            if len(params) > 1 and isinstance(params[1], dict):
-                param_dict = params[1]
-            elif len(params) > 0 and isinstance(params[0], dict):
-                param_dict = params[0]
-            else:
-                # 如果参数格式不对，使用默认值
-                param_dict = {}
+        # 数据类型 - params现在直接是字典
+        if isinstance(params, dict):
+            param_dict = params
+        elif isinstance(params, list) and len(params) > 0 and isinstance(params[0], dict):
+            param_dict = params[0]
         else:
-            param_dict = params if isinstance(params, dict) else {}
+            param_dict = {}
 
         datatype = param_dict.get('datatype', 'DNA')
         
@@ -324,17 +526,12 @@ class MrBayesThread(BaseProcessThread):
         commands = []
         
         # 处理参数，可能是列表或字典
-        if isinstance(params, list) and len(params) > 0:
-            # 如果是列表，取第一个参数（MPI并行数）之后的参数字典
-            if len(params) > 1 and isinstance(params[1], dict):
-                param_dict = params[1]
-            elif len(params) > 0 and isinstance(params[0], dict):
-                param_dict = params[0]
-            else:
-                # 如果参数格式不对，使用默认值
-                param_dict = {}
+        if isinstance(params, dict):
+            param_dict = params
+        elif isinstance(params, list) and len(params) > 0 and isinstance(params[0], dict):
+            param_dict = params[0]
         else:
-            param_dict = params if isinstance(params, dict) else {}
+            param_dict = {}
 
         ngen = param_dict.get('ngen', 1000000)
         samplefreq = param_dict.get('samplefreq', 1000)
@@ -351,17 +548,12 @@ class MrBayesThread(BaseProcessThread):
         commands = []
         
         # 处理参数，可能是列表或字典
-        if isinstance(params, list) and len(params) > 0:
-            # 如果是列表，取第一个参数（MPI并行数）之后的参数字典
-            if len(params) > 1 and isinstance(params[1], dict):
-                param_dict = params[1]
-            elif len(params) > 0 and isinstance(params[0], dict):
-                param_dict = params[0]
-            else:
-                # 如果参数格式不对，使用默认值
-                param_dict = {}
+        if isinstance(params, dict):
+            param_dict = params
+        elif isinstance(params, list) and len(params) > 0 and isinstance(params[0], dict):
+            param_dict = params[0]
         else:
-            param_dict = params if isinstance(params, dict) else {}
+            param_dict = {}
 
         # Burn-in设置
         burnin_as_fraction = param_dict.get('burnin_as_fraction', True)
@@ -387,14 +579,24 @@ class MrBayesThread(BaseProcessThread):
 
 
 class MrBayesPlugin(BasePlugin):
-    def __init__(self, import_from=None, import_data=None):
-        super().__init__(import_from, import_data)
+    # 定义信号
+    import_alignment_signal = pyqtSignal(list)  # 导入比对结果信号
+    export_phylogeny_result_signal = pyqtSignal(dict)  # 导出系统发育树结果信号
+    export_chain_result_signal = pyqtSignal(object)  # 导出MCMC链文件信号
+    
+    def __init__(self, import_from=None, import_data=None, workdir=None):
+        super().__init__(import_from, import_data, workdir=workdir)
         
         # 初始化变量
         if not hasattr(self, 'imported_files'):
             self.imported_files = []
         if not hasattr(self, 'file_tags'):
             self.file_tags = []
+        
+        # 分区模式相关变量
+        # 注意：use_partition_mode在UI中作为QCheckBox创建，这里不初始化
+        self.partition_definitions = []
+        self.partition_mode = PartitionMode.EL
     
     def init_plugin_info(self):
         """初始化插件信息"""
@@ -458,7 +660,10 @@ class MrBayesPlugin(BasePlugin):
         # self.datatype_combo.currentIndexChanged.connect(self.on_datatype_changed)
         self.datatype_combo.setCurrentIndex(0)
 
-        self.rate_params_layout.addWidget(QLabel("Type:"))
+        type_label = QLabel("Type:")
+        type_label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
+
+        self.rate_params_layout.addWidget(type_label)
         self.rate_params_layout.addWidget(self.datatype_combo)
 
         # for DNA data
@@ -497,7 +702,7 @@ class MrBayesPlugin(BasePlugin):
         self.prot_model_combo = QComboBox()
         self.prot_model_combo.addItems(["Blosum62", "Blosum", "Wag", "Lg", "gtr", "jones", "mtrev", "Poisson", "mixed"])
 
-        self.prodata_layout.addWidget(QLabel("Protein model"))
+        self.prodata_layout.addWidget(QLabel("Model"))
         self.prodata_layout.addWidget(self.prot_model_combo)
         self.prodata_layout.addWidget(QLabel("State freq.:"))
         
@@ -531,63 +736,35 @@ class MrBayesPlugin(BasePlugin):
 
 
         
-        # MPI & BEAGLE settings
-        mpi_beagle_group = QGroupBox("MPI && BEAGLE settings")
-        mpi_beagle_layout = QFormLayout()
-        mpi_beagle_group.setLayout(mpi_beagle_layout)
-        layout.addWidget(mpi_beagle_group)
+        # MPI & BEAGLE settings button
+        mpi_beagle_layout = QHBoxLayout()
+        self.mpi_beagle_btn = QPushButton("MPI & BEAGLE Settings...")
+        self.mpi_beagle_btn.clicked.connect(self.open_mpi_beagle_dialog)
+        mpi_beagle_layout.addWidget(self.mpi_beagle_btn)
+        mpi_beagle_layout.addStretch()
+        layout.addLayout(mpi_beagle_layout)
 
-        # MPI parallels
-        mpi_params_layout = QHBoxLayout()
-        self.use_mpi = QCheckBox("Use MPI")
-        self.use_mpi.setChecked(True)
-        # Number of Parallels
-        self.n_mpi_parallel = QSpinBox()
-        n_cpu_cores = os.cpu_count()
-        # Set the maximum value to the number of CPU cores
-        self.n_mpi_parallel.setMaximum(n_cpu_cores)
-        # default value: max(n_cpu_cores / 4, 1)
-        self.n_mpi_parallel.setValue(max(int(n_cpu_cores / 4), 1))
+        # Initialize MPI & BEAGLE settings with default values
+        self.use_mpi = True
+        self.use_beagle = True
+        self.beagle_device = 'CPU'
+        self.beagle_precision = 'Double'
+        self.beagle_scaling = 'Dynamic'
 
-        mpi_params_layout.addWidget(self.use_mpi)
-        mpi_params_layout.addWidget(QLabel("Number of Parallels:"))
-        mpi_params_layout.addWidget(self.n_mpi_parallel)
-        mpi_beagle_layout.addRow("MPI settings:", mpi_params_layout) # <mpirun [UNIX] / mpiexec [WINDOWS]> -np <number>
-
-        self.beagle_params_layout = QGridLayout()
-        # use beagle?
-
-        # set usebeagle=yes/no beagledevice=cpu/gpu beagleprecision=double/single beaglescaling=dynamic/always;
-        self.use_beagle = QCheckBox("Use BEAGLE") 
-        self.use_beagle.setChecked(True)
-
-        self.beagle_device_label = QLabel("Device:")
-        self.beagle_device_label.setAlignment(Qt.AlignRight)
-        self.beagle_device_combo = QComboBox()
-        self.beagle_device_combo.addItems(["CPU", "GPU"])
-        self.beagle_device_combo.setCurrentText("CPU")
-
-        self.beagle_precision_label = QLabel("Precision:")
-        self.beagle_precision_label.setAlignment(Qt.AlignRight)
-        self.beagle_precision_combo = QComboBox()
-        self.beagle_precision_combo.addItems(["Double", "Single"])
-        self.beagle_precision_combo.setCurrentText("Double")
-
-        self.beagle_scaling_label = QLabel("Scaling:")
-        self.beagle_scaling_label.setAlignment(Qt.AlignRight)
-        self.beagle_scaling_combo = QComboBox()
-        self.beagle_scaling_combo.addItems(["Dynamic", "Always"])
-        self.beagle_scaling_combo.setCurrentText("Dynamic")
-
-        self.beagle_params_layout.addWidget(self.use_beagle, 0, 0)
-        self.beagle_params_layout.addWidget(self.beagle_device_label, 0, 2)
-        self.beagle_params_layout.addWidget(self.beagle_device_combo, 0, 3)
-        self.beagle_params_layout.addWidget(self.beagle_precision_label, 1, 0)
-        self.beagle_params_layout.addWidget(self.beagle_precision_combo, 1, 1)
-        self.beagle_params_layout.addWidget(self.beagle_scaling_label, 1, 2)
-        self.beagle_params_layout.addWidget(self.beagle_scaling_combo, 1, 3)
-
-        mpi_beagle_layout.addRow("BEAGLE settings", self.beagle_params_layout)
+        # Partition mode settings
+        partition_layout = QHBoxLayout()
+        self.use_partition_mode = QCheckBox("Enable Partition Mode")
+        self.use_partition_mode.setChecked(False)
+        self.use_partition_mode.stateChanged.connect(self.on_partition_mode_toggled)
+        
+        self.partition_config_btn = QPushButton("Configure Partitions...")
+        self.partition_config_btn.setEnabled(False)
+        self.partition_config_btn.clicked.connect(self.open_partition_config_dialog)
+        
+        partition_layout.addWidget(self.use_partition_mode)
+        partition_layout.addWidget(self.partition_config_btn)
+        partition_layout.addStretch()
+        layout.addLayout(partition_layout)
 
         mcmc_params_group = QGroupBox("MCMC settings")
         mcmc_params_layout = QFormLayout()
@@ -597,15 +774,13 @@ class MrBayesPlugin(BasePlugin):
 
         # generation; sampling frequency; run num; chain num;
         # mcmcp ngen=* samplefreq=* printfreq=<samplefreq> nchains=* nruns=* savebrlens=yes checkpoint=yes checkfreq=5000;
-        self.generation_spinbox = QSpinBox()
-        self.generation_spinbox.setMinimum(1)
-        self.generation_spinbox.setValue(1000000)
-        self.generation_spinbox.setMaximum(2147483647)
+        self.generation_spinbox = QLineEdit()
+        self.generation_spinbox.setText("1000000")
+        self.generation_spinbox.setMinimumWidth(100)
 
-        self.sampling_frequency_spinbox = QSpinBox()
-        self.sampling_frequency_spinbox.setMinimum(1)
-        self.sampling_frequency_spinbox.setValue(1000)
-        self.sampling_frequency_spinbox.setMaximum(2147483647)
+        self.sampling_frequency_spinbox = QLineEdit()
+        self.sampling_frequency_spinbox.setText("1000")
+        self.sampling_frequency_spinbox.setMinimumWidth(100)
 
         self.run_num_spinbox = QSpinBox()
         self.run_num_spinbox.setMinimum(1)
@@ -616,19 +791,40 @@ class MrBayesPlugin(BasePlugin):
         self.chain_num_spinbox.setValue(4) # MC^3
 
         mcmcp_widget = QWidget()
-        mcmcp_layout = QHBoxLayout()
         mcmcp_widget.setContentsMargins(0, 0, 0, 0)
+        mcmcp_layout = QVBoxLayout()
         mcmcp_layout.setContentsMargins(0, 0, 0, 0)
+        mcmcp_layout.setSpacing(5)
         mcmcp_widget.setLayout(mcmcp_layout)
 
-        mcmcp_layout.addWidget(QLabel("Generations:"))
-        mcmcp_layout.addWidget(self.generation_spinbox)
-        mcmcp_layout.addWidget(QLabel("Sampling Freq.:"))
-        mcmcp_layout.addWidget(self.sampling_frequency_spinbox)
-        mcmcp_layout.addWidget(QLabel("Runs:"))
-        mcmcp_layout.addWidget(self.run_num_spinbox)
-        mcmcp_layout.addWidget(QLabel("Chains:"))
-        mcmcp_layout.addWidget(self.chain_num_spinbox)
+        # 第一行：Generations和Sampling Freq.
+        row1_widget = QWidget()
+        row1_widget.setContentsMargins(0, 0, 0, 0)
+        row1_layout = QHBoxLayout()
+        row1_layout.setContentsMargins(0, 0, 0, 0)
+        row1_widget.setLayout(row1_layout)
+
+        row1_layout.addWidget(QLabel("Generations:"))
+        row1_layout.addWidget(self.generation_spinbox)
+        row1_layout.addWidget(QLabel("Sampling Freq.:"))
+        row1_layout.addWidget(self.sampling_frequency_spinbox)
+        # row1_layout.addStretch()
+
+        # 第二行：Runs和Chains
+        row2_widget = QWidget()
+        row2_widget.setContentsMargins(0, 0, 0, 0)
+        row2_layout = QHBoxLayout()
+        row2_layout.setContentsMargins(0, 0, 0, 0)
+        row2_widget.setLayout(row2_layout)
+
+        row2_layout.addWidget(QLabel("Runs:"))
+        row2_layout.addWidget(self.run_num_spinbox)
+        row2_layout.addWidget(QLabel("Chains:"))
+        row2_layout.addWidget(self.chain_num_spinbox)
+        # row2_layout.addStretch()
+
+        mcmcp_layout.addWidget(row1_widget)
+        mcmcp_layout.addWidget(row2_widget)
 
         mcmc_params_layout.addRow("MCMC:", mcmcp_widget)
 
@@ -707,7 +903,7 @@ class MrBayesPlugin(BasePlugin):
         # 处理导入的数据
         if self.import_file:
             self.file_path_edit.setText(self.import_file)
-            input_group.setVisible(False)
+            input_group.setVisible(False)   
         elif hasattr(self, 'imported_files') and self.imported_files:
             # 显示导入的文件
             for file_path in self.imported_files:
@@ -729,6 +925,46 @@ class MrBayesPlugin(BasePlugin):
         else:  # Protein
             self.dnadata_widget.setVisible(False)
             self.prodata_widget.setVisible(True)
+    
+    def open_mpi_beagle_dialog(self):
+        """打开MPI & BEAGLE设置对话框"""
+        dialog = MPIBeagleSettingsDialog(
+            self,
+            use_mpi=self.use_mpi,
+            use_beagle=self.use_beagle,
+            beagle_device=self.beagle_device,
+            beagle_precision=self.beagle_precision,
+            beagle_scaling=self.beagle_scaling
+        )
+        
+        if dialog.exec_() == QDialog.Accepted:
+            settings = dialog.get_settings()
+            self.use_mpi = settings['use_mpi']
+            self.use_beagle = settings['use_beagle']
+            self.beagle_device = settings['beagle_device']
+            self.beagle_precision = settings['beagle_precision']
+            self.beagle_scaling = settings['beagle_scaling']
+    
+    def on_partition_mode_toggled(self):
+        """分区模式复选框状态改变时处理"""
+        enabled = self.use_partition_mode.isChecked()
+        self.partition_config_btn.setEnabled(enabled)
+    
+    def open_partition_config_dialog(self):
+        """打开分区配置对话框"""
+        dialog = MrBayesPartitionDialog(
+            self,
+            partitions=self.partition_definitions,
+            mode=self.partition_mode
+        )
+        
+        if dialog.exec_() == QDialog.Accepted:
+            self.partition_definitions = dialog.get_partitions()
+            self.partition_mode = dialog.get_mode()
+            self.add_console_message(
+                f"Partition mode enabled with {len(self.partition_definitions)} partition(s), "
+                f"mode: {self.partition_mode.value}", "info"
+            )
     
     def browse_files(self):
         """浏览选择文件"""
@@ -862,12 +1098,6 @@ class MrBayesPlugin(BasePlugin):
         """获取命令行参数"""
         params = []
         
-        # 添加MPI并行数作为第一个参数
-        if self.use_mpi.isChecked():
-            params.append(self.n_mpi_parallel.value())
-        else:
-            params.append(1)
-        
         # 数据类型
         datatype = self.datatype_combo.currentText()
         params.append({'datatype': datatype})
@@ -908,17 +1138,18 @@ class MrBayesPlugin(BasePlugin):
         
         # BEAGLE设置
         params[-1].update({
-            'use_beagle': self.use_beagle.isChecked(),
-            'beagle_device': self.beagle_device_combo.currentText().lower(),
-            'beagle_precision': self.beagle_precision_combo.currentText().lower(),
-            'beagle_scaling': self.beagle_scaling_combo.currentText().lower()
+            'use_beagle': self.use_beagle,
+            'beagle_device': self.beagle_device.lower(),
+            'beagle_precision': self.beagle_precision.lower(),
+            'beagle_scaling': self.beagle_scaling.lower()
         })
         
         # MCMC参数
+        nchains = self.chain_num_spinbox.value()
         params[-1].update({
-            'ngen': self.generation_spinbox.value(),
-            'samplefreq': self.sampling_frequency_spinbox.value(),
-            'nchains': self.chain_num_spinbox.value(),
+            'ngen': int(self.generation_spinbox.text()),
+            'samplefreq': int(self.sampling_frequency_spinbox.text()),
+            'nchains': nchains,
             'nruns': self.run_num_spinbox.value()
         })
         
@@ -966,7 +1197,7 @@ class MrBayesPlugin(BasePlugin):
             
         # 检查MPI可执行文件是否存在（如果使用MPI）
         mpirun_path = None
-        if self.use_mpi.isChecked():
+        if self.use_mpi:
             mpirun_path = self.get_mpirun_path()
             if not mpirun_path or not os.path.exists(mpirun_path):
                 QMessageBox.critical(self, "Error", "MPI executable file not found! Please check config.json for 'MPIRun' entry.")
@@ -987,10 +1218,18 @@ class MrBayesPlugin(BasePlugin):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # 未知进度
         
+        # 获取参数
+        params = self.get_parameters()
+        
         # 在单独的线程中运行MrBayes
         self.analysis_thread = MrBayesThread(
-            self.tool_path, mpirun_path, input_files, self.get_parameters(), self.imported_files,
-            self.run_data_block.isChecked()
+            self.tool_path, mpirun_path, input_files, params, self.imported_files,
+            self.run_data_block.isChecked(),
+            use_partition_mode=self.use_partition_mode.isChecked(),
+            partition_definitions=self.partition_definitions,
+            partition_mode=self.partition_mode,
+            workdir=self.workdir,
+            use_mpi=self.use_mpi
         )
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
         self.analysis_thread.finished.connect(self.analysis_finished)
@@ -1029,6 +1268,12 @@ class MrBayesPlugin(BasePlugin):
         # 保存输出文件
         self.current_output_files = output_files
         
+        # 检测并发送MCMC链文件
+        self._detect_and_emit_chain_files(output_files)
+        
+        # 检测并发送系统发育树文件
+        self._detect_and_emit_phylogeny_files(output_files)
+        
         # 显示结果
         self.display_results(output_files)
         
@@ -1040,6 +1285,59 @@ class MrBayesPlugin(BasePlugin):
         
         QMessageBox.information(self, "Completed", "Phylogenetic inference completed!")
     
+    def _detect_and_emit_phylogeny_files(self, output_files):
+        """检测系统发育树文件并发送信号"""
+        # 查找.con.tre文件（共识树文件）
+        con_tre_files = [f for f in output_files if f.endswith('.con.tre')]
+        
+        if con_tre_files:
+            tree_file = con_tre_files[0]
+            # 创建系统发育树数据字典
+            phylogeny_data = {
+                'file_path': tree_file,
+                'file_type': 'newick',
+                'tool': 'mrbayes',
+                'tree_type': 'consensus'
+            }
+            # 发送信号
+            self.export_phylogeny_result_signal.emit(phylogeny_data)
+            self.add_console_message(f"Detected consensus tree: {os.path.basename(tree_file)}", "info")
+    
+    def _detect_and_emit_chain_files(self, output_files):
+        """检测MCMC链文件并发送信号"""
+        # 查找所有.p文件（MrBayes的chain文件）
+        chain_files = [f for f in output_files if f.endswith('.p')]
+        
+        if not chain_files:
+            return
+        
+        # 统计run数量
+        run_numbers = set()
+        for chain_file in chain_files:
+            filename = os.path.basename(chain_file)
+            if '.run' in filename:
+                try:
+                    run_part = filename.split('.run')[1].split('.')[0]
+                    run_number = int(run_part)
+                    run_numbers.add(run_number)
+                except (ValueError, IndexError):
+                    pass
+        
+        run_count = len(run_numbers)
+        chain_count = len(chain_files)
+        
+        # 创建一个ChainItem，包含所有链文件
+        chain_item = ChainItem(
+            file_paths=chain_files,
+            run_number=1,  # 合并所有run，使用1作为统一编号
+            chain_count=chain_count,
+            tool="mrbayes"
+        )
+        
+        # 发送信号
+        self.export_chain_result_signal.emit(chain_item)
+        self.add_console_message(f"Detected MCMC chain files: {run_count} run(s), {chain_count} chain file(s) total", "info")
+    
     def analysis_error(self, error_message):
         """分析错误处理"""
         self.is_running = False
@@ -1049,6 +1347,20 @@ class MrBayesPlugin(BasePlugin):
         
         self.add_console_message(f"Analysis error: {error_message}", "error")
         QMessageBox.critical(self, "Error", f"Analysis failed: {error_message}")
+    
+    def stop_analysis(self):
+        """停止分析"""
+        if self.analysis_thread and self.analysis_thread.isRunning():
+            # 停止线程
+            self.analysis_thread.stop()
+            self.add_console_message("Analysis stopped by user", "info")
+            
+        self.is_running = False
+        self.run_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.progress_bar.setVisible(False)
+        
+        QMessageBox.information(self, "Stopped", "Analysis has been stopped.")
     
     def get_mb_data_block(self):
         """生成MrBayes数据块内容"""
@@ -1071,51 +1383,61 @@ class MrBayesPlugin(BasePlugin):
         commands = []
         commands.append("begin mrbayes;")
         
-        # 模型设置
-        if params.get('datatype', 'DNA') == 'DNA':
-            nst = params.get('nst', 6)
-            statefreq = params.get('statefreq', 'estimated(dirichlet)')
-            commands.append(f"lset nucmodel=4by4 nst={nst};")
-            
-            if statefreq == 'fixed(equal)':
-                commands.append("prset statefreqpr=fixed(equal);")
-            elif statefreq == 'fixed(empirical)':
-                commands.append("prset statefreqpr=fixed(empirical);")
-            else:
-                commands.append("prset statefreqpr=dirichlet(1.0,1.0,1.0,1.0);")
+        # 检查是否启用分区模式
+        if self.use_partition_mode and self.partition_definitions:
+            # 分区模式
+            partition_commands = MrBayesModelConverter.generate_partition_commands(
+                self.partition_definitions, 
+                self.partition_mode
+            )
+            commands.extend(partition_commands)
         else:
-            aamodel = params.get('aamodel', 'mixed')
-            statefreq = params.get('statefreq', 'estimated(dirichlet)')
-            commands.append("lset nucmodel=protein;")
-            
-            if aamodel == 'mixed':
-                commands.append("prset aamodelpr=mixed;")
+            # 单一模型模式
+            # 模型设置
+            if params.get('datatype', 'DNA') == 'DNA':
+                nst = params.get('nst', 6)
+                statefreq = params.get('statefreq', 'estimated(dirichlet)')
+                commands.append(f"lset nucmodel=4by4 nst={nst};")
+                
+                if statefreq == 'fixed(equal)':
+                    commands.append("prset statefreqpr=fixed(equal);")
+                elif statefreq == 'fixed(empirical)':
+                    commands.append("prset statefreqpr=fixed(empirical);")
+                else:
+                    commands.append("prset statefreqpr=dirichlet(1.0,1.0,1.0,1.0);")
             else:
-                commands.append(f"prset aamodelpr=fixed({aamodel});")
+                aamodel = params.get('aamodel', 'mixed')
+                statefreq = params.get('statefreq', 'estimated(dirichlet)')
+                commands.append("lset nucmodel=protein;")
+                
+                if aamodel == 'mixed':
+                    commands.append("prset aamodelpr=mixed;")
+                else:
+                    commands.append(f"prset aamodelpr=fixed({aamodel});")
+                
+                if statefreq == 'fixed(equal)':
+                    commands.append("prset statefreqpr=fixed(equal);")
+                elif statefreq == 'fixed(empirical)':
+                    commands.append("prset statefreqpr=fixed(empirical);")
+                else:
+                    commands.append("prset statefreqpr=dirichlet(1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0);")
             
-            if statefreq == 'fixed(equal)':
-                commands.append("prset statefreqpr=fixed(equal);")
-            elif statefreq == 'fixed(empirical)':
-                commands.append("prset statefreqpr=fixed(empirical);")
-            else:
-                commands.append("prset statefreqpr=dirichlet(1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0);")
-        
-        # 速率异质性
-        rates = params.get('rates', 'equal')
-        ngammacat = params.get('ngammacat', 4)
-        
-        if rates == 'equal':
-            commands.append("lset rates=equal;")
-        elif rates == 'gamma':
-            commands.append(f"lset rates=gamma ngammacat={ngammacat};")
-        elif rates == 'invgamma':
-            commands.append(f"lset rates=invgamma ngammacat={ngammacat};")
-        elif rates == 'propinv':
-            commands.append("lset rates=propinv;")
-        elif rates == 'lnorm':
-            commands.append(f"lset rates=lnorm nlnormcat={ngammacat};")
-        elif rates == 'adgamma':
-            commands.append(f"lset rates=adgamma ngammacat={ngammacat};")
+            # 速率异质性
+            rates = params.get('rates', 'equal')
+            ngammacat = params.get('ngammacat', 4)
+            
+            if rates == 'equal':
+                commands.append("lset rates=equal;")
+            elif rates == 'gamma':
+                commands.append(f"lset rates=gamma ngammacat={ngammacat};")
+            elif rates == 'invgamma':
+                commands.append(f"lset rates=invgamma ngammacat={ngammacat};")
+            elif rates == 'propinv':
+                commands.append("lset rates=propinv;")
+            elif rates == 'lnorm':
+                commands.append(f"lset rates=lnorm nlnormcat={ngammacat};")
+            elif rates == 'adgamma':
+                commands.append(f"lset rates=adgamma ngammacat={ngammacat};")
         
         # BEAGLE设置
         if params.get('use_beagle', True):
@@ -1216,6 +1538,68 @@ class MrBayesPlugin(BasePlugin):
             self.add_console_message(error_msg, "error")
             QMessageBox.critical(self, "Error", error_msg)
     
+    def display_results(self, output_files):
+        """显示分析结果，使用IcyTree插件显示系统发育树"""
+        if not output_files:
+            self.output_info.setText("No output files generated")
+            return
+
+        # 查找.con.tre文件（共识树文件）
+        con_tre_files = [f for f in output_files if f.endswith('.con.tre')]
+        
+        if con_tre_files:
+            tree_file = con_tre_files[0]
+            try:
+                # 读取树文件内容
+                with open(tree_file, 'r') as f:
+                    tree_content = f.read().strip()
+                
+                # 确保树内容不为空
+                if not tree_content:
+                    self.output_info.setText("Tree file is empty")
+                    return
+                
+                # 导入IcyTree插件
+                from ..icytree import IcyTreePlugin
+                import os
+                
+                # 创建IcyTree插件实例
+                plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
+                icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
+                
+                # 设置Newick字符串并显示
+                icytree_plugin.set_newick_string(tree_content)
+                
+                # 在输出标签页中显示IcyTree
+                output_layout = self.output_tab.layout()
+                if output_layout:
+                    # 隐藏web_view（如果存在）
+                    if hasattr(self, 'web_view'):
+                        self.web_view.setVisible(False)
+                    
+                    # 查找并移除之前的IcyTree插件（如果有）
+                    for i in reversed(range(output_layout.count())):
+                        widget = output_layout.itemAt(i).widget()
+                        if widget and widget != self.output_info and widget != self.report_combo.parentWidget():
+                            widget.setParent(None)
+                    
+                    # 添加IcyTree插件到输出标签页
+                    output_layout.addWidget(icytree_plugin)
+                
+                self.output_info.setText(f"Consensus tree visualization ready: {os.path.basename(tree_file)}")
+                
+            except ImportError:
+                # 如果无法导入IcyTree插件，显示错误信息
+                self.output_info.setText("Error: IcyTree plugin not available")
+                
+            except Exception as e:
+                error_msg = f"Error processing tree file: {str(e)}"
+                self.output_info.setText(error_msg)
+                self.add_console_message(error_msg, "error")
+        else:
+            # 没有找到共识树文件，显示信息
+            self.output_info.setText(f"No consensus tree (.con.tre) found. Generated {len(output_files)} file(s).")
+
 class MrBayesHighlighter(QSyntaxHighlighter):
     """MrBayes语法高亮器，使用Monokai主题"""
     
@@ -1290,22 +1674,55 @@ class MrBayesHighlighter(QSyntaxHighlighter):
             QMessageBox.critical(self, "Error", error_msg)
     
     def display_results(self, output_files):
-        """显示分析结果"""
+        """显示分析结果，使用IcyTree插件显示系统发育树"""
         if not output_files:
             self.output_info.setText("No output files generated")
             return
-        
-        # 查找.con.tre文件
+
+        # 查找.con.tre文件（共识树文件）
         con_tre_files = [f for f in output_files if f.endswith('.con.tre')]
         
         if con_tre_files:
-            # 读取并显示树文件
+            tree_file = con_tre_files[0]
             try:
-                with open(con_tre_files[0], 'r') as f:
-                    tree_content = f.read()
-                self.output_info.setText(f"Consensus tree: {os.path.basename(con_tre_files[0])}")
+                # 读取树文件内容
+                with open(tree_file, 'r') as f:
+                    tree_content = f.read().strip()
                 
-                # 生成简单的HTML预览
+                # 确保树内容不为空
+                if not tree_content:
+                    self.output_info.setText("Tree file is empty")
+                    return
+                
+                # 导入IcyTree插件
+                from ..icytree import IcyTreePlugin
+                import os
+                
+                # 创建IcyTree插件实例
+                plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
+                icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
+                
+                # 设置Newick字符串并显示
+                icytree_plugin.set_newick_string(tree_content)
+                
+                # 在输出标签页中显示IcyTree
+                output_layout = self.output_tab.layout()
+                if output_layout:
+                    # 清除现有部件
+                    for i in reversed(range(output_layout.count())):
+                        widget = output_layout.itemAt(i).widget()
+                        if widget and widget != self.output_info:
+                            widget.setParent(None)
+                
+                # 添加IcyTree插件到输出标签页
+                output_layout.addWidget(icytree_plugin)
+                
+                self.output_info.setText(f"Consensus tree visualization ready: {os.path.basename(tree_file)}")
+                
+            except ImportError:
+                # 如果无法导入IcyTree插件，回退到显示文件列表
+                self.output_info.setText("IcyTree plugin not available, showing file list instead")
+                
                 html_content = f"""
                 <!DOCTYPE html>
                 <html>
@@ -1315,13 +1732,12 @@ class MrBayesHighlighter(QSyntaxHighlighter):
                         body {{ font-family: Arial, sans-serif; margin: 20px; }}
                         h1 {{ color: #2c3e50; }}
                         .info {{ background-color: #e8f4f8; padding: 10px; border-radius: 5px; }}
-                        pre {{ background-color: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; }}
                     </style>
                 </head>
                 <body>
                     <h1>MrBayes Analysis Result</h1>
                     <div class="info">
-                        <p><strong>Consensus Tree File:</strong> {os.path.basename(con_tre_files[0])}</p>
+                        <p><strong>Consensus Tree File:</strong> {os.path.basename(tree_file)}</p>
                         <p><strong>Total Output Files:</strong> {len(output_files)}</p>
                     </div>
                     <h2>Tree Content (Newick Format)</h2>
@@ -1339,7 +1755,6 @@ class MrBayesHighlighter(QSyntaxHighlighter):
                 </html>
                 """
                 
-                # 创建临时HTML文件
                 html_file = self.create_temp_file(suffix='.html')
                 with open(html_file, 'w', encoding='utf-8') as f:
                     f.write(html_content)
@@ -1349,7 +1764,39 @@ class MrBayesHighlighter(QSyntaxHighlighter):
                 self.show_current_report()
                 
             except Exception as e:
-                self.output_info.setText(f"Error reading tree file: {str(e)}")
+                error_msg = f"Error processing tree file: {str(e)}"
+                self.output_info.setText(error_msg)
+                self.add_console_message(error_msg, "error")
+                
+                # 创建错误信息的HTML页面
+                html_content = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Error Display</title>
+                    <style>
+                        body {{ 
+                            font-family: Arial, sans-serif; 
+                            margin: 20px; 
+                            background-color: #ffe6e6; 
+                            color: #d00;
+                        }}
+                    </style>
+                </head>
+                <body>
+                    <h1>Error Processing Tree File</h1>
+                    <p>{error_msg}</p>
+                </body>
+                </html>
+                """
+                
+                html_file = self.create_temp_file(suffix='.html')
+                with open(html_file, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+                
+                self.reports = [html_file]
+                self.update_report_combo()
+                self.show_current_report()
         else:
             self.output_info.setText(f"No consensus tree found. Generated {len(output_files)} file(s).")
             
@@ -1396,5 +1843,5 @@ class MrBayesPluginEntry:
         self.plugin_path = plugin_path
         # self.config = config_loader()
     
-    def run(self, import_from=None, import_data=None):
-        return MrBayesPlugin(import_from, import_data)
+    def run(self, import_from=None, import_data=None, workdir=None):
+        return MrBayesPlugin(import_from, import_data, workdir=workdir)

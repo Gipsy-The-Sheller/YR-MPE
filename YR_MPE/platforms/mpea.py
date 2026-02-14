@@ -65,14 +65,210 @@ class YR_MPEA_Widget(QWidget):
             os.path.expanduser("~")  # 默认打开用户主目录
         )
         if folder_path:
-            # 这里可以添加后续处理逻辑，比如保存工作区路径或更新UI
-            # 目前先简单显示一个消息框确认选择
+            self._switch_workspace(folder_path, is_new=True)
+    
+    def _switch_workspace(self, new_workspace_path: str, is_new: bool = False):
+        """切换工作区"""
+        try:
+            # 检查当前工作区是否有数据
+            current_has_data = self.workspace_manager.has_data() if self.workspace_manager.workspace_path else False
+            
+            if current_has_data and self.workspace_manager.workspace_path != new_workspace_path:
+                # 显示切换选项对话框
+                reply = QMessageBox.question(
+                    self,
+                    "Workspace Switch",
+                    f"Current workspace contains data.\n\n"
+                    f"Current: {self.workspace_manager.workspace_path}\n"
+                    f"Target: {new_workspace_path}\n\n"
+                    f"Choose an option:\n"
+                    f"• Yes: Overwrite target workspace with current data\n"
+                    f"• No: Clear current data and load target workspace\n"
+                    f"• Cancel: Keep current workspace",
+                    QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                    QMessageBox.Cancel
+                )
+                
+                if reply == QMessageBox.Cancel:
+                    return  # 取消切换
+                elif reply == QMessageBox.Yes:
+                    # 选项1: 用当前数据覆盖目标工作区
+                    self._save_current_data_to_workspace(new_workspace_path)
+                elif reply == QMessageBox.No:
+                    # 选项2: 清空当前数据并加载目标工作区
+                    self.workspace_manager.clear_current_state()
+                    self.workspace_manager.workspace_path = new_workspace_path
+                    self.workspace_manager._load_workspace_state()
+            
+            # 设置新工作区
+            self.workspace_manager.set_workspace_path(new_workspace_path)
+            
+            # 刷新UI
+            self._update_workspace_display()
+            
+            # 显示成功消息
+            display_name = self.workspace_manager.truncate_path(new_workspace_path)
             QMessageBox.information(
-                self, 
-                "Workspace Selected", 
-                f"Workspace folder selected:\n{folder_path}"
+                self,
+                "Workspace Selected",
+                f"Workspace set to:\n{new_workspace_path}\n\n"
+                f"History, temp, and results directories have been created."
             )
-            # TODO: 可以在这里添加实际的工作区处理逻辑
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to switch workspace:\n{str(e)}"
+            )
+    
+    def _save_current_data_to_workspace(self, workspace_path: str):
+        """保存当前数据到指定工作区"""
+        # 确保工作区目录存在
+        os.makedirs(workspace_path, exist_ok=True)
+        
+        # 创建子目录
+        subdirs = ["history", "temp", "results"]
+        for subdir in subdirs:
+            os.makedirs(os.path.join(workspace_path, subdir), exist_ok=True)
+        
+        # 保存当前工作区状态到新工作区
+        temp_path = self.workspace_manager.workspace_path
+        self.workspace_manager.workspace_path = workspace_path
+        self.workspace_manager._save_workspace_state()
+        
+        # 恢复原路径（因为set_workspace_path会再次调用）
+        self.workspace_manager.workspace_path = temp_path
+    
+    def _update_workspace_display(self):
+        """更新工作区显示"""
+        if self.workspace_manager.workspace_path:
+            display_name = self.workspace_manager.truncate_path(
+                self.workspace_manager.workspace_path
+            )
+            # 更新workspace按钮的工具提示
+            if hasattr(self, 'workspace_button'):
+                self.workspace_button.setToolTip(f"Current Workspace: {self.workspace_manager.workspace_path}")
+        else:
+            # 临时模式
+            if hasattr(self, 'workspace_button'):
+                self.workspace_button.setToolTip("Temporary Mode - No workspace selected")
+    
+    def switch_to_temporary(self):
+        """切换到临时模式（无工作区）"""
+        try:
+            # 检查当前是否有工作区且有数据
+            current_has_data = self.workspace_manager.has_data() if self.workspace_manager.workspace_path else False
+
+            if current_has_data:
+                # 提示用户数据会丢失
+                reply = QMessageBox.warning(
+                    self,
+                    "Switch to Temporary Mode",
+                    "Switching to temporary mode will clear all current workspace data.\n\n"
+                    "This action cannot be undone.\n\n"
+                    "Do you want to continue?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+
+                if reply == QMessageBox.No:
+                    return  # 用户取消
+
+            # 清空工作区路径和数据
+            self.workspace_manager.workspace_path = None
+            self.workspace_manager.clear_current_state()
+
+            # 保存配置（清空current）
+            self.workspace_manager._save_workspace_history()
+
+            # 刷新UI
+            self._update_workspace_display()
+            
+            # 刷新工作区菜单（更新Temporary选项状态）
+            self._create_workspace_menu(self.workspace_button)
+            
+            # 显示成功消息
+            QMessageBox.information(
+                self,
+                "Temporary Mode",
+                "Switched to temporary mode.\n\n"
+                "All workspace data has been cleared.\n"
+                "Select a workspace folder to save your work."
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to switch to temporary mode:\n{str(e)}"
+            )
+
+    def get_workdir(self):
+        """获取工作区 temp 目录路径
+
+        Returns:
+            str: 工作区 temp 目录路径，如果没有工作区则返回 None
+        """
+        if self.workspace_manager.workspace_path:
+            return os.path.join(self.workspace_manager.workspace_path, "temp")
+        return None
+
+    def _create_workspace_menu(self, workspace_button):
+        """创建工作区菜单"""
+        # 添加Select Workspace子菜单
+        select_workspace_action = QAction("Select Workspace", workspace_button)
+        workspace_menu = QMenu(workspace_button)
+        
+        # "Select Folder..." 选项
+        select_folder_action = QAction("Select Folder...", workspace_menu)
+        select_folder_action.triggered.connect(self.select_workspace_folder)
+        workspace_menu.addAction(select_folder_action)
+        
+        # 添加分隔符
+        separator = QAction(workspace_menu)
+        separator.setSeparator(True)
+        workspace_menu.addAction(separator)
+        
+        # 添加历史记录
+        history_list = self.workspace_manager.get_history_list()
+        if history_list:
+            for i, ws_path in enumerate(history_list):
+                display_name = self.workspace_manager.truncate_path(ws_path)
+                
+                # 标记当前工作区
+                if ws_path == self.workspace_manager.workspace_path:
+                    display_name += " (Current)"
+                
+                history_action = QAction(display_name, workspace_menu)
+                history_action.setData(ws_path)
+                history_action.triggered.connect(
+                    lambda checked, path=ws_path: self._switch_workspace(path)
+                )
+                workspace_menu.addAction(history_action)
+        else:
+            # 如果没有历史记录，添加提示
+            no_history_action = QAction("No recent workspaces", workspace_menu)
+            no_history_action.setEnabled(False)
+            workspace_menu.addAction(no_history_action)
+        
+        # 添加分隔符
+        separator2 = QAction(workspace_menu)
+        separator2.setSeparator(True)
+        workspace_menu.addAction(separator2)
+        
+        # 添加Temporary选项
+        temporary_action = QAction("Temporary", workspace_menu)
+        # 如果已经在临时模式，标记为当前
+        if not self.workspace_manager.workspace_path:
+            temporary_action.setText("Temporary (Current)")
+            temporary_action.setEnabled(False)
+        else:
+            temporary_action.triggered.connect(self.switch_to_temporary)
+        workspace_menu.addAction(temporary_action)
+        
+        select_workspace_action.setMenu(workspace_menu)
+        workspace_button.addAction(select_workspace_action)
             
     def init_ui(self):
         self.setWindowTitle("YR_MPEA")
@@ -98,16 +294,12 @@ class YR_MPEA_Widget(QWidget):
         workspace_button.setPopupMode(QToolButton.InstantPopup)
         workspace_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         main_toolbar.addWidget(workspace_button)
-
-        # 添加Select workspace folder选项
-        select_workspace_action = QAction("Select workspace folder", workspace_button)
-        select_workspace_action.triggered.connect(self.select_workspace_folder)
-        workspace_button.addAction(select_workspace_action)
         
-        # 添加分隔符
-        separator = QAction(workspace_button)
-        separator.setSeparator(True)
-        workspace_button.addAction(separator)
+        # 保存workspace_button引用
+        self.workspace_button = workspace_button
+        
+        # 创建工作区菜单
+        self._create_workspace_menu(workspace_button)
         
         # Dataset子菜单 - 使用正确的Qt API
         dataset_action = QAction("Dataset", workspace_button)
@@ -284,16 +476,16 @@ class YR_MPEA_Widget(QWidget):
         bi_menu = QMenu()
         cons_bi_action.setMenu(bi_menu)
         
-        # 添加MrBayes选项（TODO）
+        # 添加MrBayes选项
         mrbayes_action = QAction("MrBayes3-MPI-BEAGLE", phylogeny_button)
         mrbayes_action.setIcon(self.resource_factory.get_icon("software/mrbayes.svg"))
-        # mrbayes_action.triggered.connect(self.open_mrbayes_wrapper)  # TODO: 实现MrBayes集成
+        mrbayes_action.triggered.connect(self.open_mrbayes_wrapper)
         bi_menu.addAction(mrbayes_action)
         
-        # 添加PhyloBayes选项（TODO）
+        # 添加PhyloBayes选项
         phylobayes_action = QAction("PhyloBayes-MPI", phylogeny_button)
         phylobayes_action.setIcon(self.resource_factory.get_icon("software/phylobayes.svg"))
-        # phylobayes_action.triggered.connect(self.open_phylobayes_wrapper)  # TODO: 实现PhyloBayes集成
+        phylobayes_action.triggered.connect(self.open_phylobayes_wrapper)
         bi_menu.addAction(phylobayes_action)
         
         # 添加miniTracer选项
@@ -487,6 +679,30 @@ class YR_MPEA_Widget(QWidget):
         """将树形图添加到工作区"""
         self.workspace.add_phylogeny(phylogeny)
 
+        # 如果有文件路径，保存到 history
+        if isinstance(phylogeny, dict) and 'data' in phylogeny:
+            for tree_data in phylogeny['data']:
+                if isinstance(tree_data, dict) and 'file_path' in tree_data:
+                    file_path = tree_data['file_path']
+                    if os.path.exists(file_path):
+                        # 查找所有相关的输出文件（.treefile, .iqtree, .log 等）
+                        output_files = []
+                        base_path = os.path.splitext(file_path)[0]
+                        for ext in ['.treefile', '.iqtree', '.log']:
+                            if os.path.exists(base_path + ext):
+                                output_files.append(base_path + ext)
+
+                        # 添加到 history
+                        if output_files:
+                            self.workspace_manager.add_files_to_history(
+                                output_files,
+                                operation_type="iqtree"
+                            )
+
+    def add_chain_to_workspace(self, chain_item):
+        """将MCMC链文件添加到工作区"""
+        self.workspace.add_chain(chain_item)
+
     def open_caster_site_wrapper(self):
         """打开CASTER-site插件"""
         from PyQt5.QtWidgets import QDialog
@@ -636,8 +852,12 @@ class YR_MPEA_Widget(QWidget):
         dialog.layout().addWidget(model_parameter_wrapper)
         dialog.exec_()
     
-    def open_minitracer_wrapper(self):
-        """打开MiniTracer进行MCMC诊断分析"""
+    def open_minitracer_wrapper(self, chain_item=None):
+        """打开MiniTracer进行MCMC诊断分析
+        
+        Args:
+            chain_item: 可选的ChainItem对象，如果提供则自动加载该chain文件
+        """
         from PyQt5.QtWidgets import QDialog
         try:
             dialog = QDialog()
@@ -653,13 +873,60 @@ class YR_MPEA_Widget(QWidget):
             plugin_entry = self.plugin_factory.get_minitracer_plugin()
             minitracer_wrapper = plugin_entry.run()
             
+            # 如果提供了chain_item，自动加载该chain文件
+            if chain_item:
+                # 检查是旧的file_path还是新的file_paths
+                if hasattr(chain_item, 'file_paths') and chain_item.file_paths:
+                    # 新的ChainItem数据结构，支持多个链文件
+                    for file_path in chain_item.file_paths:
+                        if file_path not in minitracer_wrapper.mcmc_files:
+                            minitracer_wrapper.mcmc_files.append(file_path)
+                            try:
+                                data = minitracer_wrapper.parse_trace_file(file_path)
+                                minitracer_wrapper.mcmc_data[file_path] = data
+                            except Exception as e:
+                                QMessageBox.warning(dialog, "Error", f"Failed to load chain file {file_path}: {str(e)}")
+                                if file_path in minitracer_wrapper.mcmc_files:
+                                    minitracer_wrapper.mcmc_files.remove(file_path)
+                    
+                    # 更新界面
+                    minitracer_wrapper.update_file_table()
+                    # 选择第一个文件
+                    if minitracer_wrapper.mcmc_files:
+                        minitracer_wrapper.file_table.selectRow(0)
+                        minitracer_wrapper.update_stats_table()
+                        minitracer_wrapper.update_analysis_tabs()
+                        
+                elif hasattr(chain_item, 'file_path') and chain_item.file_path:
+                    # 旧的ChainItem数据结构，单个链文件
+                    file_path = chain_item.file_path
+                    if file_path not in minitracer_wrapper.mcmc_files:
+                        minitracer_wrapper.mcmc_files.append(file_path)
+                        try:
+                            data = minitracer_wrapper.parse_trace_file(file_path)
+                            minitracer_wrapper.mcmc_data[file_path] = data
+                            minitracer_wrapper.update_file_table()
+                            # 自动选择刚添加的文件
+                            file_index = minitracer_wrapper.mcmc_files.index(file_path)
+                            minitracer_wrapper.file_table.selectRow(file_index)
+                            minitracer_wrapper.update_stats_table()
+                            minitracer_wrapper.update_analysis_tabs()
+                        except Exception as e:
+                            QMessageBox.warning(dialog, "Error", f"Failed to load chain file: {str(e)}")
+                            if file_path in minitracer_wrapper.mcmc_files:
+                                minitracer_wrapper.mcmc_files.remove(file_path)
+            
             dialog.layout().addWidget(minitracer_wrapper)
             dialog.exec_()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open MiniTracer: {str(e)}")
 
-    def open_icytree_wrapper(self):
-        """打开IcyTree查看系统发育树"""
+    def open_icytree_wrapper(self, phylogeny_data=None):
+        """打开IcyTree查看系统发育树
+        
+        Args:
+            phylogeny_data: 可选的系统发育树数据字典，包含file_path等信息
+        """
         from PyQt5.QtWidgets import QDialog
         try:
             dialog = QDialog()
@@ -671,6 +938,22 @@ class YR_MPEA_Widget(QWidget):
             # 使用PluginFactory获取IcyTree插件
             plugin_entry = self.plugin_factory.get_icytree_plugin()
             icytree_wrapper = plugin_entry.run()
+            
+            # 如果提供了phylogeny_data，自动加载该树文件
+            if phylogeny_data and isinstance(phylogeny_data, dict) and 'file_path' in phylogeny_data:
+                file_path = phylogeny_data['file_path']
+                try:
+                    with open(file_path, 'r') as f:
+                        tree_content = f.read().strip()
+                    if tree_content:
+                        icytree_wrapper.set_newick_string(tree_content)
+                except Exception as e:
+                    QMessageBox.warning(dialog, "Error", f"Failed to load tree file: {str(e)}")
+            
+            dialog.layout().addWidget(icytree_wrapper)
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open IcyTree: {str(e)}")
             
             # # 如果工作区中有系统树数据，则传递给IcyTree
             # if hasattr(self, 'workspace') and len(self.workspace.items["phylogenies"]) > 0:
@@ -887,7 +1170,15 @@ class YR_MPEA_Widget(QWidget):
         
         # Use PluginFactory to get the plugin entry
         iqtree_entry = self.plugin_factory.get_iqtree_plugin()
-        plugin_wrapper = iqtree_entry.run(import_from=import_from, import_data=import_data)
+
+        # 获取工作目录
+        workdir = self.get_workdir()
+
+        plugin_wrapper = iqtree_entry.run(
+            import_from=import_from,
+            import_data=import_data,
+            workdir=workdir  # 添加工作目录参数
+        )
         plugin_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
         plugin_wrapper.export_model_result_signal.connect(self.add_model_to_workspace)
         plugin_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
@@ -1326,6 +1617,143 @@ class YR_MPEA_Widget(QWidget):
             self.open_seqdbg_wrapper()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create dataset by SeqDBG: {str(e)}")
+    
+    def _check_workspace_required(self, plugin_name: str) -> bool:
+        """
+        检查是否需要工作区，如果没有则提示用户选择
+        
+        Returns:
+            bool: True表示可以继续，False表示用户取消
+        """
+        if not self.workspace_manager.workspace_path:
+            reply = QMessageBox.warning(
+                self,
+                "Workspace Required",
+                f"{plugin_name} requires a workspace folder to store\n"
+                f"intermediate files and run state.\n\n"
+                f"Bayesian inference can take several hours to days,\n"
+                f"and it's important to save all intermediate files\n"
+                f"for analysis and potential recovery.\n\n"
+                f"Do you want to select a workspace folder now?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            
+            if reply == QMessageBox.Yes:
+                # 让用户选择工作区
+                folder_path = QFileDialog.getExistingDirectory(
+                    self,
+                    "Select Workspace Folder",
+                    os.path.expanduser("~")
+                )
+                if folder_path:
+                    self._switch_workspace(folder_path, is_new=True)
+                    return True
+                else:
+                    return False  # 用户取消了文件夹选择
+            else:
+                return False  # 用户拒绝选择工作区
+        
+        return True  # 已有工作区，可以继续
+    
+    def open_mrbayes_wrapper(self):
+        """打开MrBayes插件"""
+        # 检查工作区
+        if not self._check_workspace_required("MrBayes"):
+            return
+        
+        # 如果已有对话框，先删除
+        if hasattr(self, 'mrbayes_dialog') and self.mrbayes_dialog:
+            self.mrbayes_dialog.close()
+            self.mrbayes_dialog.deleteLater()
+        
+        # 创建MrBayes对话框（非模态窗口，允许后台运行）
+        from PyQt5.QtWidgets import QDialog
+        from PyQt5.QtCore import Qt
+        dialog = QDialog(self)  # 设置父窗口
+        dialog.setWindowTitle("MrBayes3-MPI-BEAGLE - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("software/mrbayes.svg"))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+        dialog.setWindowModality(Qt.NonModal)  # 设置为非模态窗口
+        dialog.setAttribute(Qt.WA_DeleteOnClose, False)  # 禁止自动删除
+        
+        # 准备导入数据
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+        
+        # 使用PluginFactory获取MrBayes插件
+        mrbayes_entry = self.plugin_factory.get_mrbayes_plugin()
+        workdir = self.get_workdir()
+        mrbayes_wrapper = mrbayes_entry.run(
+            import_from=import_from, 
+            import_data=import_data,
+            workdir=workdir
+        )
+        
+        # 连接信号
+        mrbayes_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        mrbayes_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
+        mrbayes_wrapper.export_chain_result_signal.connect(self.add_chain_to_workspace)
+        
+        dialog.layout().addWidget(mrbayes_wrapper)
+        # 保存到实例变量，防止被垃圾回收
+        self.mrbayes_dialog = dialog
+        dialog.show()  # 使用show()而非exec_()，显示非模态窗口
+    
+    def open_phylobayes_wrapper(self):
+        """打开PhyloBayes插件"""
+        # 检查工作区
+        if not self._check_workspace_required("PhyloBayes"):
+            return
+        
+        # 如果已有对话框，先删除
+        if hasattr(self, 'phylobayes_dialog') and self.phylobayes_dialog:
+            self.phylobayes_dialog.close()
+            self.phylobayes_dialog.deleteLater()
+        
+        # 创建PhyloBayes对话框（非模态窗口，允许后台运行）
+        from PyQt5.QtWidgets import QDialog
+        from PyQt5.QtCore import Qt
+        dialog = QDialog(self)  # 设置父窗口
+        dialog.setWindowTitle("PhyloBayes-MPI - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("software/phylobayes.svg"))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+        dialog.setWindowModality(Qt.NonModal)  # 设置为非模态窗口
+        dialog.setAttribute(Qt.WA_DeleteOnClose, False)  # 禁止自动删除
+        
+        # 准备导入数据
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+        
+        # 使用PluginFactory获取PhyloBayes插件
+        phylobayes_entry = self.plugin_factory.get_phylobayes_plugin()
+        workdir = self.get_workdir()
+        phylobayes_wrapper = phylobayes_entry.run(
+            import_from=import_from, 
+            import_data=import_data,
+            workdir=workdir
+        )
+        
+        # 连接信号
+        phylobayes_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        phylobayes_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
+        
+        dialog.layout().addWidget(phylobayes_wrapper)
+        # 保存到实例变量，防止被垃圾回收
+        self.phylobayes_dialog = dialog
+        dialog.show()  # 使用show()而非exec_()，显示非模态窗口
 
 class SingleGeneWorkspace(QWidget):
     def __init__(self, resource_factory=None, parent=None):
@@ -1337,6 +1765,7 @@ class SingleGeneWorkspace(QWidget):
             "models": [],
             "distances": [],
             "phylogenies": [],
+            "chains": [],  # 添加chains项
             "datasets": [],  # 添加datasets项
             # "variants": [], TODO
             # "coalescent": [], TODO
@@ -1466,6 +1895,18 @@ class SingleGeneWorkspace(QWidget):
         self.grid_layout.addWidget(distance_button, 2, len(self.items["distances"])-1)
     
     def add_phylogeny(self, phylogeny):
+        """添加系统发育树到工作区"""
+        # 确保grid_layout存在
+        if not hasattr(self, 'grid_layout'):
+            # disable hint label
+            self.workspace_hint.setVisible(False)
+            # add a grid layout
+            self.grid_widget = QWidget()
+            self.grid_layout = QGridLayout()
+            self.grid_layout.setLayout(self.grid_layout)
+            self.main_layout.addWidget(self.grid_widget)
+            self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        
         # add a phylogeny to items["phylogenies"]
         self.items["phylogenies"].append(phylogeny)
         # add a phylogeny icon to workspace
@@ -1473,9 +1914,46 @@ class SingleGeneWorkspace(QWidget):
         phylogeny_button = QToolButton()
         phylogeny_button.setIcon(phylogeny_icon)
         phylogeny_button.setIconSize(QSize(45, 45))
-        phylogeny_button.setToolTip(f"Phylogenetic Tree")
-        phylogeny_button.clicked.connect(self.open_icytree_wrapper)
+        
+        # 创建tooltip
+        if isinstance(phylogeny, dict):
+            tool_name = phylogeny.get('tool', 'unknown')
+            tree_type = phylogeny.get('tree_type', 'unknown')
+            tooltip_text = f"Phylogenetic Tree ({tool_name}, {tree_type})"
+            phylogeny_button.setToolTip(tooltip_text)
+        else:
+            phylogeny_button.setToolTip(f"Phylogenetic Tree")
+        
+        # 点击打开IcyTree，传入phylogeny数据
+        phylogeny_button.clicked.connect(lambda: self.parent_window.open_icytree_wrapper(phylogeny_data=phylogeny))
         self.grid_layout.addWidget(phylogeny_button, 3, len(self.items["phylogenies"])-1)
+    
+    def add_chain(self, chain_item):
+        """添加MCMC链文件到工作区"""
+        # 确保grid_layout存在
+        if not hasattr(self, 'grid_layout'):
+            # disable hint label
+            self.workspace_hint.setVisible(False)
+            # add a grid layout
+            self.grid_widget = QWidget()
+            self.grid_layout = QGridLayout()
+            self.grid_widget.setLayout(self.grid_layout)
+            self.main_layout.addWidget(self.grid_widget)
+            self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        
+        # add a chain to items["chains"]
+        self.items["chains"].append(chain_item)
+        # add a chain icon to workspace
+        chain_icon = self.resource_factory.get_icon("file/chain.svg")
+        chain_button = QToolButton()
+        chain_button.setIcon(chain_icon)
+        chain_button.setIconSize(QSize(45, 45))
+        # 创建tooltip，显示链信息
+        tooltip_text = f"MCMC Chains (Run {chain_item.run_number}, {chain_item.chain_count} chain(s), Tool: {chain_item.tool})"
+        chain_button.setToolTip(tooltip_text)
+        # 点击打开miniTracer（通过parent_window）
+        chain_button.clicked.connect(lambda: self.parent_window.open_minitracer_wrapper(chain_item=chain_item))
+        self.grid_layout.addWidget(chain_button, 4, len(self.items["chains"])-1)
     
     def add_dataset(self, dataset):
         """添加数据集到工作区"""
@@ -1499,9 +1977,8 @@ class SingleGeneWorkspace(QWidget):
         dataset_button.setIcon(dataset_icon)
         dataset_button.setIconSize(QSize(45, 45))
         dataset_button.setToolTip(f"Dataset: {getattr(dataset, 'dataset_name', 'Unnamed Dataset')}")
-        # Dataset数据项应该显示在数据区域，使用合适的行号
-        # 根据老版实现，Dataset应该有自己的行（比如第4行，因为0-3已被其他功能占用）
-        dataset_row = 4
+        # Dataset数据项应该显示在数据区域，使用第5行
+        dataset_row = 5
         
         # 实现单击选中，双击查看的交互逻辑
         dataset_button.doubleClicked = False
@@ -1570,6 +2047,17 @@ class SingleGeneWorkspace(QWidget):
             phylogeny_button.clicked.connect(self.open_icytree_wrapper)
             self.grid_layout.addWidget(phylogeny_button, 3, i)
         
+        # 添加chains
+        for i, chain in enumerate(self.items["chains"]):
+            chain_icon = self.resource_factory.get_icon("file/chain.svg")
+            chain_button = QToolButton()
+            chain_button.setIcon(chain_icon)
+            chain_button.setIconSize(QSize(45, 45))
+            tooltip_text = f"MCMC Chain (Run {chain.run_number}, Chain {chain.chain_number}, Tool: {chain.tool})"
+            chain_button.setToolTip(tooltip_text)
+            chain_button.clicked.connect(lambda checked, c=chain: self.open_minitracer_wrapper(chain_item=c))
+            self.grid_layout.addWidget(chain_button, 4, i)
+        
         # 添加datasets
         for i, dataset in enumerate(self.items["datasets"]):
             dataset_icon = self.resource_factory.get_icon("file/dataset.svg")
@@ -1577,7 +2065,7 @@ class SingleGeneWorkspace(QWidget):
             dataset_button.setIcon(dataset_icon)
             dataset_button.setIconSize(QSize(45, 45))
             dataset_button.setToolTip(f"Dataset: {getattr(dataset, 'dataset_name', 'Unnamed Dataset')}")
-            dataset_row = 4
+            dataset_row = 5  # Dataset显示在第5行
             
             # 实现单击选中，双击查看的交互逻辑
             dataset_button.doubleClicked = False
