@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_1" data-name=" 图层 1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 45 45.7">
+  <defs>
+    <style>
+      .cls-1, .cls-2, .cls-3, .cls-4, .cls-5 {
+        stroke-linejoin: round;
+        stroke-width: 3px;
+      }
+
+      .cls-1, .cls-2, .cls-5 {
+        stroke: #4e6691;
+      }
+
+      .cls-1, .cls-3 {
+        stroke-linecap: round;
+      }
+
+      .cls-1, .cls-3, .cls-4, .cls-5 {
+        fill: none;
+      }
+
+      .cls-2 {
+        fill: #fff;
+      }
+
+      .cls-3, .cls-4 {
+        stroke: #ba3e45;
+      }
+    </style>
+  </defs>
+  <polygon class="cls-2" points="22.5 35.1 35.3 42.3 32.4 27.8 43.2 17.9 28.6 16.2 22.5 2.8 16.4 16.2 1.8 17.9 12.6 27.8 9.7 42.3 22.5 35.1"/>
+  <line class="cls-3" x1="16" y1="21.3" x2="19.3" y2="24.6"/>
+  <line class="cls-3" x1="19.3" y1="24.6" x2="16" y2="27.9"/>
+  <line class="cls-1" x1="29.2" y1="21.3" x2="25.8" y2="24.6"/>
+  <line class="cls-1" x1="25.8" y1="24.6" x2="29.2" y2="27.9"/>
+  <line class="cls-4" x1="19.3" y1="24.6" x2="22.6" y2="24.6"/>
+  <line class="cls-5" x1="22.6" y1="24.6" x2="25.8" y2="24.6"/>
+</svg>
