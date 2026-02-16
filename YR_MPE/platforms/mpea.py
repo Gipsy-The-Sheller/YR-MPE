@@ -553,7 +553,11 @@ class YR_MPEA_Widget(QWidget):
         caster_site_action.triggered.connect(self.open_caster_site_wrapper)
         coalescent_button_menu.addAction(caster_site_action)
 
-        # TODO: Astral-III and other coalescent methods
+        # 添加ASTRAL功能到COALESCENT菜单
+        astral_action = QAction("ASTRAL", coalescent_button)
+        astral_action.setIcon(self.resource_factory.get_icon("software/astral.svg"))
+        astral_action.triggered.connect(self.open_astral_wrapper)
+        coalescent_button_menu.addAction(astral_action)
 
         clock_button = QToolButton()
         clock_button.setText("CLOCK")
@@ -720,13 +724,39 @@ class YR_MPEA_Widget(QWidget):
             if len(self.workspace.items["alignments"]) >= 1:
                 import_from = "YR_MPEA"
                 import_data = self.workspace.items["alignments"][0]
-        
+
         # use PluginFactory to get the plugin
         caster_site_entry = self.plugin_factory.get_caster_site_plugin()
         caster_site_wrapper = caster_site_entry.run(import_from=import_from, import_data=import_data)
         # 连接信号，如果插件发出新序列或结果，添加到工作区
         # 注意：根据插件实际情况决定是否需要连接信号
         dialog.layout().addWidget(caster_site_wrapper)
+        dialog.exec_()
+
+    def open_astral_wrapper(self):
+        """打开ASTRAL插件"""
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle("ASTRAL - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("software/astral.svg"))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data
+        import_from = None
+        import_data = None
+        workspace_type = type(self.workspace).__name__
+        if workspace_type == "SingleGeneWorkspace":
+            if len(self.workspace.items["alignments"]) >= 1:
+                import_from = "YR_MPEA"
+                import_data = self.workspace.items["alignments"][0]
+
+        # use PluginFactory to get the plugin
+        astral_entry = self.plugin_factory.get_astral_plugin()
+        astral_wrapper = astral_entry.run(import_from=import_from, import_data=import_data)
+        # 连接信号，如果插件发出新序列或结果，添加到工作区
+        # 注意：根据插件实际情况决定是否需要连接信号
+        dialog.layout().addWidget(astral_wrapper)
         dialog.exec_()
 
     def open_clustal_omega_wrapper(self):
