@@ -15,6 +15,7 @@ from Bio import SeqIO
 
 # 添加新的导入
 from .export_partitioned_nexus import export_partitioned_nexus
+from .import_partitioned_nexus import import_partitioned_nexus
 
 
 class DatasetItem:
@@ -70,6 +71,13 @@ class DatasetManager(QDialog):
         # 菜单栏
         menubar = QMenuBar()
         file_menu = menubar.addMenu("&File")
+        
+        # 导入选项
+        import_nexus_action = QAction("Import (from partitioned NEXUS)", self)
+        import_nexus_action.triggered.connect(self.import_from_partitioned_nexus)
+        file_menu.addAction(import_nexus_action)
+        
+        file_menu.addSeparator()
         
         # 导出选项
         export_fasta_action = QAction("Export (to multiple FASTA files)", self)
@@ -178,7 +186,7 @@ class DatasetManager(QDialog):
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels([
             "Selected", "Loci Name", "Length", "Sequence Count", 
-            "Aligned", "View"
+            "Aligned", "Options"
         ])
         self.table.horizontalHeader().setStretchLastSection(True)
         # 启用右键菜单
@@ -295,10 +303,22 @@ class DatasetManager(QDialog):
         aligned_label = QLabel("✓" if item.is_aligned else "✗")
         self.table.setCellWidget(row, 4, aligned_label)
         
-        # View button
+        # Options layout with View and Remove buttons
+        options_widget = QWidget()
+        options_layout = QHBoxLayout()
+        options_layout.setContentsMargins(2, 2, 2, 2)
+        options_layout.setSpacing(4)
+        
         view_button = QPushButton("View")
         view_button.clicked.connect(lambda _, r=row: self.view_dataset(r))
-        self.table.setCellWidget(row, 5, view_button)
+        options_layout.addWidget(view_button)
+        
+        remove_button = QPushButton("Remove")
+        remove_button.clicked.connect(lambda _, r=row: self.remove_dataset(r))
+        options_layout.addWidget(remove_button)
+        
+        options_widget.setLayout(options_layout)
+        self.table.setCellWidget(row, 5, options_widget)
         
     def colorize_sequence_count(self, label: QLabel, count: int):
         """根据序列数量着色"""
@@ -388,7 +408,68 @@ class DatasetManager(QDialog):
             QMessageBox.critical(
                 self, "Error", f"Failed to export datasets: {str(e)}"
             )
-            
+
+    def import_from_partitioned_nexus(self):
+        """从分区 NEXUS 文件导入数据"""
+        # 选择导入文件
+        import_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Partitioned NEXUS File", "", "NEXUS Files (*.nex *.nexus)"
+        )
+        if not import_path:
+            return
+
+        try:
+            # 调用导入函数
+            dataset_items, partition_scheme, summary = import_partitioned_nexus(import_path)
+
+            # 询问用户是替换还是追加
+            if self.dataset_items:
+                reply = QMessageBox.question(
+                    self, "Import Mode",
+                    "Do you want to replace existing datasets or append to them?",
+                    QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                    QMessageBox.No  # 默认追加
+                )
+
+                if reply == QMessageBox.Yes:
+                    # 替换现有数据
+                    self.dataset_items = dataset_items
+                    self.table.setRowCount(0)  # 清空表格
+                    for item in dataset_items:
+                        self.add_dataset_to_table(item)
+                elif reply == QMessageBox.No:
+                    # 追加到现有数据
+                    for item in dataset_items:
+                        self.dataset_items.append(item)
+                        self.add_dataset_to_table(item)
+                else:
+                    # 取消导入
+                    return
+            else:
+                # 没有现有数据，直接添加
+                self.dataset_items = dataset_items
+                for item in dataset_items:
+                    self.add_dataset_to_table(item)
+
+            # 显示成功消息
+            message = (
+                f"Successfully imported partitioned NEXUS file from {import_path}\n"
+                f"Taxa: {summary['total_taxa']}, "
+                f"Partitions: {summary['partition_count']}, "
+                f"Total length: {summary['nchar']}"
+            )
+            QMessageBox.information(self, "Import Success", message)
+
+            # 发送信号通知数据已更新
+            self.dataset_processed.emit(self.dataset_items)
+
+        except FileNotFoundError as e:
+            QMessageBox.critical(self, "File Not Found", str(e))
+        except ValueError as e:
+            QMessageBox.critical(self, "Parse Error", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Import Error", f"Failed to import NEXUS file: {str(e)}")
+
     def export_to_partitioned_nexus(self):
         """导出为分区NEXUS格式 - 使用改进的实现"""
         # 获取选中的datasets

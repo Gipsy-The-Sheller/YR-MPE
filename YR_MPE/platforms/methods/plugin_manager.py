@@ -106,6 +106,12 @@ class PluginManager:
         except ImportError:
             pass
         
+        try:
+            from YR_MPE.plugins.mrbayes_plugin import MrBayesPluginEntry
+            self.register_plugin("mrbayes", MrBayesPluginEntry)
+        except ImportError:
+            pass
+        
     def _register_coalescent_plugins(self):
         """注册溯祖插件"""
         try:
