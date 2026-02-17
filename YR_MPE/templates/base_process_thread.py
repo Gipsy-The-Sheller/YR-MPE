@@ -27,16 +27,18 @@ class BaseProcessThread(QThread):
     error = pyqtSignal(str)                        # 错误信号
     console_output = pyqtSignal(str, str)          # 控制台输出 (消息, 消息类型)
     
-    def __init__(self, tool_path: str, input_files: List[str], parameters: List[str], 
-                 imported_files: Optional[List[str]] = None):
+    def __init__(self, tool_path: str, input_files: List[str], parameters: List[str],
+                 imported_files: Optional[List[str]] = None, **kwargs):
         """
         初始化基础进程线程
-        
+
         Args:
             tool_path (str): 工具可执行文件路径
             input_files (List[str]): 输入文件路径列表
             parameters (List[str]): 命令行参数列表
             imported_files (Optional[List[str]]): 导入的文件列表（用于报告生成）
+            **kwargs: 可选参数，包括：
+                - workdir: 工作目录（用于临时文件）
         """
         super().__init__()
         self.tool_path = tool_path
@@ -45,6 +47,9 @@ class BaseProcessThread(QThread):
         self.imported_files = imported_files or []
         self.is_running = False
         self._process = None
+
+        # 工作目录支持
+        self.workdir = kwargs.get('workdir', None)
         
     def run(self):
         """
@@ -167,17 +172,33 @@ class BaseProcessThread(QThread):
             self.console_output.emit(error_msg, "error")
             raise e
 
-    def create_temp_file(self, suffix: str = '') -> str:
+    def create_temp_file(self, suffix: str = '', **kwargs) -> str:
         """
         创建临时文件
-        
+
         Args:
             suffix (str): 文件后缀
-            
+            **kwargs: 可选参数，包括：
+                - workdir: 工作目录（优先使用）
+                - dir: 目录（tempfile 标准参数）
+
         Returns:
             str: 临时文件路径
         """
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        # 优先使用 self.workdir，其次使用 kwargs 中的 workdir 或 dir
+        temp_dir = kwargs.get('workdir', kwargs.get('dir', self.workdir))
+
+        # 如果有指定工作目录，使用它；否则使用系统临时目录
+        if temp_dir and os.path.exists(temp_dir):
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_file = tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=suffix,
+                dir=temp_dir
+            )
+        else:
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+
         temp_file.close()
         return temp_file.name
     

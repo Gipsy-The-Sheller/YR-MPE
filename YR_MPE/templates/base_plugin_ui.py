@@ -27,24 +27,28 @@ class BasePlugin(QWidget):
     - 进度条和运行控制
     """
     
-    def __init__(self, import_from=None, import_data=None):
+    def __init__(self, import_from=None, import_data=None, **kwargs):
         """
         初始化基础插件
-        
         Args:
             import_from (str): 数据导入来源
             import_data (any): 导入的数据
+            **kwargs: 可选参数，包括：
+                - workdir: 工作目录（用于临时文件）
         """
         super().__init__()
         self.plugin_path = os.path.dirname(os.path.abspath(__file__))
         self.destroyed.connect(self.on_destroyed)
-        
+
         # 导入相关
         self.import_from = import_from
         self.import_data = import_data
         self.import_file = None
         self.temp_files = []
-        
+
+        # 工作目录支持（用于临时文件）
+        self.workdir = kwargs.get('workdir', None)  # 向后兼容：默认为 None
+
         # 运行状态
         self.is_running = False
         self.tool_path = None
@@ -97,7 +101,7 @@ class BasePlugin(QWidget):
     def config(self):
         """
         检查插件配置
-        
+
         Returns:
             bool: 配置是否有效
         """
@@ -105,22 +109,22 @@ class BasePlugin(QWidget):
             config_path = os.path.join(self.plugin_path, "config.json")
             if not os.path.exists(config_path):
                 return False
-            
+
             with open(config_path, 'r', encoding='utf-8') as f:
                 config_data = json.load(f)
-            
+
             plugin_config = None
             for tool in config_data:
                 if tool.get("name").lower() == self.tool_name.lower():
                     plugin_config = tool
                     break
-            
+
             if not plugin_config:
                 return False
-            
+
             self.tool_path = os.path.join(self.plugin_path, plugin_config["path"].lstrip("/").lstrip("\\"))
             return os.path.exists(self.tool_path)
-            
+
         except Exception as e:
             print(f"Config check failed: {e}")
             return False
@@ -522,9 +526,32 @@ class BasePlugin(QWidget):
         self.report_combo.setEnabled(len(self.reports) > 1)
         self.report_combo.setCurrentIndex(self.current_report_index)
 
-    def create_temp_file(self, suffix=''):
-        """创建临时文件"""
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    def create_temp_file(self, suffix='', **kwargs):
+        """创建临时文件
+
+        Args:
+            suffix: 文件后缀
+            **kwargs: 可选参数，包括：
+                - workdir: 工作目录（优先使用）
+                - dir: 目录（tempfile 标准参数）
+
+        Returns:
+            str: 临时文件路径
+        """
+        # 优先使用 self.workdir，其次使用 kwargs 中的 workdir 或 dir
+        temp_dir = kwargs.get('workdir', kwargs.get('dir', self.workdir))
+
+        # 如果有指定工作目录，使用它；否则使用系统临时目录
+        if temp_dir and os.path.exists(temp_dir):
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_file = tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=suffix,
+                dir=temp_dir
+            )
+        else:
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+
         temp_file.close()
         return temp_file.name
 
