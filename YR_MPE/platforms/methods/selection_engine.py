@@ -9,10 +9,10 @@ from .dataset_models import (
     DatasetItem, DatasetInfo, SelectionNode,
     ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT, ITEM_TYPE_MODEL,
     ITEM_TYPE_DISTANCE, ITEM_TYPE_PHYLOGENY, ITEM_TYPE_VARIANT,
-    ITEM_TYPE_COALESCENT, ITEM_TYPE_CLOCK,
+    ITEM_TYPE_COALESCENT, ITEM_TYPE_CLOCK, ITEM_TYPE_CHAIN,
     SELECTION_STATE_NONE, SELECTION_STATE_GREEN,
     SELECTION_STATE_BLUE, SELECTION_STATE_RED,
-    DATA_DEPENDENCIES
+    DATA_DEPENDENCIES, ITEM_TYPE_TO_GROUP, OWNERSHIP_GROUPS
 )
 
 
@@ -32,11 +32,18 @@ class SelectionEngine:
     
     def select_item(self, item_id: str, append: bool = False) -> bool:
         """
-        选中数据项（直接选择 - 规则1）
+        选中数据项（基于所有权 UUID 机制）
+        
+        规则：
+        1. 清除同类型的不同 UUID 的激活项（确保同一类型只有一个激活）
+        2. 清除不同类型且不同 UUID 的激活项
+        3. 保留不同类型但相同 UUID 的激活项
+        4. 将当前项设置为绿色
+        5. 高亮同 UUID 的其他未激活项为蓝色
         
         Args:
             item_id: 数据项ID
-            append: 是否追加选择（不清除之前的选择）
+            append: 是否追加选择（暂不使用，保留接口兼容）
         
         Returns:
             是否成功选择
@@ -45,20 +52,64 @@ class SelectionEngine:
         if not item:
             return False
         
-        # 如果不是追加选择，先清除所有选择
-        if not append:
-            self.clear_all_selections()
+        # 获取当前项的类型分组
+        current_group = ITEM_TYPE_TO_GROUP.get(item.item_type)
         
-        # 设置为绿色
+        # 获取所有当前激活（绿色）的数据项
+        green_items = self.manager.get_items_by_state(SELECTION_STATE_GREEN)
+        
+        # 遍历所有绿色项，根据规则处理
+        for green_item in green_items:
+            # 如果是当前项本身，跳过
+            if green_item.id == item.id:
+                continue
+            
+            # 检查是否是同一类型分组
+            green_item_group = ITEM_TYPE_TO_GROUP.get(green_item.item_type)
+            
+            if green_item_group == current_group:
+                # 同一类型分组：清除激活（确保同一类型只有一个激活）
+                self._set_item_state(green_item, SELECTION_STATE_NONE, "")
+            elif green_item.ownership_uuid != item.ownership_uuid:
+                # 不同类型且不同 UUID：清除激活
+                self._set_item_state(green_item, SELECTION_STATE_NONE, "")
+            # else: 不同类型但相同 UUID：保留激活状态
+        
+        # 将当前项设置为绿色
         self._set_item_state(item, SELECTION_STATE_GREEN, "Direct selection")
         
-        # 执行关联选择（规则2）
-        self._perform_auto_selection(item)
+        # 基于所有权 UUID 的高亮机制
+        if item.ownership_uuid:
+            self._apply_ownership_highlighting(item)
         
-        # 执行冲突检测（规则6）
+        # 选择祖先节点
+        self._select_ancestors(item)
+        
+        # 执行冲突检测
         self._check_conflicts(item)
         
         return True
+    
+    def _apply_ownership_highlighting(self, item: DatasetItem):
+        """
+        应用基于所有权 UUID 的高亮机制
+        
+        规则：
+        1. 高亮同 UUID 的其他未激活项目为蓝色（上下文高亮）
+        2. 不改变已激活（绿色）的项目
+        """
+        # 遍历所有数据项
+        for other_item in self.manager.items.values():
+            if other_item.id == item.id:
+                continue
+            
+            # 如果有相同的 UUID，设置为蓝色（上下文高亮）
+            # 但不要改变已经激活的项目
+            if (other_item.ownership_uuid and 
+                other_item.ownership_uuid == item.ownership_uuid and
+                other_item.selection_state != SELECTION_STATE_GREEN):
+                self._set_item_state(other_item, SELECTION_STATE_BLUE,
+                                   f"Same ownership as {item.get_name()}")
     
     def _perform_auto_selection(self, item: DatasetItem):
         """

@@ -226,19 +226,8 @@ class DatasetSelectionManager:
         
         item = self.items[item_id]
         
-        # 如果不是追加选择，先清除所有选择
-        if not append:
-            self.clear_all_selections()
-        
-        # 设置为绿色
-        item.selection_state = SELECTION_STATE_GREEN
-        item.selection_reason = "Direct selection"
-        self.selected_items.add(item_id)
-        
-        # 执行关联选择
-        self._perform_auto_selection(item)
-        
-        return True
+        # 使用 selection_engine 进行选择（包含所有权 UUID 机制）
+        return self.selection_engine.select_item(item_id, append)
     
     def _perform_auto_selection(self, item: DatasetItem):
         """执行自动关联选择"""

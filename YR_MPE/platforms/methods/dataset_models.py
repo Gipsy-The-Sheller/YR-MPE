@@ -57,6 +57,30 @@ DATA_DEPENDENCIES = {
     ITEM_TYPE_CHAIN: [ITEM_TYPE_ALIGNMENT]
 }
 
+# 所有权分组（同一组内只能同时激活一个项目）
+# 根据用户要求：
+# - Dataset / Alignment / Sequence 算一种
+# - distance 算一种
+# - model 算一种
+# - tree (phylogeny) 算一种
+# - trace plot (chain) 算一种
+OWNERSHIP_GROUPS = {
+    "sequence_group": [ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT],
+    "distance_group": [ITEM_TYPE_DISTANCE],
+    "model_group": [ITEM_TYPE_MODEL],
+    "phylogeny_group": [ITEM_TYPE_PHYLOGENY],
+    "chain_group": [ITEM_TYPE_CHAIN],
+    "variant_group": [ITEM_TYPE_VARIANT],
+    "coalescent_group": [ITEM_TYPE_COALESCENT],
+    "clock_group": [ITEM_TYPE_CLOCK]
+}
+
+# 反向映射：item_type -> group_name
+ITEM_TYPE_TO_GROUP = {}
+for group_name, item_types in OWNERSHIP_GROUPS.items():
+    for item_type in item_types:
+        ITEM_TYPE_TO_GROUP[item_type] = group_name
+
 
 class DatasetItem:
     """数据集项模型 - 扩展版本，支持数据所有权和选择机制"""
@@ -88,6 +112,9 @@ class DatasetItem:
         # 选择状态
         self.selection_state: str = SELECTION_STATE_NONE
         self.selection_reason: str = ""       # 选择原因（用于调试和日志）
+        
+        # 所有权 UUID（用于高亮机制）
+        self.ownership_uuid: str = ""         # 数据所有权标识，同 UUID 的数据会一起高亮
         
         # 验证状态
         self.is_valid: bool = True
@@ -188,6 +215,7 @@ class DatasetItem:
             "metadata": self.metadata,
             "selection_state": self.selection_state,
             "selection_reason": self.selection_reason,
+            "ownership_uuid": self.ownership_uuid,
             "is_valid": self.is_valid,
             "validation_errors": self.validation_errors
         }
@@ -215,6 +243,7 @@ class DatasetItem:
         item.metadata = data.get("metadata", {})
         item.selection_state = data.get("selection_state", SELECTION_STATE_NONE)
         item.selection_reason = data.get("selection_reason", "")
+        item.ownership_uuid = data.get("ownership_uuid", "")
         item.is_valid = data.get("is_valid", True)
         item.validation_errors = data.get("validation_errors", [])
         

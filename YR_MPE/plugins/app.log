@@ -1,0 +1,12 @@
+2025-12-06 00:04:00,508 [MainThread] root.<module>:136 - INFO - [INFO] RESTART
+cwd: E:\Codes\YRTools\plugins\YR-MPE\YR_MPE\plugins
+Root: e:\Codes\YRTools
+Python path: ['e:\\Codes\\YRTools', 'e:\\Codes\\YRTools', 'D:\\PyMOL\\python310.zip', 'D:\\PyMOL\\DLLs', 'D:\\PyMOL\\lib', 'D:\\PyMOL', 'D:\\PyMOL\\lib\\site-packages', 'e:\\codes\\bioinf\\balign', 'D:\\PyMOL\\lib\\site-packages\\win32', 'D:\\PyMOL\\lib\\site-packages\\win32\\lib', 'D:\\PyMOL\\lib\\site-packages\\Pythonwin'] 
+2025-12-06 00:04:01,423 [MainThread] root.load_fonts:555 - ERROR - [ERROR] Failed to load fonts.
+2025-12-06 00:04:01,423 [MainThread] root.scan_plugins:139 - INFO - [INFO] Scanning plugins with enhanced config loader...
+2025-12-06 00:04:01,424 [MainThread] core.config_loader.get_all_plugins:204 - WARNING - Plugins directory not found: plugins
+2025-12-06 00:04:01,424 [MainThread] root.scan_plugins:144 - INFO - [INFO] Scanning completed! Found a total of 0 valid plugins.
+2025-12-06 00:04:01,425 [MainThread] root.scan_plugins:139 - INFO - [INFO] Scanning plugins with enhanced config loader...
+2025-12-06 00:04:01,425 [MainThread] core.config_loader.get_all_plugins:204 - WARNING - Plugins directory not found: plugins
+2025-12-06 00:04:01,428 [MainThread] root.scan_plugins:144 - INFO - [INFO] Scanning completed! Found a total of 0 valid plugins.
+2025-12-06 00:04:01,857 [MainThread] root.load_global_stylesheet:537 - WARNING - [WARN] Unable to find global qss. Using default style.

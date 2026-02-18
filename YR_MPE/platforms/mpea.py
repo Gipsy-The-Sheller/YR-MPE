@@ -18,6 +18,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
+import uuid
+from typing import Optional, Dict, List, Any
 from Bio import SeqIO
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
 QMenuBar, QToolBar, QToolButton, QGroupBox, QLabel,
@@ -1882,6 +1884,9 @@ class SingleGeneWorkspace(QWidget):
         dataset_item.loci_name = f"Sequence_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         dataset_item.name = dataset_item.loci_name
         
+        # 设置所有权 UUID（初始数据生成新的 UUID）
+        dataset_item.ownership_uuid = str(uuid.uuid4())
+        
         # 存储序列数据
         dataset_item.sequences = sequences
         dataset_item.sequence_count = len(sequences)
@@ -1944,10 +1949,11 @@ class SingleGeneWorkspace(QWidget):
         # 切换选择状态
         item = self.dataset_selection_manager.get_item(item_id)
         if item and item.selection_state == SELECTION_STATE_GREEN:
-            # 如果已经选中，取消选择
-            self.dataset_selection_manager.clear_all_selections()
+            # 如果已经选中，只取消这个项目的选择，不影响其他项目
+            item.selection_state = SELECTION_STATE_NONE
+            item.selection_reason = ""
         else:
-            # 否则选中该项
+            # 否则选中该项（select_item会处理同一类型和不同UUID的deactivate逻辑）
             self.dataset_selection_manager.select_item(item_id)
         
         # 更新所有按钮的样式
@@ -2032,12 +2038,30 @@ class SingleGeneWorkspace(QWidget):
         # 添加到网格布局
         self.grid_layout.addWidget(item_button, row, col)
         
-        # 自动选中该数据项
-        if self.dataset_selection_manager:
-            self.dataset_selection_manager.select_item(dataset_item.id)
-            item_button.update_style()
+        # 不再自动选中该数据项，让用户手动选择
+        # 这样可以避免 import 时出现同类型多个被激活的问题
+        # item_button.update_style()
         
         return item_button
+    
+    def _get_active_ownership_uuid(self) -> Optional[str]:
+        """获取当前激活的序列/alignment 的 ownership_uuid"""
+        if not self.dataset_selection_manager:
+            return None
+        
+        # 获取当前激活（绿色）的数据项
+        green_items = self.dataset_selection_manager.get_items_by_state(SELECTION_STATE_GREEN)
+        
+        # 优先返回 sequence 或 alignment 类型的 UUID
+        for item in green_items:
+            if item.item_type in [ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT]:
+                return item.ownership_uuid
+        
+        # 如果没有 sequence/alignment，返回第一个绿色项的 UUID
+        if green_items:
+            return green_items[0].ownership_uuid
+        
+        return None
     
     def add_model(self, model):
         """添加模型到工作区"""
@@ -2056,6 +2080,14 @@ class SingleGeneWorkspace(QWidget):
         dataset_item.dataset_id = self.current_dataset_id
         dataset_item.loci_name = f"Model_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         dataset_item.name = dataset_item.loci_name
+        
+        # 继承所有权 UUID（如果存在）
+        ownership_uuid = self._get_active_ownership_uuid()
+        if ownership_uuid:
+            dataset_item.ownership_uuid = ownership_uuid
+        else:
+            # 如果没有可继承的 UUID，生成新的
+            dataset_item.ownership_uuid = str(uuid.uuid4())
         
         # 存储模型数据
         if isinstance(model, dict):
@@ -2105,6 +2137,14 @@ class SingleGeneWorkspace(QWidget):
         dataset_item.dataset_id = self.current_dataset_id
         dataset_item.loci_name = f"Distance_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         dataset_item.name = dataset_item.loci_name
+        
+        # 继承所有权 UUID（如果存在）
+        ownership_uuid = self._get_active_ownership_uuid()
+        if ownership_uuid:
+            dataset_item.ownership_uuid = ownership_uuid
+        else:
+            # 如果没有可继承的 UUID，生成新的
+            dataset_item.ownership_uuid = str(uuid.uuid4())
         
         # 存储距离数据
         if isinstance(distance, dict):

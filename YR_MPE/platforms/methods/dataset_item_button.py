@@ -65,12 +65,13 @@ class DatasetItemButton(QToolButton):
         super().__init__(parent)
         
         self.item = item
-        self.double_click_timer = QTimer()
-        self.double_click_timer.setSingleShot(True)
-        self.double_click_timer.timeout.connect(self._on_single_click)
+        self.click_timer = QTimer()
+        self.click_timer.setSingleShot(True)
+        self.click_timer.timeout.connect(self._on_single_click_delayed)
         
         self.click_count = 0
         self.last_click_time = 0
+        self.pending_single_click = False
         
         # 初始化按钮
         self._init_button()
@@ -136,24 +137,25 @@ class DatasetItemButton(QToolButton):
     def _on_click(self):
         """处理点击事件"""
         self.click_count += 1
-        current_time = self.click_count
         
-        # 使用定时器来区分单击和双击
-        QTimer.singleShot(250, lambda: self._check_click(current_time))
-    
-    def _check_click(self, click_id: int):
-        """检查是单击还是双击"""
-        if click_id == self.click_count:
-            # 单击
-            self.clicked_single.emit(self.item.id)
-        elif click_id + 1 == self.click_count:
-            # 双击
+        if self.click_count == 1:
+            # 第一次点击，等待可能的第二次点击
+            self.pending_single_click = True
+            self.click_timer.start(250)  # 等待250毫秒
+        elif self.click_count == 2:
+            # 第二次点击，是双击
+            self.click_timer.stop()
+            self.pending_single_click = False
             self.clicked_double.emit(self.item.id)
-            self.click_count = 0  # 重置计数
+            self.click_count = 0
     
-    def _on_single_click(self):
-        """单击事件处理"""
-        self.clicked_single.emit(self.item.id)
+    def _on_single_click_delayed(self):
+        """延迟的单击事件处理"""
+        if self.pending_single_click and self.click_count == 1:
+            # 确认是单击（没有第二次点击）
+            self.clicked_single.emit(self.item.id)
+            self.pending_single_click = False
+            self.click_count = 0
     
     def _show_context_menu(self, position):
         """显示右键菜单"""
@@ -189,10 +191,7 @@ class DatasetItemButton(QToolButton):
         # TODO: 实现删除逻辑
         pass
     
-    def mouseDoubleClickEvent(self, event):
-        """处理双击事件"""
-        super().mouseDoubleClickEvent(event)
-        self.clicked_double.emit(self.item.id)
+    # 移除了mouseDoubleClickEvent，因为双击已经在_on_click中处理
     
     def enterEvent(self, event):
         """鼠标进入事件"""
@@ -229,6 +228,12 @@ class DatasetButton(QToolButton):
         super().__init__(parent)
         
         self.dataset = dataset
+        self.click_timer = QTimer()
+        self.click_timer.setSingleShot(True)
+        self.click_timer.timeout.connect(self._on_single_click_delayed)
+        
+        self.click_count = 0
+        self.pending_single_click = False
         
         # 不设置文本，只显示图标
         # self.setText(self._get_button_text())  # 移除文本
@@ -254,6 +259,29 @@ class DatasetButton(QToolButton):
         )
         self.setStyleSheet(style)
     
+    def _on_click(self):
+        """处理点击事件"""
+        self.click_count += 1
+        
+        if self.click_count == 1:
+            # 第一次点击，等待可能的第二次点击
+            self.pending_single_click = True
+            self.click_timer.start(250)  # 等待250毫秒
+        elif self.click_count == 2:
+            # 第二次点击，是双击
+            self.click_timer.stop()
+            self.pending_single_click = False
+            self.clicked_double.emit(self.dataset.id)
+            self.click_count = 0
+    
+    def _on_single_click_delayed(self):
+        """延迟的单击事件处理"""
+        if self.pending_single_click and self.click_count == 1:
+            # 确认是单击（没有第二次点击）
+            self.clicked_single.emit(self.dataset.id)
+            self.pending_single_click = False
+            self.click_count = 0
+    
     def _get_button_text(self) -> str:
         """获取按钮文本（已弃用，保留以兼容）"""
         text = f"{self.dataset.name}"
@@ -267,10 +295,7 @@ class DatasetButton(QToolButton):
         """处理点击事件"""
         self.clicked_single.emit(self.dataset.id)
     
-    def mouseDoubleClickEvent(self, event):
-        """处理双击事件"""
-        super().mouseDoubleClickEvent(event)
-        self.clicked_double.emit(self.dataset.id)
+    # 移除了mouseDoubleClickEvent，因为双击已经在_on_click中处理
     
     def update_dataset(self, dataset: DatasetInfo):
         """更新数据集"""
