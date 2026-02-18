@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_1" data-name=" 图层 1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 45 45.7">
+  <defs>
+    <style>
+      .cls-1 {
+        opacity: .5;
+      }
+
+      .cls-2 {
+        fill: none;
+        stroke: #4e6691;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 3px;
+      }
+
+      .cls-3 {
+        opacity: .2;
+      }
+    </style>
+  </defs>
+  <g class="cls-3">
+    <polyline class="cls-2" points="18.3 13.7 18.3 4.7 33.7 4.7"/>
+    <line class="cls-2" x1="18.3" y1="13.7" x2="33.7" y2="13.7"/>
+    <polyline class="cls-2" points="18.3 32.6 18.3 23.6 33.7 23.6"/>
+    <line class="cls-2" x1="18.3" y1="32.6" x2="33.7" y2="32.6"/>
+    <polyline class="cls-2" points="2.8 28.1 2.8 9.2 18.3 9.2"/>
+    <line class="cls-2" x1="2.8" y1="28.1" x2="18.3" y2="28.1"/>
+  </g>
+  <g class="cls-1">
+    <polyline class="cls-2" points="22.1 17.5 22.1 8.5 37.6 8.5"/>
+    <line class="cls-2" x1="22.1" y1="17.5" x2="37.6" y2="17.5"/>
+    <polyline class="cls-2" points="22.1 36.4 22.1 27.4 37.6 27.4"/>
+    <line class="cls-2" x1="22.1" y1="36.4" x2="37.6" y2="36.4"/>
+    <polyline class="cls-2" points="6.7 31.9 6.7 13 22.1 13"/>
+    <line class="cls-2" x1="6.7" y1="31.9" x2="22.1" y2="31.9"/>
+  </g>
+  <g>
+    <polyline class="cls-2" points="26.7 22.1 26.7 13.1 42.2 13.1"/>
+    <line class="cls-2" x1="26.7" y1="22.1" x2="42.2" y2="22.1"/>
+    <polyline class="cls-2" points="26.7 41 26.7 32 42.2 32"/>
+    <line class="cls-2" x1="26.7" y1="41" x2="42.2" y2="41"/>
+    <polyline class="cls-2" points="11.3 36.5 11.3 17.6 26.7 17.6"/>
+    <line class="cls-2" x1="11.3" y1="36.5" x2="26.7" y2="36.5"/>
+  </g>
+</svg>
