@@ -73,11 +73,11 @@ class PluginExecutor(QObject):
             "reports": reports,
             "status": "success"
         }
-        
-        # 更新工作区状态
+
+        # 更新工作区状态 - 将插件名称作为操作类型
         if output_files:
-            self.workspace_manager.add_files_to_history(output_files)
-            
+            self.workspace_manager.add_files_to_history(output_files, operation_type=plugin_name)
+
         self.execution_finished.emit(plugin_name, result)
         
         # 清理活动执行

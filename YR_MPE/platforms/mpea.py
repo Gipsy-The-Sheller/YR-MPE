@@ -18,6 +18,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
+import uuid
+from typing import Optional, Dict, List, Any
 from Bio import SeqIO
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
 QMenuBar, QToolBar, QToolButton, QGroupBox, QLabel,
@@ -31,6 +33,18 @@ from .methods import (
     FileOperations, UIHelpers
 )
 from .methods.import_partitioned_nexus import import_partitioned_nexus
+
+# 导入数据集选择管理器和按钮组件
+from .methods.dataset_selection_manager import DatasetSelectionManager
+from .methods.dataset_item_button import DatasetItemButton, DatasetButton
+from .methods.dataset_models import (
+    DatasetItem, DatasetInfo,
+    ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT, ITEM_TYPE_MODEL,
+    ITEM_TYPE_DISTANCE, ITEM_TYPE_PHYLOGENY, ITEM_TYPE_CHAIN,
+    ITEM_TYPE_VARIANT, ITEM_TYPE_COALESCENT, ITEM_TYPE_CLOCK,
+    SELECTION_STATE_NONE, SELECTION_STATE_GREEN,
+    SELECTION_STATE_BLUE, SELECTION_STATE_RED
+)
 
 # 导入工厂模式
 from ..factories import ResourceFactory, PluginFactory
@@ -51,6 +65,9 @@ class YR_MPEA_Widget(QWidget):
         # 初始化工厂
         self.resource_factory = ResourceFactory()
         self.plugin_factory = PluginFactory()
+        
+        # 初始化数据集选择管理器
+        self.dataset_selection_manager = DatasetSelectionManager()
         
         # 注册所有插件
         self.plugin_manager.register_all_plugins()
@@ -588,7 +605,11 @@ class YR_MPEA_Widget(QWidget):
         # main_layout.addWidget(mainworkspace_group)
 
         # 创建SingleGeneWorkspace实例
-        self.workspace = SingleGeneWorkspace(resource_factory=self.resource_factory, parent=self)
+        self.workspace = SingleGeneWorkspace(
+            resource_factory=self.resource_factory,
+            dataset_selection_manager=self.dataset_selection_manager,
+            parent=self
+        )
         self.workspace.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         main_layout.addWidget(self.workspace)
 
@@ -1787,10 +1808,13 @@ class YR_MPEA_Widget(QWidget):
         dialog.show()  # 使用show()而非exec_()，显示非模态窗口
 
 class SingleGeneWorkspace(QWidget):
-    def __init__(self, resource_factory=None, parent=None):
+    def __init__(self, resource_factory=None, dataset_selection_manager=None, parent=None):
         super().__init__()
         self.resource_factory = resource_factory  # 添加resource_factory引用
         self.parent_window = parent  # 添加parent引用
+        self.dataset_selection_manager = dataset_selection_manager  # 添加数据集选择管理器
+        
+        # 保留旧的 items 结构以保持向后兼容
         self.items = {
             "alignments": [],
             "models": [],
@@ -1802,6 +1826,20 @@ class SingleGeneWorkspace(QWidget):
             # "coalescent": [], TODO
             # "clock": [], TODO
         }
+        
+        # 新的按钮存储，按类型分组
+        self.item_buttons = {
+            "alignments": [],
+            "models": [],
+            "distances": [],
+            "phylogenies": [],
+            "chains": [],
+            "datasets": []
+        }
+        
+        # 当前选中的数据集ID
+        self.current_dataset_id = None
+        
         self.plugin_path = os.path.dirname(os.path.abspath(__file__))
         self.init_ui()
 
@@ -1811,7 +1849,8 @@ class SingleGeneWorkspace(QWidget):
         # background color: white
         # self.setStyleSheet("background-color: white;")
         # add a label: "Single Gene Workspace"
-        self.workspace_hint = QLabel("Single Gene Workspace\nAdd an alignment or drag and drop a file here to start")
+        # self.workspace_hint = QLabel("Single Gene Workspace\nAdd an alignment or drag and drop a file here to start")
+        self.workspace_hint = QLabel("Add a sequence file or create a new dataset to start.") 
         self.workspace_hint.setAlignment(Qt.AlignCenter)
         self.workspace_hint.setStyleSheet("color: #555555;")
         self.main_layout.addWidget(self.workspace_hint)
@@ -1819,111 +1858,364 @@ class SingleGeneWorkspace(QWidget):
         # TODO: drag and drop event
     
     def add_sequence(self, sequences):
-        # judge if there's already an alignment
-        if len(self.items["alignments"]) > 0:
-            # replace the existing alignment or not
-            replace_alignment = QMessageBox.question(self, "Replace Alignment", "Do you want to replace the existing alignment?", QMessageBox.Yes | QMessageBox.No)
-            if replace_alignment == QMessageBox.Yes:
-                self.items["alignments"] = []
-            else:
-                return
-        else:
-            # disable hint label
+        """添加序列到工作区"""
+        # 如果还没有数据集，创建一个默认数据集
+        if not self.current_dataset_id:
+            if self.dataset_selection_manager:
+                self.current_dataset_id = self.dataset_selection_manager.create_dataset(
+                    name="Default Dataset",
+                    description="Auto-created default dataset",
+                    is_multigene=False
+                )
+        
+        # 确保网格布局存在
+        if not hasattr(self, 'grid_layout'):
             self.workspace_hint.setVisible(False)
-            # add a grid layout
             self.grid_widget = QWidget()
             self.grid_layout = QGridLayout()
             self.grid_widget.setLayout(self.grid_layout)
             self.main_layout.addWidget(self.grid_widget)
-
-            # align to top-left
             self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         
-        # add the sequence set to items["alignments"]
+        # 创建 DatasetItem
+        from datetime import datetime
+        dataset_item = DatasetItem(item_type=ITEM_TYPE_SEQUENCE)
+        dataset_item.dataset_id = self.current_dataset_id
+        dataset_item.loci_name = f"Sequence_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        dataset_item.name = dataset_item.loci_name
+        
+        # 设置所有权 UUID（初始数据生成新的 UUID）
+        dataset_item.ownership_uuid = str(uuid.uuid4())
+        
+        # 存储序列数据
+        dataset_item.sequences = sequences
+        dataset_item.sequence_count = len(sequences)
+        if sequences and len(sequences) > 0:
+            if hasattr(sequences[0], 'seq'):
+                try:
+                    dataset_item.length = len(str(sequences[0].seq))
+                except:
+                    dataset_item.length = 0
+            else:
+                dataset_item.length = 0
+        dataset_item.is_aligned = False  # 未比对
+        
+        # 添加到管理器
+        if self.dataset_selection_manager:
+            success = self.dataset_selection_manager.add_item(dataset_item, self.current_dataset_id)
+            if not success:
+                QMessageBox.warning(self, "Warning", "Failed to add item to dataset")
+                return
+            # 使用 dataset_item 的 ID 来获取数据项（因为 add_item 会设置 ID）
+            dataset_item = self.dataset_selection_manager.get_item(dataset_item.id)
+            if not dataset_item:
+                QMessageBox.warning(self, "Warning", "Failed to retrieve added item")
+                return
+        
+        # 保留旧的数据结构（向后兼容）
         self.items["alignments"].append(sequences)
-        # add an 'alignment' icon to workspace
-        alignment_icon = self.resource_factory.get_icon("file/sequence.svg")
-        alignment_button = QToolButton()
-        alignment_button.setIcon(alignment_icon)
-        alignment_button.setIconSize(QSize(45, 45))
-        # alignment_button.setToolTip("Alignment")
-        alignment_button.clicked.connect(lambda: self.view_alignment(sequences))
-        self.grid_layout.addWidget(alignment_button, 0, len(self.items["alignments"])-1)
+        
+        # 创建 DatasetItemButton
+        item_button = DatasetItemButton(dataset_item, parent=self)
+        item_button.clicked_single.connect(self._on_item_single_click)
+        item_button.clicked_double.connect(self._on_item_double_click)
+        
+        # 设置图标
+        if self.resource_factory:
+            icon = self.resource_factory.get_icon("file/sequence.svg")
+            if icon:
+                item_button.setIcon(icon)
+                item_button.setIconSize(QSize(45, 45))
+        
+        # 存储按钮引用
+        self.item_buttons["alignments"].append(item_button)
+        
+        # 添加到网格布局
+        # alignments 总是从第 0 列开始，依次向右排列
+        self.grid_layout.addWidget(item_button, 0, len(self.item_buttons["alignments"])-1)
+        
+        # 如果有 dataset 按钮，需要将它们向右移动以避免覆盖
+        if "datasets" in self.item_buttons and self.item_buttons["datasets"]:
+            self._rearrange_row_0_buttons()
+        
+        # 自动选中该数据项
+        if self.dataset_selection_manager:
+            self.dataset_selection_manager.select_item(dataset_item.id)
+            # 更新所有按钮的样式（select_item 会改变多个项目的状态）
+            self._update_all_button_styles()
+    
+    def _on_item_single_click(self, item_id: str):
+        """处理数据项单击事件"""
+        if not self.dataset_selection_manager:
+            return
+        
+        # 清除所有数据集的高亮
+        self._clear_dataset_highlights()
+        
+        # 切换选择状态
+        item = self.dataset_selection_manager.get_item(item_id)
+        if item and item.selection_state == SELECTION_STATE_GREEN:
+            # 如果已经选中，只取消这个项目的选择，不影响其他项目
+            item.selection_state = SELECTION_STATE_NONE
+            item.selection_reason = ""
+        else:
+            # 否则选中该项（select_item会处理同一类型和不同UUID的deactivate逻辑）
+            self.dataset_selection_manager.select_item(item_id)
+        
+        # 更新所有按钮的样式
+        self._update_all_button_styles()
+    
+    def _clear_dataset_highlights(self):
+        """清除所有数据集的高亮"""
+        if not self.dataset_selection_manager:
+            return
+        
+        for dataset in self.dataset_selection_manager.get_all_datasets():
+            dataset.selection_state = SELECTION_STATE_NONE
+    
+    def _on_item_double_click(self, item_id: str):
+        """处理数据项双击事件"""
+        if not self.dataset_selection_manager:
+            return
+        
+        item = self.dataset_selection_manager.get_item(item_id)
+        if not item:
+            return
+        
+        # 根据数据类型执行相应的查看操作
+        if item.item_type == ITEM_TYPE_SEQUENCE or item.item_type == ITEM_TYPE_ALIGNMENT:
+            self.view_alignment(item.sequences)
+        elif item.item_type == ITEM_TYPE_MODEL:
+            self.view_model_result(item.data)
+        elif item.item_type == ITEM_TYPE_DISTANCE:
+            self.view_distance_matrix(item.data)
+        elif item.item_type == ITEM_TYPE_PHYLOGENY:
+            self.view_phylogeny(item.data)
+        elif item.item_type == ITEM_TYPE_CHAIN:
+            # Chain 数据的特殊处理
+            if self.parent_window:
+                self.parent_window.open_minitracer_wrapper(chain_item=item.data)
+    
+    def _update_all_button_styles(self):
+        """更新所有按钮的样式"""
+        for button_list in self.item_buttons.values():
+            for button in button_list:
+                if isinstance(button, DatasetItemButton):
+                    button.update_style()
+                elif isinstance(button, DatasetButton):
+                    button.update_style()
+    
+    def _rearrange_row_0_buttons(self):
+        """重新排列第 0 行的所有按钮，确保 alignments 在左，datasets 在右"""
+        # 首先移除所有第 0 行的按钮
+        alignments_count = len(self.item_buttons.get("alignments", []))
+        datasets_count = len(self.item_buttons.get("datasets", []))
+        
+        # 从右向左移除，避免索引变化
+        for i in range(max(alignments_count, datasets_count) - 1, -1, -1):
+            # 移除 alignments
+            if i < alignments_count:
+                button = self.item_buttons["alignments"][i]
+                self.grid_layout.removeWidget(button)
+            # 移除 datasets
+            if i < datasets_count:
+                button = self.item_buttons["datasets"][i]
+                self.grid_layout.removeWidget(button)
+        
+        # 重新添加所有按钮，alignments 在左，datasets 在右
+        # alignments 从第 0 列开始
+        for i, button in enumerate(self.item_buttons.get("alignments", [])):
+            self.grid_layout.addWidget(button, 0, i)
+        
+        # datasets 从 alignments 的数量之后开始
+        start_col = len(self.item_buttons.get("alignments", []))
+        for i, button in enumerate(self.item_buttons.get("datasets", [])):
+            self.grid_layout.addWidget(button, 0, start_col + i)
+        
+        # 重新排列后更新所有按钮的样式
+        self._update_all_button_styles()
+    
+    def _create_item_button(self, dataset_item: DatasetItem, item_type_key: str, row: int, col: int, icon_name: str):
+        """创建数据项按钮的通用方法
+        
+        Args:
+            dataset_item: 数据项对象
+            item_type_key: 数据类型键值（如 "models", "distances"）
+            row: 网格布局行号
+            col: 网格布局列号
+            icon_name: 图标文件名
+        """
+        # 确保网格布局存在
+        if not hasattr(self, 'grid_layout'):
+            self.workspace_hint.setVisible(False)
+            self.grid_widget = QWidget()
+            self.grid_layout = QGridLayout()
+            self.grid_widget.setLayout(self.grid_layout)
+            self.main_layout.addWidget(self.grid_widget)
+            self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        
+        # 创建 DatasetItemButton
+        item_button = DatasetItemButton(dataset_item, parent=self)
+        item_button.clicked_single.connect(self._on_item_single_click)
+        item_button.clicked_double.connect(self._on_item_double_click)
+        
+        # 设置图标
+        if self.resource_factory:
+            icon = self.resource_factory.get_icon(icon_name)
+            if icon:
+                item_button.setIcon(icon)
+                item_button.setIconSize(QSize(45, 45))
+        
+        # 存储按钮引用
+        if item_type_key not in self.item_buttons:
+            self.item_buttons[item_type_key] = []
+        self.item_buttons[item_type_key].append(item_button)
+        
+        # 添加到网格布局
+        self.grid_layout.addWidget(item_button, row, col)
+        
+        # 检查新项目是否应该显示为蓝色高亮
+        # 如果新项目继承了当前激活的 ownership UUID，将其设置为蓝色
+        if self.dataset_selection_manager and dataset_item.ownership_uuid:
+            active_uuid = self._get_active_ownership_uuid()
+            if active_uuid and dataset_item.ownership_uuid == active_uuid:
+                # 将新项目设置为蓝色高亮（上下文高亮）
+                dataset_item.selection_state = SELECTION_STATE_BLUE
+                dataset_item.selection_reason = "Same ownership as active items"
+                item_button.update_style()
+        
+        return item_button
+    
+    def _get_active_ownership_uuid(self) -> Optional[str]:
+        """获取当前激活的序列/alignment 的 ownership_uuid"""
+        if not self.dataset_selection_manager:
+            return None
+        
+        # 获取当前激活（绿色）的数据项
+        green_items = self.dataset_selection_manager.get_items_by_state(SELECTION_STATE_GREEN)
+        
+        # 优先返回 sequence 或 alignment 类型的 UUID
+        for item in green_items:
+            if item.item_type in [ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT]:
+                return item.ownership_uuid
+        
+        # 如果没有 sequence/alignment，返回第一个绿色项的 UUID
+        if green_items:
+            return green_items[0].ownership_uuid
+        
+        return None
     
     def add_model(self, model):
-        # 检查是单个模型还是模型表
-        if isinstance(model, dict) and "type" in model and model["type"] == "model_table":
-            # 处理模型表
-            model_name = model.get("name", "Model Table")
-            self.items["models"].append(model)
-            
-            # 确保grid_layout存在
-            if not hasattr(self, 'grid_layout'):
-                # disable hint label
-                self.workspace_hint.setVisible(False)
-                # add a grid layout
-                self.grid_widget = QWidget()
-                self.grid_layout = QGridLayout()
-                self.grid_widget.setLayout(self.grid_layout)
-                self.main_layout.addWidget(self.grid_widget)
-                self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-            
-            # add a 'model' icon to workspace
-            model_icon = self.resource_factory.get_icon("file/model.svg")
-            model_button = QToolButton()
-            model_button.setIcon(model_icon)
-            model_button.setIconSize(QSize(45, 45))
-            model_button.setToolTip(f"Substitution Model: {model_name}")
-            model_button.clicked.connect(lambda: self.view_model_result(model))
-            self.grid_layout.addWidget(model_button, 1, len(self.items["models"])-1)
+        """添加模型到工作区"""
+        # 如果还没有数据集，创建一个默认数据集
+        if not self.current_dataset_id:
+            if self.dataset_selection_manager:
+                self.current_dataset_id = self.dataset_selection_manager.create_dataset(
+                    name="Default Dataset",
+                    description="Auto-created default dataset",
+                    is_multigene=False
+                )
+        
+        # 创建 DatasetItem
+        from datetime import datetime
+        dataset_item = DatasetItem(item_type=ITEM_TYPE_MODEL)
+        dataset_item.dataset_id = self.current_dataset_id
+        dataset_item.loci_name = f"Model_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        dataset_item.name = dataset_item.loci_name
+        
+        # 继承所有权 UUID（如果存在）
+        ownership_uuid = self._get_active_ownership_uuid()
+        if ownership_uuid:
+            dataset_item.ownership_uuid = ownership_uuid
         else:
-            # 处理单个模型（保持向后兼容）
+            # 如果没有可继承的 UUID，生成新的
+            dataset_item.ownership_uuid = str(uuid.uuid4())
+        
+        # 存储模型数据
+        if isinstance(model, dict):
+            dataset_item.data = model
+            model_name = model.get("name", model.get("model", "Unknown Model"))
+        else:
+            dataset_item.data = {"model": getattr(model, 'model_name', 'Unknown Model')}
             model_name = getattr(model, 'model_name', 'Unknown Model')
-            self.items["models"].append(model)
-            
-            # 确保grid_layout存在
-            if not hasattr(self, 'grid_layout'):
-                # disable hint label
-                self.workspace_hint.setVisible(False)
-                # add a grid layout
-                self.grid_widget = QWidget()
-                self.grid_layout = QGridLayout()
-                self.grid_widget.setLayout(self.grid_layout)
-                self.main_layout.addWidget(self.grid_widget)
-                self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-            
-            # add a 'model' icon to workspace
-            model_icon = self.resource_factory.get_icon("file/model.svg")
-            model_button = QToolButton()
-            model_button.setIcon(model_icon)
-            model_button.setIconSize(QSize(45, 45))
-            model_button.setToolTip(f"Substitution Model: {model_name}")
-            model_button.clicked.connect(lambda: self.view_model_result(model))
-            self.grid_layout.addWidget(model_button, 1, len(self.items["models"])-1)
+        
+        # 保留旧的数据结构（向后兼容）
+        self.items["models"].append(model)
+        
+        # 添加到管理器
+        if self.dataset_selection_manager:
+            success = self.dataset_selection_manager.add_item(dataset_item, self.current_dataset_id)
+            if not success:
+                QMessageBox.warning(self, "Warning", "Failed to add model to dataset")
+                return
+            dataset_item = self.dataset_selection_manager.get_item(dataset_item.id)
+            if not dataset_item:
+                QMessageBox.warning(self, "Warning", "Failed to retrieve added model")
+                return
+        
+        # 创建按钮
+        self._create_item_button(
+            dataset_item=dataset_item,
+            item_type_key="models",
+            row=1,
+            col=len(self.item_buttons["models"]),
+            icon_name="file/model.svg"
+        )
     
     def add_distance(self, distance):
-        # add a distance to items["distances"]
+        """添加距离矩阵到工作区"""
+        # 如果还没有数据集，创建一个默认数据集
+        if not self.current_dataset_id:
+            if self.dataset_selection_manager:
+                self.current_dataset_id = self.dataset_selection_manager.create_dataset(
+                    name="Default Dataset",
+                    description="Auto-created default dataset",
+                    is_multigene=False
+                )
+        
+        # 创建 DatasetItem
+        from datetime import datetime
+        dataset_item = DatasetItem(item_type=ITEM_TYPE_DISTANCE)
+        dataset_item.dataset_id = self.current_dataset_id
+        dataset_item.loci_name = f"Distance_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        dataset_item.name = dataset_item.loci_name
+        
+        # 继承所有权 UUID（如果存在）
+        ownership_uuid = self._get_active_ownership_uuid()
+        if ownership_uuid:
+            dataset_item.ownership_uuid = ownership_uuid
+        else:
+            # 如果没有可继承的 UUID，生成新的
+            dataset_item.ownership_uuid = str(uuid.uuid4())
+        
+        # 存储距离数据
+        if isinstance(distance, dict):
+            dataset_item.data = distance
+        else:
+            dataset_item.data = {"content": distance}
+        
+        # 保留旧的数据结构（向后兼容）
         self.items["distances"].append(distance)
         
-        # 确保grid_layout存在
-        if not hasattr(self, 'grid_layout'):
-            # disable hint label
-            self.workspace_hint.setVisible(False)
-            # add a grid layout
-            self.grid_widget = QWidget()
-            self.grid_layout = QGridLayout()
-            self.grid_widget.setLayout(self.grid_layout)
-            self.main_layout.addWidget(self.grid_widget)
-            self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        # 添加到管理器
+        if self.dataset_selection_manager:
+            success = self.dataset_selection_manager.add_item(dataset_item, self.current_dataset_id)
+            if not success:
+                QMessageBox.warning(self, "Warning", "Failed to add distance to dataset")
+                return
+            dataset_item = self.dataset_selection_manager.get_item(dataset_item.id)
+            if not dataset_item:
+                QMessageBox.warning(self, "Warning", "Failed to retrieve added distance")
+                return
         
-        # add a 'distance' icon to workspace
-        distance_icon = self.resource_factory.get_icon("file/distance.svg")
-        distance_button = QToolButton()
-        distance_button.setIcon(distance_icon)
-        distance_button.setIconSize(QSize(45, 45))
-        distance_button.setToolTip(f"Pairwise Distance Matrix")
-        distance_button.clicked.connect(lambda: self.view_distance_matrix(distance))
-        self.grid_layout.addWidget(distance_button, 2, len(self.items["distances"])-1)
+        # 创建按钮
+        self._create_item_button(
+            dataset_item=dataset_item,
+            item_type_key="distances",
+            row=2,
+            col=len(self.item_buttons["distances"]),
+            icon_name="file/distance.svg"
+        )
     
     def add_phylogeny(self, phylogeny):
         """添加系统发育树到工作区"""
@@ -1945,6 +2237,13 @@ class SingleGeneWorkspace(QWidget):
         phylogeny_button = QToolButton()
         phylogeny_button.setIcon(phylogeny_icon)
         phylogeny_button.setIconSize(QSize(45, 45))
+        
+        # 设置样式，背景透明（与其他未选中的按钮保持一致）
+        phylogeny_button.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+            }
+        """)
         
         # 创建tooltip
         if isinstance(phylogeny, dict):
@@ -1979,6 +2278,14 @@ class SingleGeneWorkspace(QWidget):
         chain_button = QToolButton()
         chain_button.setIcon(chain_icon)
         chain_button.setIconSize(QSize(45, 45))
+        
+        # 设置样式，背景透明（与其他未选中的按钮保持一致）
+        chain_button.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+            }
+        """)
+        
         # 创建tooltip，显示链信息
         tooltip_text = f"MCMC Chains (Run {chain_item.run_number}, {chain_item.chain_count} chain(s), Tool: {chain_item.tool})"
         chain_button.setToolTip(tooltip_text)
@@ -2002,25 +2309,115 @@ class SingleGeneWorkspace(QWidget):
             self.main_layout.addWidget(self.grid_widget)
             self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         
-        # add a dataset icon to workspace
-        dataset_icon = self.resource_factory.get_icon("file/dataset.svg")
-        dataset_button = QToolButton()
-        dataset_button.setIcon(dataset_icon)
-        dataset_button.setIconSize(QSize(45, 45))
-        dataset_button.setToolTip(f"Dataset: {getattr(dataset, 'dataset_name', 'Unnamed Dataset')}")
-        # Dataset数据项应该显示在数据区域，使用第5行
-        dataset_row = 5
+        # 创建或获取 DatasetInfo
+        dataset_name = getattr(dataset, 'dataset_name', 'Unnamed Dataset')
         
-        # 实现单击选中，双击查看的交互逻辑
-        dataset_button.doubleClicked = False
-        dataset_button.mousePressEvent = lambda event, btn=dataset_button: self._on_dataset_mouse_press(btn, event)
-        dataset_button.mouseReleaseEvent = lambda event, btn=dataset_button, ds=dataset: self._on_dataset_mouse_release(btn, ds, event)
-        dataset_button.mouseDoubleClickEvent = lambda event, btn=dataset_button: self._on_dataset_double_click(btn, event)
+        # 检查是否已经有这个数据集在管理器中
+        dataset_info = None
+        if self.dataset_selection_manager:
+            # 查找是否已存在同名数据集
+            for ds in self.dataset_selection_manager.get_all_datasets():
+                if ds.name == dataset_name:
+                    dataset_info = ds
+                    break
         
-        self.grid_layout.addWidget(dataset_button, dataset_row, len(self.items["datasets"])-1)
+        # 如果不存在，创建新的数据集
+        if not dataset_info and self.dataset_selection_manager:
+            is_multigene = hasattr(dataset, 'items') and len(dataset.items) > 1
+            dataset_id = self.dataset_selection_manager.create_dataset(
+                name=dataset_name,
+                description=f"Dataset created from {dataset_name}",
+                is_multigene=is_multigene
+            )
+            dataset_info = self.dataset_selection_manager.get_dataset(dataset_id)
+            
+            # 如果有 items，添加到数据集
+            if hasattr(dataset, 'items') and dataset.items:
+                for item in dataset.items:
+                    # 这里需要将旧格式的 item 转换为 DatasetItem
+                    # 暂时跳过，因为需要更复杂的转换逻辑
+                    pass
+        
+        # 创建 DatasetButton
+        if dataset_info:
+            dataset_button = DatasetButton(dataset_info, parent=self)
+            dataset_button.clicked_single.connect(self._on_dataset_click)
+            # 双击事件需要适配参数：DatasetButton 传递 dataset_id，但 _on_dataset_double_click 期望 button, event
+            dataset_button.clicked_double.connect(lambda dataset_id: self._on_dataset_double_click_by_id(dataset_id))
+        else:
+            # 如果没有数据集信息，使用普通按钮（向后兼容）
+            dataset_button = QToolButton()
+        
+        # 设置图标
+        if self.resource_factory:
+            icon = self.resource_factory.get_icon("file/dataset.svg")
+            if icon:
+                dataset_button.setIcon(icon)
+                dataset_button.setIconSize(QSize(45, 45))
+        
+        # 设置 tooltip
+        if hasattr(dataset, 'dataset_name'):
+            dataset_button.setToolTip(f"Dataset: {dataset.dataset_name}")
+        
+        # Dataset数据项与 alignments 放在同一行（第0行），因为它们在所有权机制上是并列的
+        dataset_row = 0
+        
+        # 存储按钮引用
+        if "datasets" not in self.item_buttons:
+            self.item_buttons["datasets"] = []
+        self.item_buttons["datasets"].append(dataset_button)
+        
+        # 添加到网格布局
+        # Dataset 的列号从 alignments 数量开始，避免与 alignments 重叠
+        dataset_col = len(self.item_buttons.get("alignments", [])) + len(self.item_buttons["datasets"]) - 1
+        self.grid_layout.addWidget(dataset_button, dataset_row, dataset_col)
         
         # 存储dataset引用到按钮上，便于后续访问
         dataset_button.dataset_ref = dataset
+    
+    def _on_dataset_click(self, dataset_id: str):
+        """处理数据集单击事件"""
+        if not self.dataset_selection_manager:
+            return
+        
+        # 获取数据集信息
+        dataset_info = self.dataset_selection_manager.get_dataset(dataset_id)
+        if not dataset_info:
+            return
+        
+        # 切换数据集的选择状态
+        if dataset_info.selection_state == SELECTION_STATE_GREEN:
+            # 如果当前是绿色，取消选择（设为无色）
+            dataset_info.selection_state = SELECTION_STATE_NONE
+            # 清除所有数据项的选择
+            self.dataset_selection_manager.selection_engine.clear_all_selections()
+        else:
+            # 如果当前是无色或蓝色，设置为绿色
+            dataset_info.selection_state = SELECTION_STATE_GREEN
+            # 使用 selection_engine 选择整个数据集（设置为蓝色上下文高亮）
+            self.dataset_selection_manager.selection_engine.select_dataset(dataset_id)
+        
+        # 更新所有按钮的样式
+        self._update_all_button_styles()
+    
+    def _on_dataset_double_click_by_id(self, dataset_id: str):
+        """处理数据集双击事件（通过 dataset_id）"""
+        if not self.dataset_selection_manager:
+            return
+        
+        # 获取数据集信息
+        dataset_info = self.dataset_selection_manager.get_dataset(dataset_id)
+        if dataset_info:
+            # 构造 dataset 对象（兼容旧的接口）
+            class DatasetObject:
+                def __init__(self, dataset_info):
+                    self.dataset_name = dataset_info.name
+                    self.items = []
+                    self.partition_scheme = None
+                    self.summary = {}
+            
+            dataset = DatasetObject(dataset_info)
+            self.open_dataset_manager_for_dataset(dataset)
     
     def refresh_workspace_layout(self):
         """刷新工作区布局，重新创建所有按钮"""
@@ -2096,7 +2493,7 @@ class SingleGeneWorkspace(QWidget):
             dataset_button.setIcon(dataset_icon)
             dataset_button.setIconSize(QSize(45, 45))
             dataset_button.setToolTip(f"Dataset: {getattr(dataset, 'dataset_name', 'Unnamed Dataset')}")
-            dataset_row = 5  # Dataset显示在第5行
+            dataset_row = 0  # Dataset与alignments放在同一行（第0行）
             
             # 实现单击选中，双击查看的交互逻辑
             dataset_button.doubleClicked = False
@@ -2104,7 +2501,9 @@ class SingleGeneWorkspace(QWidget):
             dataset_button.mouseReleaseEvent = lambda event, btn=dataset_button, ds=dataset: self._on_dataset_mouse_release(btn, ds, event)
             dataset_button.mouseDoubleClickEvent = lambda event, btn=dataset_button: self._on_dataset_double_click(btn, event)
             
-            self.grid_layout.addWidget(dataset_button, dataset_row, i)
+            # Dataset 的列号从 alignments 数量开始，避免与 alignments 重叠
+            dataset_col = len(self.items["alignments"]) + i
+            self.grid_layout.addWidget(dataset_button, dataset_row, dataset_col)
             # 存储dataset引用到按钮上，便于后续访问
             dataset_button.dataset_ref = dataset
     
@@ -2135,8 +2534,15 @@ class SingleGeneWorkspace(QWidget):
     def open_dataset_manager_for_dataset(self, dataset):
         """打开Dataset Manager查看特定数据集"""
         try:
-            # 使用PluginFactory获取DatasetManager插件
-            dataset_manager = self.parent_window.plugin_factory.get_dataset_manager()
+            # 直接导入并实例化 DatasetManager 类
+            from .methods.dataset_manager import DatasetManager
+            
+            # 创建 DatasetManager 实例，传递必要的参数
+            dataset_manager = DatasetManager(
+                dataset_name=getattr(dataset, 'dataset_name', 'Dataset'),
+                plugin_factory=self.parent_window.plugin_factory,
+                workspace=self
+            )
             
             # 保存引用防止被垃圾回收
             if not hasattr(self.parent_window, 'dataset_managers'):
@@ -2144,11 +2550,6 @@ class SingleGeneWorkspace(QWidget):
             self.parent_window.dataset_managers.append(dataset_manager)
             
             dialog = dataset_manager
-            
-            # 设置必要的参数
-            dialog.dataset_name = getattr(dataset, 'dataset_name', 'Dataset')
-            dialog.plugin_factory = self.parent_window.plugin_factory
-            dialog.workspace = self
             
             # 如果dataset包含items数据，加载到dialog中
             if hasattr(dataset, 'items') and dataset.items:
