@@ -1931,12 +1931,18 @@ class SingleGeneWorkspace(QWidget):
         self.item_buttons["alignments"].append(item_button)
         
         # 添加到网格布局
+        # alignments 总是从第 0 列开始，依次向右排列
         self.grid_layout.addWidget(item_button, 0, len(self.item_buttons["alignments"])-1)
+        
+        # 如果有 dataset 按钮，需要将它们向右移动以避免覆盖
+        if "datasets" in self.item_buttons and self.item_buttons["datasets"]:
+            self._rearrange_row_0_buttons()
         
         # 自动选中该数据项
         if self.dataset_selection_manager:
             self.dataset_selection_manager.select_item(dataset_item.id)
-            item_button.update_style()
+            # 更新所有按钮的样式（select_item 会改变多个项目的状态）
+            self._update_all_button_styles()
     
     def _on_item_single_click(self, item_id: str):
         """处理数据项单击事件"""
@@ -1999,6 +2005,36 @@ class SingleGeneWorkspace(QWidget):
                 elif isinstance(button, DatasetButton):
                     button.update_style()
     
+    def _rearrange_row_0_buttons(self):
+        """重新排列第 0 行的所有按钮，确保 alignments 在左，datasets 在右"""
+        # 首先移除所有第 0 行的按钮
+        alignments_count = len(self.item_buttons.get("alignments", []))
+        datasets_count = len(self.item_buttons.get("datasets", []))
+        
+        # 从右向左移除，避免索引变化
+        for i in range(max(alignments_count, datasets_count) - 1, -1, -1):
+            # 移除 alignments
+            if i < alignments_count:
+                button = self.item_buttons["alignments"][i]
+                self.grid_layout.removeWidget(button)
+            # 移除 datasets
+            if i < datasets_count:
+                button = self.item_buttons["datasets"][i]
+                self.grid_layout.removeWidget(button)
+        
+        # 重新添加所有按钮，alignments 在左，datasets 在右
+        # alignments 从第 0 列开始
+        for i, button in enumerate(self.item_buttons.get("alignments", [])):
+            self.grid_layout.addWidget(button, 0, i)
+        
+        # datasets 从 alignments 的数量之后开始
+        start_col = len(self.item_buttons.get("alignments", []))
+        for i, button in enumerate(self.item_buttons.get("datasets", [])):
+            self.grid_layout.addWidget(button, 0, start_col + i)
+        
+        # 重新排列后更新所有按钮的样式
+        self._update_all_button_styles()
+    
     def _create_item_button(self, dataset_item: DatasetItem, item_type_key: str, row: int, col: int, icon_name: str):
         """创建数据项按钮的通用方法
         
@@ -2038,9 +2074,15 @@ class SingleGeneWorkspace(QWidget):
         # 添加到网格布局
         self.grid_layout.addWidget(item_button, row, col)
         
-        # 不再自动选中该数据项，让用户手动选择
-        # 这样可以避免 import 时出现同类型多个被激活的问题
-        # item_button.update_style()
+        # 检查新项目是否应该显示为蓝色高亮
+        # 如果新项目继承了当前激活的 ownership UUID，将其设置为蓝色
+        if self.dataset_selection_manager and dataset_item.ownership_uuid:
+            active_uuid = self._get_active_ownership_uuid()
+            if active_uuid and dataset_item.ownership_uuid == active_uuid:
+                # 将新项目设置为蓝色高亮（上下文高亮）
+                dataset_item.selection_state = SELECTION_STATE_BLUE
+                dataset_item.selection_reason = "Same ownership as active items"
+                item_button.update_style()
         
         return item_button
     
@@ -2196,6 +2238,13 @@ class SingleGeneWorkspace(QWidget):
         phylogeny_button.setIcon(phylogeny_icon)
         phylogeny_button.setIconSize(QSize(45, 45))
         
+        # 设置样式，背景透明（与其他未选中的按钮保持一致）
+        phylogeny_button.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+            }
+        """)
+        
         # 创建tooltip
         if isinstance(phylogeny, dict):
             tool_name = phylogeny.get('tool', 'unknown')
@@ -2229,6 +2278,14 @@ class SingleGeneWorkspace(QWidget):
         chain_button = QToolButton()
         chain_button.setIcon(chain_icon)
         chain_button.setIconSize(QSize(45, 45))
+        
+        # 设置样式，背景透明（与其他未选中的按钮保持一致）
+        chain_button.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+            }
+        """)
+        
         # 创建tooltip，显示链信息
         tooltip_text = f"MCMC Chains (Run {chain_item.run_number}, {chain_item.chain_count} chain(s), Tool: {chain_item.tool})"
         chain_button.setToolTip(tooltip_text)
@@ -2302,8 +2359,8 @@ class SingleGeneWorkspace(QWidget):
         if hasattr(dataset, 'dataset_name'):
             dataset_button.setToolTip(f"Dataset: {dataset.dataset_name}")
         
-        # Dataset数据项应该显示在数据区域，使用第5行
-        dataset_row = 5
+        # Dataset数据项与 alignments 放在同一行（第0行），因为它们在所有权机制上是并列的
+        dataset_row = 0
         
         # 存储按钮引用
         if "datasets" not in self.item_buttons:
@@ -2311,7 +2368,9 @@ class SingleGeneWorkspace(QWidget):
         self.item_buttons["datasets"].append(dataset_button)
         
         # 添加到网格布局
-        self.grid_layout.addWidget(dataset_button, dataset_row, len(self.item_buttons["datasets"])-1)
+        # Dataset 的列号从 alignments 数量开始，避免与 alignments 重叠
+        dataset_col = len(self.item_buttons.get("alignments", [])) + len(self.item_buttons["datasets"]) - 1
+        self.grid_layout.addWidget(dataset_button, dataset_row, dataset_col)
         
         # 存储dataset引用到按钮上，便于后续访问
         dataset_button.dataset_ref = dataset
@@ -2321,13 +2380,22 @@ class SingleGeneWorkspace(QWidget):
         if not self.dataset_selection_manager:
             return
         
-        # 设置数据集的选择状态为蓝色（上下文高亮）
+        # 获取数据集信息
         dataset_info = self.dataset_selection_manager.get_dataset(dataset_id)
-        if dataset_info:
-            dataset_info.selection_state = SELECTION_STATE_BLUE
+        if not dataset_info:
+            return
         
-        # 使用 selection_engine 选择整个数据集（设置为蓝色上下文高亮）
-        self.dataset_selection_manager.selection_engine.select_dataset(dataset_id)
+        # 切换数据集的选择状态
+        if dataset_info.selection_state == SELECTION_STATE_GREEN:
+            # 如果当前是绿色，取消选择（设为无色）
+            dataset_info.selection_state = SELECTION_STATE_NONE
+            # 清除所有数据项的选择
+            self.dataset_selection_manager.selection_engine.clear_all_selections()
+        else:
+            # 如果当前是无色或蓝色，设置为绿色
+            dataset_info.selection_state = SELECTION_STATE_GREEN
+            # 使用 selection_engine 选择整个数据集（设置为蓝色上下文高亮）
+            self.dataset_selection_manager.selection_engine.select_dataset(dataset_id)
         
         # 更新所有按钮的样式
         self._update_all_button_styles()
@@ -2425,7 +2493,7 @@ class SingleGeneWorkspace(QWidget):
             dataset_button.setIcon(dataset_icon)
             dataset_button.setIconSize(QSize(45, 45))
             dataset_button.setToolTip(f"Dataset: {getattr(dataset, 'dataset_name', 'Unnamed Dataset')}")
-            dataset_row = 5  # Dataset显示在第5行
+            dataset_row = 0  # Dataset与alignments放在同一行（第0行）
             
             # 实现单击选中，双击查看的交互逻辑
             dataset_button.doubleClicked = False
@@ -2433,7 +2501,9 @@ class SingleGeneWorkspace(QWidget):
             dataset_button.mouseReleaseEvent = lambda event, btn=dataset_button, ds=dataset: self._on_dataset_mouse_release(btn, ds, event)
             dataset_button.mouseDoubleClickEvent = lambda event, btn=dataset_button: self._on_dataset_double_click(btn, event)
             
-            self.grid_layout.addWidget(dataset_button, dataset_row, i)
+            # Dataset 的列号从 alignments 数量开始，避免与 alignments 重叠
+            dataset_col = len(self.items["alignments"]) + i
+            self.grid_layout.addWidget(dataset_button, dataset_row, dataset_col)
             # 存储dataset引用到按钮上，便于后续访问
             dataset_button.dataset_ref = dataset
     
@@ -2464,8 +2534,15 @@ class SingleGeneWorkspace(QWidget):
     def open_dataset_manager_for_dataset(self, dataset):
         """打开Dataset Manager查看特定数据集"""
         try:
-            # 使用PluginFactory获取DatasetManager插件
-            dataset_manager = self.parent_window.plugin_factory.get_dataset_manager()
+            # 直接导入并实例化 DatasetManager 类
+            from .methods.dataset_manager import DatasetManager
+            
+            # 创建 DatasetManager 实例，传递必要的参数
+            dataset_manager = DatasetManager(
+                dataset_name=getattr(dataset, 'dataset_name', 'Dataset'),
+                plugin_factory=self.parent_window.plugin_factory,
+                workspace=self
+            )
             
             # 保存引用防止被垃圾回收
             if not hasattr(self.parent_window, 'dataset_managers'):
@@ -2473,11 +2550,6 @@ class SingleGeneWorkspace(QWidget):
             self.parent_window.dataset_managers.append(dataset_manager)
             
             dialog = dataset_manager
-            
-            # 设置必要的参数
-            dialog.dataset_name = getattr(dataset, 'dataset_name', 'Dataset')
-            dialog.plugin_factory = self.parent_window.plugin_factory
-            dialog.workspace = self
             
             # 如果dataset包含items数据，加载到dialog中
             if hasattr(dataset, 'items') and dataset.items:

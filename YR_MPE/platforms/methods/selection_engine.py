@@ -75,6 +75,12 @@ class SelectionEngine:
                 self._set_item_state(green_item, SELECTION_STATE_NONE, "")
             # else: 不同类型但相同 UUID：保留激活状态
         
+        # 清除所有与新选择项 UUID 不同的蓝色项
+        blue_items = self.manager.get_items_by_state(SELECTION_STATE_BLUE)
+        for blue_item in blue_items:
+            if blue_item.ownership_uuid != item.ownership_uuid:
+                self._set_item_state(blue_item, SELECTION_STATE_NONE, "")
+        
         # 将当前项设置为绿色
         self._set_item_state(item, SELECTION_STATE_GREEN, "Direct selection")
         

@@ -291,10 +291,6 @@ class DatasetButton(QToolButton):
         
         return text
     
-    def _on_click(self):
-        """处理点击事件"""
-        self.clicked_single.emit(self.dataset.id)
-    
     # 移除了mouseDoubleClickEvent，因为双击已经在_on_click中处理
     
     def update_dataset(self, dataset: DatasetInfo):
