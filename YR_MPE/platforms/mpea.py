@@ -2215,20 +2215,35 @@ class SingleGeneWorkspace(QWidget):
             
             # 格式化模型结果显示
             if isinstance(model_result, dict) and "type" in model_result and model_result["type"] == "model_table":
-                # 显示模型表
-                content = f"Model Selection Results for {model_result.get('name', 'Unknown')}\n\n"
-                content += "Rank\tModel\tAIC\tBIC\tWeight\n"
-                content += "-" * 50 + "\n"
-                for i, model_info in enumerate(model_result.get("models", [])):
-                    content += f"{i+1}\t{model_info.get('model', 'N/A')}\t{model_info.get('aic', 'N/A')}\t{model_info.get('bic', 'N/A')}\t{model_info.get('weight', 'N/A')}\n"
+                # 显示模型表 - 使用QTableWidget而不是QTextEdit
+                headers = model_result.get("headers", ["Model", "AIC", "BIC"])
+                model_data = model_result.get("data", [])
                 
                 # 模型表标签页
                 model_table_tab = QWidget()
                 model_table_layout = QVBoxLayout()
-                text_edit = QTextEdit()
-                text_edit.setReadOnly(True)
-                text_edit.setText(content)
-                model_table_layout.addWidget(text_edit)
+                
+                # 创建表格
+                table = QTableWidget()
+                table.setColumnCount(len(headers))
+                table.setHorizontalHeaderLabels(headers)
+                table.setRowCount(len(model_data))
+                
+                # 填充数据
+                for row, model_info in enumerate(model_data):
+                    for col, header in enumerate(headers):
+                        value = model_info.get(header, "N/A")
+                        item = QTableWidgetItem(str(value))
+                        # 数值列右对齐
+                        if header != "Model":
+                            item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                        table.setItem(row, col, item)
+                
+                # 调整列宽
+                table.resizeColumnsToContents()
+                table.setSortingEnabled(True)
+                
+                model_table_layout.addWidget(table)
                 model_table_tab.setLayout(model_table_layout)
                 tab_widget.addTab(model_table_tab, "Model Table")
                 
