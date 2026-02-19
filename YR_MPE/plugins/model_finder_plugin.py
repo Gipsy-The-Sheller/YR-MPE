@@ -20,18 +20,23 @@
 from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, 
                              QMessageBox, QGroupBox, QFormLayout, QLineEdit, 
                              QSpinBox, QCheckBox, QLabel, QComboBox, QTableWidget, QTableWidgetItem,
-                             QTextEdit, QToolButton, QApplication, QFrame, QWidget)
+                             QTextEdit, QToolButton, QApplication, QFrame, QWidget, QDialog)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon, QFont
 import tempfile
 import os
 import re
-from typing import List, Optional
+from typing import List, Optional, Dict
 from Bio import SeqIO
 
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
 import subprocess
+
+# 导入分区模式相关模块
+from .partition_mode import PartitionDefinition, PartitionMode, create_partition_from_dict
+from .model_finder_partition_ui import ModelFinderPartitionDialog
+from .model_finder_partition_thread import ModelFinderPartitionThread
 
 
 class ModelFinderThread(BaseProcessThread):
@@ -104,9 +109,19 @@ class ModelFinderPlugin(BasePlugin):
         """初始化ModelFinder插件"""
         super().__init__(import_from, import_data)
         
-        # 特别处理YR-MPEA导入的数据
+        # 初始化分区模式相关变量
+        self.partition_mode_enabled = False
+        self.partition_definitions: List[PartitionDefinition] = []
+        self.partition_mode = PartitionMode.EL
+        self.partition_rcluster = False
+        self.partition_rcluster_percent = None
+        self.partition_dialog = None
+        
+        # 处理不同来源的导入数据
         if import_from == "YR_MPEA" and import_data is not None:
             self.handle_import_data(import_data)
+        elif import_from == "DATASET_MANAGER" and import_data is not None:
+            self.handle_dataset_import(import_data)
         
     def init_plugin_info(self):
         """初始化插件信息"""
@@ -138,6 +153,180 @@ class ModelFinderPlugin(BasePlugin):
         else:
             self.import_file = None
             self.imported_files = []
+
+    def handle_dataset_import(self, import_data):
+        """处理从DatasetManager导入的数据"""
+        try:
+            # import_data 应该是一个包含 dataset items 和配置信息的字典
+            if not isinstance(import_data, dict):
+                QMessageBox.warning(self, "Import Error", "Invalid dataset import data format")
+                return
+            
+            # 获取 dataset items 和配置
+            dataset_items = import_data.get('dataset_items', [])
+            dataset_config = import_data.get('dataset_config', {})
+            
+            # 检查是否有选中的 partition
+            selected_items = [item for item in dataset_items if item.selected]
+            if not selected_items:
+                QMessageBox.warning(self, "No Selection", "No partitions selected from dataset. Please select at least one partition.")
+                return
+            
+            # 检查所有选中的 partition 是否已比对
+            unaligned_items = [item for item in selected_items if not item.is_aligned]
+            if unaligned_items:
+                unaligned_names = [item.loci_name for item in unaligned_items]
+                warning_msg = "The following partitions are not aligned:\n" + "\n".join(f"  - {name}" for name in unaligned_names)
+                warning_msg += "\n\nPlease align these partitions first or select only aligned partitions."
+                QMessageBox.warning(self, "Alignment Required", warning_msg)
+                # 强制打断自动导入，剩余一个空界面
+                return
+            
+            # 获取 dataset 的设置（topo-linked/topo-unlinked, edge-linked/edge-unlinked）
+            topo_linked = dataset_config.get('topo_linked', False)
+            edge_linked = dataset_config.get('edge_linked', False)
+            
+            # 映射到 partition mode
+            # topo-unlinked -> Separate Tree (TUL)
+            # edge-linked -> Edge-linked Equal (TL)
+            # edge-unlinked -> Edge-unlinked (EUL)
+            if not topo_linked:
+                self.partition_mode = PartitionMode.TUL  # Separate tree
+            elif edge_linked:
+                self.partition_mode = PartitionMode.TL  # Edge-linked equal
+            else:
+                self.partition_mode = PartitionMode.EUL  # Edge-unlinked
+            
+            # 合并所有选中的 partition 为 supermatrix
+            supermatrix_sequences = {}
+            partition_definitions = []
+            current_pos = 1
+            
+            # 获取所有序列名称（假设所有 partition 有相同的序列）
+            if selected_items:
+                all_seq_names = [seq.id for seq in selected_items[0].sequences]
+            else:
+                all_seq_names = []
+            
+            # 合并序列
+            for seq_name in all_seq_names:
+                supermatrix_seq = ""
+                for item in selected_items:
+                    # 找到对应的序列
+                    seq = next((s for s in item.sequences if s.id == seq_name), None)
+                    if seq:
+                        supermatrix_seq += str(seq.seq)
+                    else:
+                        # 如果某个 partition 缺少该序列，用 ? 填充
+                        supermatrix_seq += "?" * item.length
+                supermatrix_sequences[seq_name] = supermatrix_seq
+            
+            # 创建 supermatrix 临时文件
+            temp_file = self.create_temp_file(suffix='.fas')
+            with open(temp_file, 'w') as f:
+                for seq_name, seq_content in supermatrix_sequences.items():
+                    f.write(f">{seq_name}\n{seq_content}\n")
+            
+            self.import_file = temp_file
+            self.imported_files = [temp_file]
+            
+            # 计算 partition 坐标并创建 partition definitions
+            for item in selected_items:
+                end_pos = current_pos + item.length - 1
+                partition_def = PartitionDefinition(
+                    name=item.loci_name,
+                    file_path="",  # 空字符串表示使用 supermatrix 的坐标
+                    seq_type="DNA",  # 默认 DNA，后续会检测
+                    model_range=f"{current_pos}-{end_pos}",
+                    selected_model=None
+                )
+                partition_definitions.append(partition_def)
+                current_pos = end_pos + 1
+            
+            self.partition_definitions = partition_definitions
+            
+            # 检测序列类型冲突
+            self._detect_sequence_type_conflicts(selected_items, partition_definitions)
+            
+            # 启用分区模式
+            self.partition_mode_enabled = True
+            
+            # 默认保持 rcluster 打开
+            self.partition_rcluster = True
+            self.partition_rcluster_percent = 0.95
+            
+            # 更新 UI
+            if hasattr(self, 'file_path_edit') and self.file_path_edit:
+                self.file_path_edit.setText(temp_file)
+            
+            if hasattr(self, 'partition_mode_checkbox'):
+                self.partition_mode_checkbox.setChecked(True)
+            
+            # 更新分区状态显示
+            self.update_partition_status()
+            
+            # 添加控制台消息
+            self.add_console_message(f"Dataset imported: {len(selected_items)} partitions", "info")
+            self.add_console_message(f"Partition mode: {self.partition_mode.value}", "info")
+            self.add_console_message(f"Rcluster enabled: {self.partition_rcluster}", "info")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Import Error", f"Failed to import dataset: {str(e)}")
+            # 强制打断自动导入，剩余一个空界面
+            self.import_file = None
+            self.imported_files = []
+            self.partition_definitions = []
+            self.partition_mode_enabled = False
+
+    def _detect_sequence_type_conflicts(self, dataset_items, partition_definitions):
+        """检测序列类型冲突"""
+        # 检查每个 partition 的序列类型
+        conflicts = []
+        seq_types = []
+        
+        for item, partition_def in zip(dataset_items, partition_definitions):
+            # 检测序列类型
+            seq_type = self._detect_sequence_type(item.sequences)
+            seq_types.append(seq_type)
+            partition_def.seq_type = seq_type
+        
+        # 检查是否有冲突
+        if len(set(seq_types)) > 1:
+            conflict_types = set(seq_types)
+            conflict_msg = f"Sequence type conflict detected: {', '.join(conflict_types)}\n"
+            conflict_msg += "Partitions have different sequence types:\n"
+            for item, seq_type in zip(dataset_items, seq_types):
+                conflict_msg += f"  - {item.loci_name}: {seq_type}\n"
+            conflict_msg += "\nThis may cause issues during model selection. Proceed with caution."
+            
+            QMessageBox.warning(self, "Sequence Type Conflict", conflict_msg)
+            self.add_console_message("WARNING: Sequence type conflict detected", "warning")
+        
+        return seq_types
+    
+    def _detect_sequence_type(self, sequences):
+        """检测序列类型"""
+        if not sequences:
+            return "DNA"
+        
+        # 获取第一个序列的字符串
+        first_seq = str(sequences[0].seq).upper()
+        
+        # 检查是否包含蛋白质特殊字符
+        protein_chars = set("ACDEFGHIKLMNPQRSTVWY*")
+        dna_chars = set("ACGTNRYSWKMBDHV")
+        
+        # 统计字符
+        total_chars = len(first_seq)
+        protein_count = sum(1 for c in first_seq if c in protein_chars)
+        dna_count = sum(1 for c in first_seq if c in dna_chars)
+        
+        # 如果包含大量的蛋白质特殊字符，则为蛋白质
+        if protein_count > total_chars * 0.5:
+            return "AA"
+        # 否则为 DNA
+        else:
+            return "DNA"
 
     def setup_input_tab(self):
         """设置输入标签页"""
@@ -173,6 +362,27 @@ class ModelFinderPlugin(BasePlugin):
         self.sequence_text.setMaximumHeight(200)
         self.sequence_text.textChanged.connect(self.on_text_changed)
         input_layout.addRow("Sequence text:", self.sequence_text)
+        
+        # 分区模式复选框
+        self.partition_mode_checkbox = QCheckBox("Enable Partition Mode")
+        self.partition_mode_checkbox.setChecked(False)
+        self.partition_mode_checkbox.stateChanged.connect(self.on_partition_mode_toggled)
+        input_layout.addRow("", self.partition_mode_checkbox)
+        
+        # 分区模式配置按钮（初始隐藏）
+        partition_config_layout = QHBoxLayout()
+        self.partition_config_btn = QPushButton("Configure Partitions")
+        self.partition_config_btn.clicked.connect(self.open_partition_dialog)
+        self.partition_config_btn.setVisible(False)
+        partition_config_layout.addWidget(self.partition_config_btn)
+        partition_config_layout.addStretch()
+        input_layout.addRow("", partition_config_layout)
+        
+        # 分区状态标签（初始隐藏）
+        self.partition_status_label = QLabel("No partitions defined")
+        self.partition_status_label.setStyleSheet("color: #6c757d; font-style: italic;")
+        self.partition_status_label.setVisible(False)
+        input_layout.addRow("", self.partition_status_label)
         
         # 处理导入的数据
         if self.import_file:
@@ -366,6 +576,83 @@ class ModelFinderPlugin(BasePlugin):
         self.imported_files.clear()
         self.file_tags.clear()
         self.file_tags_container.setVisible(False)
+    
+    def on_partition_mode_toggled(self, state):
+        """处理分区模式复选框切换"""
+        self.partition_mode_enabled = (state == Qt.Checked)
+        
+        if self.partition_mode_enabled:
+            # 启用分区模式
+            self.partition_config_btn.setVisible(True)
+            self.partition_status_label.setVisible(True)
+            self.add_console_message("Partition mode enabled. Please configure partitions.", "info")
+        else:
+            # 禁用分区模式
+            self.partition_config_btn.setVisible(False)
+            self.partition_status_label.setVisible(False)
+            self.partition_definitions = []
+            self.add_console_message("Partition mode disabled.", "info")
+    
+    def open_partition_dialog(self):
+        """打开分区配置对话框"""
+        try:
+            # 创建分区对话框
+            if self.partition_dialog is None:
+                self.partition_dialog = ModelFinderPartitionDialog(parent=self)
+                # 连接信号
+                self.partition_dialog.partitions_selected.connect(self.handle_partitions_selected)
+            
+            # 设置当前分区定义
+            if self.partition_definitions:
+                self.partition_dialog.set_partitions(self.partition_definitions)
+                self.partition_dialog.set_partition_mode(self.partition_mode)
+            
+            # 显示对话框
+            if self.partition_dialog.exec_() == QDialog.Accepted:
+                # 用户点击了OK
+                partitions = self.partition_dialog.get_partitions()
+                mode = self.partition_dialog.get_partition_mode()
+                rcluster = self.partition_dialog.get_rcluster_enabled()
+                rcluster_percent = self.partition_dialog.get_rcluster_percent()
+                
+                # 更新分区定义
+                self.partition_definitions = partitions
+                self.partition_mode = mode
+                self.partition_rcluster = rcluster
+                self.partition_rcluster_percent = rcluster_percent
+                
+                # 更新状态显示
+                self.update_partition_status()
+                
+                self.add_console_message(f"Partition configuration updated: {len(partitions)} partitions, mode: {mode.value}", "info")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open partition dialog: {str(e)}")
+    
+    def handle_partitions_selected(self, partitions: List[PartitionDefinition]):
+        """处理分区定义信号"""
+        self.partition_definitions = partitions
+        self.update_partition_status()
+        self.add_console_message(f"Received {len(partitions)} partition definitions", "info")
+    
+    def update_partition_status(self):
+        """更新分区状态显示"""
+        if not self.partition_definitions:
+            self.partition_status_label.setText("No partitions defined")
+        else:
+            mode_text = {
+                PartitionMode.EL: "Edge-linked",
+                PartitionMode.EUL: "Edge-unlinked",
+                PartitionMode.TUL: "Tree-unlinked"
+            }.get(self.partition_mode, "Unknown")
+            
+            partition_names = [p.name for p in self.partition_definitions]
+            if len(partition_names) <= 3:
+                names_text = ", ".join(partition_names)
+            else:
+                names_text = f"{partition_names[0]}, {partition_names[1]}, ... ({len(partition_names)} total)"
+            
+            self.partition_status_label.setText(f"Mode: {mode_text} | Partitions: {names_text}")
 
     def setup_output_tab(self):
         """设置输出预览标签页"""
@@ -450,6 +737,13 @@ class ModelFinderPlugin(BasePlugin):
         """获取命令行参数"""
         params = []
         
+        # 如果启用了分区模式
+        if self.partition_mode_enabled and self.partition_definitions:
+            # 使用分区模式线程类处理
+            # 这里返回特殊标记，让run_analysis方法使用分区线程
+            return {"partition_mode": True}
+        
+        # 常规模型查找参数
         # 序列类型
         seq_type = self.seq_type_combo.currentText()
         
@@ -557,9 +851,17 @@ class ModelFinderPlugin(BasePlugin):
         if not self.tool_path or not os.path.exists(self.tool_path):
             QMessageBox.critical(self, "Error", "IQ-TREE executable file not found!")
             return
+        
+        # 如果启用了分区模式但没有定义分区
+        if self.partition_mode_enabled and not self.partition_definitions:
+            QMessageBox.warning(self, "Warning", "Partition mode is enabled but no partitions are defined. Please configure partitions first.")
+            return
             
         # 添加控制台消息
-        self.add_console_message("Starting IQ-TREE ModelFinder...", "info")
+        if self.partition_mode_enabled:
+            self.add_console_message(f"Starting IQ-TREE ModelFinder with partition mode ({self.partition_mode.value})...", "info")
+        else:
+            self.add_console_message("Starting IQ-TREE ModelFinder...", "info")
         
         # 准备输入文件
         input_files = self.prepare_input_files()
@@ -573,10 +875,29 @@ class ModelFinderPlugin(BasePlugin):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # 未知进度
         
-        # 在单独的线程中运行ModelFinder
-        self.analysis_thread = ModelFinderThread(
-            self.tool_path, input_files, self.get_parameters(), self.imported_files
-        )
+        # 根据是否启用分区模式选择不同的线程类
+        params = self.get_parameters()
+        if isinstance(params, dict) and params.get("partition_mode"):
+            # 使用分区模式线程
+            self.analysis_thread = ModelFinderPartitionThread(
+                self.tool_path,
+                input_files[0] if len(input_files) == 1 else input_files,
+                self.partition_definitions,
+                self.partition_mode,
+                self.partition_rcluster,
+                self.partition_rcluster_percent,
+                {
+                    'seq_type': self.seq_type_combo.currentText(),
+                    'criterion': self.criterion_combo.currentText(),
+                    'threads': self.threads_spinbox.value()
+                }
+            )
+        else:
+            # 使用常规线程
+            self.analysis_thread = ModelFinderThread(
+                self.tool_path, input_files, params, self.imported_files
+            )
+        
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
         self.analysis_thread.finished.connect(self.analysis_finished)
         self.analysis_thread.error.connect(self.analysis_error)
