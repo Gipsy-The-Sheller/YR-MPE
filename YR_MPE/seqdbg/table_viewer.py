@@ -22,7 +22,8 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QSplitter, QLabel, QPushButton, QGroupBox, QMessageBox,
     QListWidget, QFileDialog, QTabWidget, QComboBox, QLineEdit, QStyledItemDelegate,
-    QRadioButton, QCheckBox, QDialog, QDialogButtonBox, QAbstractItemView, QListWidgetItem
+    QRadioButton, QCheckBox, QDialog, QDialogButtonBox, QAbstractItemView, QListWidgetItem,
+    QSizePolicy
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QSize, QTimer
 from PyQt5.QtGui import QColor, QFont, QBrush
@@ -1721,7 +1722,7 @@ class DatasetExportWidget(QWidget):
         button_layout = QHBoxLayout()
         layout.addLayout(button_layout)
         
-        self.export_button = QPushButton("Export (to multiple FASTA files)")
+        self.export_button = QPushButton("Export (FASTA)")
         self.export_button.setMinimumHeight(40)
         self.export_button.clicked.connect(self.on_export)
         button_layout.addWidget(self.export_button)
