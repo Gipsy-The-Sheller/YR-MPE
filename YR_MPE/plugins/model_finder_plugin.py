@@ -108,7 +108,7 @@ class ModelFinderPlugin(BasePlugin):
     def __init__(self, import_from=None, import_data=None):
         """初始化ModelFinder插件"""
         super().__init__(import_from, import_data)
-        
+
         # 初始化分区模式相关变量
         self.partition_mode_enabled = False
         self.partition_definitions: List[PartitionDefinition] = []
@@ -116,7 +116,7 @@ class ModelFinderPlugin(BasePlugin):
         self.partition_rcluster = False
         self.partition_rcluster_percent = None
         self.partition_dialog = None
-        
+
         # 处理不同来源的导入数据
         if import_from == "YR_MPEA" and import_data is not None:
             self.handle_import_data(import_data)
@@ -161,13 +161,13 @@ class ModelFinderPlugin(BasePlugin):
             if not isinstance(import_data, dict):
                 QMessageBox.warning(self, "Import Error", "Invalid dataset import data format")
                 return
-            
+
             # 获取 dataset items 和配置
             dataset_items = import_data.get('dataset_items', [])
             dataset_config = import_data.get('dataset_config', {})
-            
-            # 检查是否有选中的 partition
-            selected_items = [item for item in dataset_items if item.selected]
+
+            # dataset_items 应该已经是选中的 items（由 _prepare_import_data 过滤）
+            selected_items = dataset_items
             if not selected_items:
                 QMessageBox.warning(self, "No Selection", "No partitions selected from dataset. Please select at least one partition.")
                 return
