@@ -280,6 +280,11 @@ class SeqMatrixUI(QMainWindow):
         import_from_nexus_action_icon = QIcon(os.path.join(self.plugin_path, "..", "icons", "seqmatrix", "import_nexus.svg"))
         self.import_from_nexus_action.setIcon(import_from_nexus_action_icon)
 
+        self.import_partitioned_nexus_action = QAction("Import Partitioned NEXUS to Dataset", self)
+        menu_bar.addAction(self.import_partitioned_nexus_action)
+        import_partitioned_nexus_icon = QIcon(os.path.join(self.plugin_path, "..", "icons", "partition.svg"))
+        self.import_partitioned_nexus_action.setIcon(import_partitioned_nexus_icon)
+
         self.import_from_excel_action = QAction("Import from Excel", self)
         menu_bar.addAction(self.import_from_excel_action)
         import_from_excel_icon = QIcon(os.path.join(self.plugin_path, "..", "icons", "seqmatrix", "import_excel.svg"))
@@ -319,6 +324,15 @@ class SeqMatrixUI(QMainWindow):
         self.seq_matrix = DraggableTableWidget(self)
         self.right_layout.addWidget(self.seq_matrix)
         
+        # 底部按钮区域
+        button_layout = QHBoxLayout()
+        self.import_dataset_button = QPushButton("Import as a dataset")
+        self.import_dataset_button.setIcon(QIcon(os.path.join(self.plugin_path, "..", "icons", "dataset.svg")))
+        self.import_dataset_button.clicked.connect(self.import_as_dataset)
+        button_layout.addStretch()
+        button_layout.addWidget(self.import_dataset_button)
+        self.right_layout.addLayout(button_layout)
+        
         # essential column: sequence name
         self.seq_matrix.setColumnCount(2)
         self.seq_matrix.setRowCount(4)
@@ -333,6 +347,12 @@ class SeqMatrixUI(QMainWindow):
         # Other columns are handled in the drop event to make them non-editable
 
 class Lg_SeqMatrix(SeqMatrixUI):
+    
+    # 信号定义
+    import_dataset_signal = pyqtSignal(list, list)  # 发送序列数据和分区定义
+    # 格式: (sequences_list, partition_definitions_list)
+    # sequences_list: [{'name': str, 'seq': str}, ...]
+    # partition_definitions_list: [{'name': str, 'start': int, 'end': int}, ...]
     
     # Logics of SeqMatrix
     def __init__(self, import_from = None):
@@ -358,13 +378,46 @@ class Lg_SeqMatrix(SeqMatrixUI):
         # Store accession items for NCBI download mapping
         self.accession_items = {}  # accession -> [(row, col), ...]
         
+        # Track if opened from YR-MPEA
+        self.opened_from_yrmpea = import_from == "YR_MPEA"
+        
         # Connect actions to methods
         self.setup_connections()
+    
+    def closeEvent(self, event):
+        """Handle close event - ask about importing to platform if opened from YR-MPEA"""
+        if self.opened_from_yrmpea:
+            # 检查是否有数据
+            has_data = len(self.seqmatrix_data) > 0 or len(self.sequence_data) > 0
+            
+            if has_data:
+                reply = QMessageBox.question(
+                    self,
+                    "Import to Platform",
+                    "Do you want to import the data to the platform as a dataset?",
+                    QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+                )
+                
+                if reply == QMessageBox.Yes:
+                    # 导出为字典格式
+                    sequences_list, partition_definitions = self.export_as_dict()
+                    if sequences_list:
+                        # 发送字典数据
+                        self.import_dataset_signal.emit(sequences_list, partition_definitions)
+                        event.accept()
+                        return
+                elif reply == QMessageBox.Cancel:
+                    event.ignore()
+                    return
+        
+        # 正常关闭
+        super().closeEvent(event)
     
     def setup_connections(self):
         """Setup signal-slot connections"""
         self.import_sequence_action.triggered.connect(self.import_sequences)
         self.import_from_nexus_action.triggered.connect(self.import_nexus)
+        self.import_partitioned_nexus_action.triggered.connect(self.import_partitioned_nexus_to_dataset)
         self.import_from_excel_action.triggered.connect(self.import_excel)
         self.append_new_row_action.triggered.connect(self.append_row)
         self.append_new_column_action.triggered.connect(self.append_column)
@@ -372,6 +425,10 @@ class Lg_SeqMatrix(SeqMatrixUI):
         self.delete_column_action.triggered.connect(self.delete_column)
         self.export_action.triggered.connect(self.export_data)
         self.download_from_NCBI_action.triggered.connect(self.download_ncbi)
+        
+        # 连接导入按钮
+        if hasattr(self, 'import_dataset_button'):
+            self.import_dataset_button.clicked.connect(self.import_as_dataset)
 
         # Setup custom mime data for tree items
         self.tree_explorer.startDrag = self.tree_start_drag
@@ -485,7 +542,52 @@ class Lg_SeqMatrix(SeqMatrixUI):
         
         self.update_tree_view()
         self.update_table()
-    
+
+    def import_partitioned_nexus_to_dataset(self):
+        """Import partitioned NEXUS file to Dataset Manager"""
+        file, _ = QFileDialog.getOpenFileName(
+            self, "Select Partitioned NEXUS file", "", "NEXUS files (*.nex *.nexus)")
+
+        if not file:
+            return
+
+        try:
+            # Import the partitioned NEXUS file
+            from YR_MPE.platforms.methods.import_partitioned_nexus import import_partitioned_nexus
+            from YR_MPE.platforms.methods.dataset_manager import DatasetManager
+
+            dataset_items, partition_scheme, summary = import_partitioned_nexus(file)
+
+            # Create Dataset Manager dialog
+            dataset_manager = DatasetManager()
+            dataset_manager.dataset_name = os.path.splitext(os.path.basename(file))[0]
+
+            # Add imported items to dataset manager
+            dataset_manager.dataset_items = dataset_items
+
+            # Update table
+            for item in dataset_items:
+                dataset_manager.add_dataset_to_table(item)
+
+            # Show success message
+            message = (
+                f"Successfully imported partitioned NEXUS file from {file}"
+                f"\nTaxa: {summary['total_taxa']}, "
+                f"Partitions: {summary['partition_count']}, "
+                f"Total length: {summary['nchar']}"
+            )
+            QMessageBox.information(self, "Import Success", message)
+
+            # Show Dataset Manager dialog
+            dataset_manager.exec_()
+
+        except FileNotFoundError as e:
+            QMessageBox.critical(self, "File Not Found", str(e))
+        except ValueError as e:
+            QMessageBox.critical(self, "Parse Error", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Import Error", f"Failed to import partitioned NEXUS: {str(e)}")
+
     def import_excel(self):
         """Import data from Excel files"""
         file, _ = QFileDialog.getOpenFileName(
@@ -639,6 +741,215 @@ class Lg_SeqMatrix(SeqMatrixUI):
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to export data: {str(e)}")
+    
+    def export_as_dict(self):
+        """Export data as dictionary format for direct import
+        
+        Returns:
+            tuple: (sequences_list, partition_definitions_list)
+                - sequences_list: [{'name': str, 'seq': str}, ...]
+                - partition_definitions_list: [{'name': str, 'start': int, 'end': int}, ...]
+        """
+        sequences_dict = {}  # {sequence_name: concatenated_sequence}
+        partition_definitions = []  # [{'name': str, 'start': int, 'end': int}, ...]
+        
+        # 首先收集所有序列名和初始化序列
+        for row in range(self.seq_matrix.rowCount()):
+            name_item = self.seq_matrix.item(row, 0)
+            if name_item and name_item.text():
+                seq_name = name_item.text()
+                sequences_dict[seq_name] = ""
+        
+        # 收集每个分区的序列
+        current_pos = 0
+        for col in range(1, self.seq_matrix.columnCount()):
+            header_item = self.seq_matrix.horizontalHeaderItem(col)
+            partition_name = header_item.text() if header_item else f"Partition_{col}"
+            
+            partition_seqs = {}
+            partition_length = 0
+            
+            for row in range(self.seq_matrix.rowCount()):
+                name_item = self.seq_matrix.item(row, 0)
+                partition_item = self.seq_matrix.item(row, col)
+                
+                if name_item and partition_item:
+                    seq_name = name_item.text()
+                    if partition_item.data(Qt.UserRole):
+                        uuid = partition_item.data(Qt.UserRole)
+                        if uuid in self.seqmatrix_data:
+                            seq_data = self.seqmatrix_data[uuid]["sequence"]
+                            sequences_dict[seq_name] += seq_data
+                            partition_seqs[seq_name] = seq_data
+                            if len(seq_data) > partition_length:
+                                partition_length = len(seq_data)
+            
+            # 填充缺失数据（使用 gap）
+            for seq_name in sequences_dict.keys():
+                if seq_name not in partition_seqs:
+                    sequences_dict[seq_name] += "-" * partition_length
+        
+            # 记录分区定义（1-based索引）
+            start_pos = current_pos + 1
+            end_pos = current_pos + partition_length
+            partition_definitions.append({
+                'name': partition_name,
+                'start': start_pos,
+                'end': end_pos
+            })
+            current_pos += partition_length
+        
+        # 确保所有序列长度一致
+        nchar = current_pos
+        for seq_name in sequences_dict:
+            if len(sequences_dict[seq_name]) < nchar:
+                sequences_dict[seq_name] += "-" * (nchar - len(sequences_dict[seq_name]))
+        
+        # 转换为列表格式
+        sequences_list = [{'name': name, 'seq': seq} for name, seq in sequences_dict.items()]
+        
+        return sequences_list, partition_definitions
+    
+    def export_as_partitioned_nexus(self, save_to_file=False):
+        """Export data as partitioned NEXUS format
+        
+        Args:
+            save_to_file: 如果为 True，保存到文件并返回文件路径；如果为 False，只返回文本内容
+        
+        Returns:
+            str: NEXUS 文件内容或文件路径（取决于 save_to_file）
+        """
+        try:
+            # 收集序列数据
+            sequences_dict = {}  # {sequence_name: concatenated_sequence}
+            partition_definitions = []  # [(partition_name, start_pos, end_pos)]
+            
+            # 首先收集所有序列名和初始化序列
+            for row in range(self.seq_matrix.rowCount()):
+                name_item = self.seq_matrix.item(row, 0)
+                if name_item and name_item.text():
+                    seq_name = name_item.text()
+                    sequences_dict[seq_name] = ""
+            
+            # 收集每个分区的序列
+            current_pos = 0
+            for col in range(1, self.seq_matrix.columnCount()):
+                header_item = self.seq_matrix.horizontalHeaderItem(col)
+                partition_name = header_item.text() if header_item else f"Partition_{col}"
+                
+                partition_seqs = {}
+                partition_length = 0
+                
+                for row in range(self.seq_matrix.rowCount()):
+                    name_item = self.seq_matrix.item(row, 0)
+                    partition_item = self.seq_matrix.item(row, col)
+                    
+                    if name_item and partition_item:
+                        seq_name = name_item.text()
+                        if partition_item.data(Qt.UserRole):
+                            uuid = partition_item.data(Qt.UserRole)
+                            if uuid in self.seqmatrix_data:
+                                seq_data = self.seqmatrix_data[uuid]["sequence"]
+                                sequences_dict[seq_name] += seq_data
+                                partition_seqs[seq_name] = seq_data
+                                if len(seq_data) > partition_length:
+                                    partition_length = len(seq_data)
+                
+                # 填充缺失数据（使用 gap）
+                for seq_name in sequences_dict.keys():
+                    if seq_name not in partition_seqs:
+                        sequences_dict[seq_name] += "-" * partition_length
+            
+            # 记录分区定义
+            start_pos = current_pos + 1
+            end_pos = current_pos + partition_length
+            partition_definitions.append((partition_name, start_pos, end_pos))
+            current_pos += partition_length
+            
+            # 确保所有序列长度一致
+            nchar = current_pos
+            for seq_name in sequences_dict:
+                if len(sequences_dict[seq_name]) < nchar:
+                    sequences_dict[seq_name] += "-" * (nchar - len(sequences_dict[seq_name]))
+            
+            # 生成 NEXUS 文件内容
+            ntax = len(sequences_dict)
+            nchar = current_pos
+            
+            # 生成 matrix 部分
+            matrix_lines = []
+            max_name_length = max(len(name) for name in sequences_dict.keys())
+            
+            for seq_name, seq in sequences_dict.items():
+                matrix_lines.append(f"{seq_name}{' ' * (max_name_length - len(seq_name))} {seq}")
+            
+            # 生成 sets 部分
+            sets_lines = []
+            for partition_name, start, end in partition_definitions:
+                sets_lines.append(f"    charset {partition_name} = {start}-{end};")
+
+            # 先计算join结果以避免f-string中的反斜杠问题
+            matrix_content = '\n'.join(matrix_lines)
+            sets_content = '\n'.join(sets_lines)
+
+            nexus_content = f"""#NEXUS
+begin data;
+    dimensions ntax={ntax} nchar={nchar};
+    format datatype=DNA missing=? gap=-;
+    matrix
+{matrix_content}
+;
+end;
+
+begin sets;
+{sets_content}
+end;"""
+            
+            # 根据参数决定是否保存文件
+            if save_to_file:
+                # 保存文件
+                file_path, _ = QFileDialog.getSaveFileName(
+                    self, "Save Partitioned NEXUS File", "", "NEXUS Files (*.nex *.nexus)"
+                )
+                
+                if file_path:
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(nexus_content)
+                    QMessageBox.information(self, "Success", f"Data exported as partitioned NEXUS to {file_path}")
+                    return nexus_content
+            else:
+                # 直接返回 NEXUS 内容
+                return nexus_content
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to export as partitioned NEXUS: {str(e)}")
+            return None if save_to_file else None
+    
+    def import_as_dataset(self):
+        """Import current data as a dataset to the platform"""
+        try:
+            # 询问用户是否导入到平台
+            reply = QMessageBox.question(
+                self,
+                "Import to Platform",
+                "Do you want to import the current data to the platform as a dataset?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                # 导出为字典格式
+                sequences_list, partition_definitions = self.export_as_dict()
+                
+                # 发送字典数据
+                self.import_dataset_signal.emit(sequences_list, partition_definitions)
+                QMessageBox.information(
+                    self,
+                    "Import Successful",
+                    "Data imported to platform successfully!"
+                )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to import as dataset: {str(e)}")
     
     def download_ncbi(self):
         """Download sequences from NCBI"""
