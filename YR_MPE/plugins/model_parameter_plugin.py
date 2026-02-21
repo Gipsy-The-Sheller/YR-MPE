@@ -202,16 +202,40 @@ class ModelParameterPlugin(BasePlugin):
             self.sequence_text.setEnabled(False)
         
         # 参数组
-        params_group = QGroupBox("Model Parameters")
+        self.params_group = QGroupBox("Model Parameters")
         params_layout = QFormLayout()
-        params_group.setLayout(params_layout)
-        layout.addWidget(params_group)
+        self.params_group.setLayout(params_layout)
+        layout.addWidget(self.params_group)
         
         # 模型选择
         model_layout = QHBoxLayout()
         self.model_combo = QComboBox()
-        self.model_combo.addItems(["AUTO", "JC", "K2P", "HKY", "TVM", "GTR"])
-        self.model_combo.setCurrentText("AUTO")
+        
+        # DNA模型列表（参考IQ-Tree插件的完整列表）
+        dna_models = [
+            ["JC69", "JC"], ["F81"], ["K2P", "K80"], ["HKY85", "HKY"], ["TNe"], ["TN93", "TN"], 
+            ["K3P", "K81"], ["K81u", "K3Pu"], ["TPM2"], ["TPM2u"], ["TPM3"], ["TPM3u"], 
+            ["TIM"], ["TIMe"], ["TIM2"], ["TIM2e"], ["TIM3"], ["TIM3e"], ["TVM"], ["TVMe"], ["SYM"], ["GTR"]
+        ]
+        
+        # 创建模型映射字典
+        self.model_map = {}  # 用于存储别名到主名称的映射
+        model_display_items = ['auto']
+        
+        # 处理DNA模型
+        for model_entry in dna_models:
+            if isinstance(model_entry, list) and len(model_entry) == 2:
+                main_model, alias = model_entry[0], model_entry[1]
+                model_display_items.append(f"{main_model} ({alias})")  # 添加带别名的显示项
+                self.model_map[alias] = main_model  # 存储别名到主名称的映射
+            elif isinstance(model_entry, list) and len(model_entry) == 1:
+                model_display_items.append(model_entry[0])
+            else:
+                model_display_items.append(model_entry)
+        
+        # 添加所有模型到组合框
+        self.model_combo.addItems(model_display_items)
+        self.model_combo.setCurrentText("auto")
         self.model_combo.currentTextChanged.connect(self.on_model_changed)
         model_layout.addWidget(QLabel("Substitution Model:"))
         model_layout.addWidget(self.model_combo)
@@ -419,7 +443,8 @@ class ModelParameterPlugin(BasePlugin):
     
     def on_model_changed(self):
         """Handle model change"""
-        if self.model_combo.currentText() == "AUTO":
+        current_text = self.model_combo.currentText()
+        if current_text == "AUTO" or current_text == "auto":
             self.gamma_checkbox.setEnabled(True)
             self.invar_checkbox.setEnabled(True)
             self.empirical_checkbox.setEnabled(True)
@@ -651,10 +676,16 @@ class ModelParameterPlugin(BasePlugin):
         
         # 模型
         model_text = self.model_combo.currentText()
+        model = model_text
         
-        if model_text != "AUTO":
-            model = model_text
-            
+        # 如果选择了带别名的模型显示项，则提取主模型名称
+        if " (" in model_text and ")" in model_text:
+            model = model_text.split(" (")[0]
+        # 如果是别名，则转换为主名称
+        elif model_text in self.model_map:
+            model = self.model_map[model_text]
+        
+        if model != "AUTO" and model != "auto":
             # 添加模型扩展参数
             if self.gamma_checkbox.isChecked():
                 model += f"+G{self.gamma_spinbox.value()}"
