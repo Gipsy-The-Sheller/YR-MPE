@@ -44,7 +44,7 @@ class PartitionTableModel:
     
     def __init__(self):
         self.partitions: List[PartitionDefinition] = []
-        self.headers = ["Name", "File", "Seq Type", "Model Range", "Selected Model"]
+        self.headers = ["Name", "File", "Model Range", "Selected Model"]
         self.validation_status = {}  # partition_name -> (is_valid, error_message)
     
     def add_partition(self, partition: PartitionDefinition) -> bool:
@@ -165,7 +165,7 @@ class ModelFinderPartitionDialog(QDialog):
         
         # 分区表格
         self.partition_table = QTableWidget()
-        self.partition_table.setColumnCount(5)
+        self.partition_table.setColumnCount(4)
         self.partition_table.setHorizontalHeaderLabels(self.table_model.headers)
         self.partition_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.partition_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -314,17 +314,13 @@ class ModelFinderPartitionDialog(QDialog):
             file_item = QTableWidgetItem(partition.file_path if partition.file_path else "Same file")
             self.partition_table.setItem(row, 1, file_item)
             
-            # Seq Type
-            seq_type_item = QTableWidgetItem(partition.seq_type)
-            self.partition_table.setItem(row, 2, seq_type_item)
-            
             # Model Range
             range_item = QTableWidgetItem(partition.get_display_range())
-            self.partition_table.setItem(row, 3, range_item)
+            self.partition_table.setItem(row, 2, range_item)
             
             # Selected Model
             model_item = QTableWidgetItem(partition.selected_model if partition.selected_model else "Auto")
-            self.partition_table.setItem(row, 4, model_item)
+            self.partition_table.setItem(row, 3, model_item)
         
         # 更新按钮状态
         has_partitions = self.table_model.row_count() > 0
@@ -494,11 +490,6 @@ class PartitionEditDialog(QDialog):
         file_layout.addWidget(self.browse_file_btn)
         form_layout.addRow("File:", file_layout)
         
-        # 序列类型
-        self.seq_type_combo = QComboBox()
-        self.seq_type_combo.addItems(["DNA", "AA", "CODON", "MORPH", "STANDARD"])
-        form_layout.addRow("Seq Type:", self.seq_type_combo)
-        
         # 模型范围
         self.model_range_edit = QLineEdit()
         self.model_range_edit.setPlaceholderText("e.g., 1-1000 or gene1.fas:1-1000")
@@ -515,7 +506,6 @@ class PartitionEditDialog(QDialog):
         if self.partition:
             self.name_edit.setText(self.partition.name)
             self.file_path_edit.setText(self.partition.file_path)
-            self.seq_type_combo.setCurrentText(self.partition.seq_type)
             self.model_range_edit.setText(self.partition.model_range)
             if self.partition.selected_model:
                 self.selected_model_edit.setText(self.partition.selected_model)
@@ -551,7 +541,7 @@ class PartitionEditDialog(QDialog):
         partition = PartitionDefinition(
             name=self.name_edit.text().strip(),
             file_path=self.file_path_edit.text().strip(),
-            seq_type=self.seq_type_combo.currentText(),
+            seq_type="DNA",  # 默认使用DNA类型，seq_type由全局参数控制
             model_range=self.model_range_edit.text().strip(),
             selected_model=self.selected_model_edit.text().strip() or None
         )

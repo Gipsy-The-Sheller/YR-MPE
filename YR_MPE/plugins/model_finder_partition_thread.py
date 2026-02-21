@@ -37,7 +37,7 @@ class ModelFinderPartitionThread(BaseProcessThread):
                  partition_mode: PartitionMode,
                  rcluster: bool = False,
                  rcluster_percent: Optional[int] = None,
-                 extra_params: Optional[List[str]] = None):
+                 global_params: Optional[Dict] = None):
         """
         初始化ModelFinder分区线程
         
@@ -48,13 +48,14 @@ class ModelFinderPartitionThread(BaseProcessThread):
             partition_mode: 分区模式
             rcluster: 是否使用分层聚类加速
             rcluster_percent: 分层聚类百分比
-            extra_params: 额外的命令行参数
+            global_params: 全局参数字典，包含 seq_type, criterion, threads
         """
-        super().__init__(tool_path, input_files, extra_params or [])
+        super().__init__(tool_path, input_files, [])
         self.partitions = partitions
         self.partition_mode = partition_mode
         self.rcluster = rcluster
         self.rcluster_percent = rcluster_percent
+        self.global_params = global_params or {}
     
     def get_tool_name(self) -> str:
         """返回工具名称"""
@@ -95,11 +96,28 @@ class ModelFinderPartitionThread(BaseProcessThread):
         mode_param = self.partition_mode.get_iqtree_parameter()
         cmd.extend([mode_param, partition_file])
         
-        # 添加模型测试参数 (使用MFP+MERGE，IQ-TREE 3推荐)
-        cmd.extend(["-m", "MFP+MERGE"])
+        # 添加序列类型参数（从全局参数获取）
+        seq_type = self.global_params.get('seq_type', 'AUTO')
+        if seq_type != "AUTO":
+            seq_type_code = {"dna": "DNA", "prot": "AA"}[seq_type.lower()]
+            cmd.extend(["-st", seq_type_code])
         
-        # 添加性能优化参数
-        cmd.extend(["-T", "AUTO"])  # 自动检测CPU核心数
+        # 添加准则参数（从全局参数获取）
+        criterion = self.global_params.get('criterion', 'BIC')
+        if criterion == "BIC":
+            pass  # BIC是默认值，不需要额外参数
+        elif criterion == "AICc":
+            cmd.extend(["-AICc"])
+        elif criterion == "AIC":
+            cmd.extend(["-AIC"])
+        
+        # 添加模型集参数
+        cmd.extend(["-mset", "ALL"])  # 测试所有模型
+        
+        # 添加线程数参数（从全局参数获取）
+        threads = self.global_params.get('threads', 1)
+        if threads > 1:
+            cmd.extend(["-nt", str(threads)])
         
         # 可选：添加分层聚类加速（适用于大型数据集）
         if self.rcluster and self.rcluster_percent:
@@ -108,10 +126,6 @@ class ModelFinderPartitionThread(BaseProcessThread):
         # 添加输出前缀
         input_base = os.path.splitext(os.path.basename(input_file))[0]
         cmd.extend(["--prefix", f"{input_base}_partitioned"])
-        
-        # 添加额外参数
-        if self.parameters:
-            cmd.extend(self.parameters)
         
         return cmd
     
