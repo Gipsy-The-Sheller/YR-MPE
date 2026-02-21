@@ -1169,6 +1169,7 @@ class YR_MPEA_Widget(QWidget):
     
     def open_ml_distance_wrapper(self):
         from PyQt5.QtWidgets import QDialog
+        from .methods.dataset_models import ITEM_TYPE_MODEL, SELECTION_STATE_GREEN
         dialog = QDialog()
         dialog.setWindowTitle(f"Distance Calculator [implemented from IQ-TREE] - YR-MPEA")
         dialog.setWindowIcon(self.resource_factory.get_icon("dist.svg"))
@@ -1177,12 +1178,77 @@ class YR_MPEA_Widget(QWidget):
     
         # Prepare import data (使用抽象层)
         import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
+        
+        # 获取最佳模型（只检查green状态的model）
+        best_model = ""
+        # 从dataset_selection_manager获取green状态的model
+        if self.dataset_selection_manager:
+            green_models = [item for item in self.dataset_selection_manager.get_selected_items() 
+                          if item.item_type == ITEM_TYPE_MODEL]
+            if green_models:
+                model_data = green_models[0].data
+                # 处理模型表或单个模型
+                if isinstance(model_data, dict):
+                    if "type" in model_data and model_data["type"] == "model_table" and model_data["data"]:
+                        # 取模型表中的第一个（最佳）模型
+                        best_model = model_data["data"][0]['Model']
+                    elif "Model" in model_data:
+                        # 直接使用单个模型数据
+                        best_model = model_data
     
         # Use PluginFactory to get the plugin
         ml_distance_entry = self.plugin_factory.get_ml_distance_plugin()
         plugin_wrapper = ml_distance_entry.run(import_from=import_from, import_data=import_data)
         plugin_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
         plugin_wrapper.export_distance_result_signal.connect(self.add_distance_matrix_to_workspace)
+    
+        # parse model
+        model_entries = best_model.split("+")
+
+        model_noalias = ['JC69 (JC)', 'F81', 'K2P (K80)', 'HKY85 (HKY)', 'TNe', 'TN93 (TN)', 'K3P (K81)', 
+                        'K81u', 'TPM2', 'TPM2u', 'TPM3', 'TPM3u', 'TIM', 'TIMe', 'TIM2', 'TIM2e', 'TIM3', 
+                        'TIM3e', 'TVM', 'TVMe', 'SYM', 'GTR', 'Blosum62', 'cpREV', 
+                        'Dayhoff', 'DCMut', 'EAL', 'ELM', 'FLAVI', 'FLU', 'GTR20', 'HIVb', 'HIVw', 'JTT', 
+                        'JTTDCMut', 'LG', 'mtART', 'mtMAM', 'mtREV', 'mtZOA', 'mtMet', 'mtVer', 'mtInv', 
+                        'NQ.bird', 'NQ.insect', 'NQ.mammal', 'NQ.pfam', 'NQ.plant', 'NQ.yeast', 'Poisson', 
+                        'PMB', 'Q.bird', 'Q.insect', 'Q.mammal', 'Q.pfam', 'Q.plant', 'Q.yeast', 'rtREV', 'VT', 'WAG']
+        model_alias = {'JC': 'JC69 (JC)', 'JC69': 'JC69 (JC)', 'K80': 'K2P (K80)', 'K2P': 'K2P (K80)', 
+                       'TN': 'TN93 (TN)', 'TN93': 'TN93 (TN)', 'K81': 'K3P (K81)', 'K3P': 'K3P (K81)',
+                       'K81u': 'K81u (K3Pu)', 'K3Pu': 'K81u (K3Pu)', 'HKY': 'HKY85 (HKY)', 'HKY85': 'HKY85 (HKY)'}
+        if model_entries[0] in model_noalias:
+            plugin_wrapper.model_combo.setCurrentText(model_entries[0])
+        elif model_entries[0] in model_alias.keys():
+            plugin_wrapper.model_combo.setCurrentText(model_alias[model_entries[0]])
+        else:
+            plugin_wrapper.model_combo.setCurrentText("auto")
+
+        # Invariable sites?
+        if "I" in model_entries:
+            plugin_wrapper.invar_checkbox.setChecked(True)
+        
+        # empirical?
+        if "F" in model_entries:
+            # plugin_wrapper.empirical_checkbox.setChecked(True)
+            plugin_wrapper.state_freq_combo.setCurrentText("Empirical (+F)")
+        
+        elif "FO" in model_entries:
+            plugin_wrapper.state_freq_combo.setCurrentText("ML-optimized (+FO)")
+
+        elif "FQ" in model_entries:
+            plugin_wrapper.state_freq_combo.setCurrentText("Equal (+FQ)")
+        
+        # FreeRate?
+        if "R" in model_entries:
+            plugin_wrapper.freerate_checkbox.setChecked(True)
+        
+        if "ASC" in model_entries:
+            plugin_wrapper.ascertain_checkbox.setChecked(True)
+        
+        # Gamma Caterories [identify Gx]
+        for item in model_entries[1:]:
+            if item.startswith("G"):
+                plugin_wrapper.gamma_checkbox.setChecked(True)
+                plugin_wrapper.gamma_spinbox.setValue(int(item[1:]))
     
         dialog.layout().addWidget(plugin_wrapper)
         dialog.exec_()        
@@ -1227,6 +1293,7 @@ class YR_MPEA_Widget(QWidget):
     
     def open_iqtree_wrapper(self):
         from PyQt5.QtWidgets import QDialog
+        from .methods.dataset_models import ITEM_TYPE_MODEL, SELECTION_STATE_GREEN
         dialog = QDialog()
         dialog.setWindowTitle(f"IQ-TREE 3 - YR-MPEA")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/iqtree.svg"))
@@ -1236,18 +1303,22 @@ class YR_MPEA_Widget(QWidget):
         # Prepare import data (使用抽象层)
         import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
         
-        # 如果是从 YR_MPEA 导入且有模型信息，则添加到导入数据中
+        # 获取最佳模型（只检查green状态的model）
         best_model = ""
-        if import_from == "YR_MPEA" and import_data and len(self.workspace.items["models"]) >= 1:
-            model_data = self.workspace.items["models"][0]
-            # 处理模型表或单个模型
-            if isinstance(model_data, dict):
-                if "type" in model_data and model_data["type"] == "model_table" and model_data["data"]:
-                    # 取模型表中的第一个（最佳）模型
-                    best_model = model_data["data"][0]['Model']
-                elif "Model" in model_data:
-                    # 直接使用单个模型数据
-                    best_model = model_data
+        # 从dataset_selection_manager获取green状态的model
+        if self.dataset_selection_manager:
+            green_models = [item for item in self.dataset_selection_manager.get_selected_items() 
+                          if item.item_type == ITEM_TYPE_MODEL]
+            if green_models:
+                model_data = green_models[0].data
+                # 处理模型表或单个模型
+                if isinstance(model_data, dict):
+                    if "type" in model_data and model_data["type"] == "model_table" and model_data["data"]:
+                        # 取模型表中的第一个（最佳）模型
+                        best_model = model_data["data"][0]['Model']
+                    elif "Model" in model_data:
+                        # 直接使用单个模型数据
+                        best_model = model_data
         
         # Use PluginFactory to get the plugin entry
         iqtree_entry = self.plugin_factory.get_iqtree_plugin()
