@@ -320,24 +320,25 @@ class SelectionEngine:
             self._set_item_state(item, SELECTION_STATE_NONE, "")
     
     def _set_item_state(self, item: DatasetItem, state: str, reason: str):
-        """
-        设置数据项的选择状态
-        
-        Args:
-            item: 数据项
-            state: 选择状态
-            reason: 选择原因
-        """
-        item.selection_state = state
-        item.selection_reason = reason
-        
-        # 更新选中项集合
-        if state == SELECTION_STATE_GREEN:
-            self.manager.selected_items.add(item.id)
-        elif item.id in self.manager.selected_items:
-            self.manager.selected_items.remove(item.id)
+            """
+            设置数据项的选择状态
     
-    # ========== 特殊选择方法 ==========
+            Args:
+                item: 数据项
+                state: 选择状态
+                reason: 选择原因
+            """
+            item.selection_state = state
+            item.selection_reason = reason
+    
+            # 更新选中项集合
+            if state == SELECTION_STATE_GREEN:
+                self.manager.selected_items.add(item.id)
+            elif item.id in self.manager.selected_items:
+                self.manager.selected_items.remove(item.id)
+    
+            # 保存状态
+            self.manager._save_state()    # ========== 特殊选择方法 ==========
     
     def select_dataset(self, dataset_id: str):
         """

@@ -308,7 +308,8 @@ class DatasetInfo:
             "settings": self.settings,
             "partition_scheme": self.partition_scheme,
             "loci_count": self.loci_count,
-            "taxa_count": self.taxa_count
+            "taxa_count": self.taxa_count,
+            "selection_state": self.selection_state
         }
         
     @classmethod
@@ -330,6 +331,7 @@ class DatasetInfo:
         info.partition_scheme = data.get("partition_scheme")
         info.loci_count = data.get("loci_count", 0)
         info.taxa_count = data.get("taxa_count", 0)
+        info.selection_state = data.get("selection_state", SELECTION_STATE_NONE)
         
         return info
 

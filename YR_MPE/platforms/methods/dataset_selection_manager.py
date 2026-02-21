@@ -434,21 +434,21 @@ class DatasetSelectionManager:
         """保存状态到文件"""
         if self.disable_auto_save:
             return  # 禁用自动保存
-            
+
         if not self.workspace_path:
             return
-        
+
         state_file = os.path.join(self.workspace_path, "dataset_selection_state.json")
-        
+
         state = {
             "version": self.version,
-            "datasets": {dataset_id: dataset.to_dict() 
+            "datasets": {dataset_id: dataset.to_dict()
                         for dataset_id, dataset in self.datasets.items()},
-            "items": {item_id: item.to_dict() 
+            "items": {item_id: item.to_dict()
                      for item_id, item in self.items.items()},
             "selected_items": list(self.selected_items)
         }
-        
+
         with open(state_file, 'w', encoding='utf-8') as f:
             json.dump(state, f, indent=2, ensure_ascii=False)
     
@@ -456,30 +456,30 @@ class DatasetSelectionManager:
         """从文件加载状态"""
         if not self.workspace_path:
             return
-        
+
         state_file = os.path.join(self.workspace_path, "dataset_selection_state.json")
         if not os.path.exists(state_file):
             return
-        
+
         try:
             with open(state_file, 'r', encoding='utf-8') as f:
                 state = json.load(f)
-            
+
             # 加载数据集
             for dataset_id, dataset_data in state.get("datasets", {}).items():
                 self.datasets[dataset_id] = DatasetInfo.from_dict(dataset_data)
-            
+
             # 加载数据项
             for item_id, item_data in state.get("items", {}).items():
                 self.items[item_id] = DatasetItem.from_dict(item_data)
-            
+
             # 加载选中项
             self.selected_items = set(state.get("selected_items", []))
-            
+
             # 重建选择树
             for dataset_id in self.datasets.keys():
                 self._build_selection_tree(dataset_id)
-            
+
         except Exception as e:
             print(f"Failed to load state: {e}")
     

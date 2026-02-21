@@ -116,9 +116,18 @@ class YR_MPEA_Widget(QWidget):
                     self.workspace_manager.clear_current_state()
                     self.workspace_manager.workspace_path = new_workspace_path
                     self.workspace_manager._load_workspace_state()
+                    # 加载数据集选择管理器的状态
+                    self.dataset_selection_manager.workspace_path = new_workspace_path
+                    self.dataset_selection_manager._load_state()
             
             # 设置新工作区
             self.workspace_manager.set_workspace_path(new_workspace_path)
+            
+            # 设置数据集选择管理器的工作区路径
+            self.dataset_selection_manager.set_workspace_path(new_workspace_path)
+            
+            # 加载数据集选择管理器的状态（如果存在的话）
+            self.dataset_selection_manager._load_state()
             
             # 刷新UI
             self._update_workspace_display()
@@ -153,6 +162,12 @@ class YR_MPEA_Widget(QWidget):
         temp_path = self.workspace_manager.workspace_path
         self.workspace_manager.workspace_path = workspace_path
         self.workspace_manager._save_workspace_state()
+        
+        # 保存数据集选择管理器的状态到新工作区
+        temp_dataset_path = self.dataset_selection_manager.workspace_path
+        self.dataset_selection_manager.workspace_path = workspace_path
+        self.dataset_selection_manager._save_state()
+        self.dataset_selection_manager.workspace_path = temp_dataset_path
         
         # 恢复原路径（因为set_workspace_path会再次调用）
         self.workspace_manager.workspace_path = temp_path
@@ -230,6 +245,93 @@ class YR_MPEA_Widget(QWidget):
         if self.workspace_manager.workspace_path:
             return os.path.join(self.workspace_manager.workspace_path, "temp")
         return None
+
+    def _prepare_import_data(self, workspace_item_types=None):
+        """准备插件导入数据（抽象层，统一处理 dataset 和 SingleGeneWorkspace）
+        
+        Args:
+            workspace_item_types: 工作区中的数据项类型列表，例如 ["alignments"]
+                                   如果为 None，则不检查工作区数据
+        
+        Returns:
+            tuple: (import_from, import_data)
+                   import_from: "DATASET_MANAGER" 或 "YR_MPEA" 或 None
+                   import_data: 导入数据的字典或单个数据项
+        """
+        import_from = None
+        import_data = None
+        
+        # 1. 优先检查是否有选中的 dataset items
+        if self.dataset_selection_manager:
+            # 获取状态为 green 的 dataset
+            from .methods.dataset_models import SELECTION_STATE_GREEN
+            green_datasets = [ds for ds in self.dataset_selection_manager.get_all_datasets()
+                             if ds.selection_state == SELECTION_STATE_GREEN]
+
+            if green_datasets:
+                # 获取第一个 green dataset
+                green_dataset = green_datasets[0]
+
+                # 获取该 dataset 中所有 selected 的 items（使用 selected_items 集合）
+                selected_items = []
+                for item_id in green_dataset.items:
+                    # 检查 item_id 是否在 selected_items 集合中
+                    if item_id in self.dataset_selection_manager.selected_items:
+                        item = self.dataset_selection_manager.get_item(item_id)
+                        if item:
+                            selected_items.append(item)
+
+                if selected_items:
+                    import_from = "DATASET_MANAGER"
+                    import_data = {
+                        'dataset_items': selected_items,
+                        'dataset_config': {
+                            'topo_linked': green_dataset.settings.get('topo_linked', False),
+                            'edge_linked': green_dataset.settings.get('edge_linked', False)
+                        }
+                    }
+                    return import_from, import_data
+        
+        # 2. 如果没有选中的 dataset items，则检查 SingleGeneWorkspace
+        if workspace_item_types:
+            workspace_type = type(self.workspace).__name__
+            if workspace_type == "SingleGeneWorkspace":
+                for item_type in workspace_item_types:
+                    if len(self.workspace.items.get(item_type, [])) >= 1:
+                        import_from = "YR_MPEA"
+                        import_data = self.workspace.items[item_type][0]
+                        break
+        
+        return import_from, import_data
+    
+    def _get_dataset_config(self):
+        """获取当前 dataset 的配置信息
+        
+        Returns:
+            dict: 包含 topo_linked 和 edge_linked 的配置字典
+        """
+        if not self.dataset_selection_manager:
+            return {}
+        
+        # 获取当前选中的 dataset
+        selected_items = self.dataset_selection_manager.get_selected_items()
+        if not selected_items:
+            return {}
+        
+        # 获取 dataset ID
+        dataset_id = selected_items[0].dataset_id
+        if not dataset_id:
+            return {}
+        
+        dataset = self.dataset_selection_manager.get_dataset(dataset_id)
+        if not dataset:
+            return {}
+        
+        # 返回配置信息
+        return {
+            'topo_linked': dataset.settings.get('topo_linked', False),
+            'edge_linked': dataset.settings.get('edge_linked', False)
+        }
 
     def _create_workspace_menu(self, workspace_button):
         """创建工作区菜单"""
@@ -664,14 +766,8 @@ class YR_MPEA_Widget(QWidget):
         dialog.setWindowIcon(self.resource_factory.get_icon("software/muscle.svg"))
         dialog.setLayout(QVBoxLayout())
         
-        # Prepare import data
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
+        # Prepare import data (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
         
         # use QDialog to open the muscle5_wrapper
         muscle5_entry = self.plugin_factory.get_muscle5_plugin()
@@ -788,14 +884,8 @@ class YR_MPEA_Widget(QWidget):
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
-                # Prepare import data
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
+        # Prepare import data (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
         
         # use PluginFactory to get the plugin
         clustal_omega_entry = self.plugin_factory.get_clustal_omega_plugin()
@@ -812,13 +902,8 @@ class YR_MPEA_Widget(QWidget):
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
+        # Prepare import data (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
         
         # use PluginFactory to get the plugin
         mafft_entry = self.plugin_factory.get_mafft_plugin()
@@ -836,14 +921,8 @@ class YR_MPEA_Widget(QWidget):
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
-        # Prepare import data
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
+        # Prepare import data (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
         
         # use PluginFactory to get the plugin
         macse_entry = self.plugin_factory.get_macse_plugin()
@@ -860,15 +939,9 @@ class YR_MPEA_Widget(QWidget):
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
-        # Prepare import data
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
-        
+        # Prepare import data (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
+
         # use PluginFactory to get the plugin
         model_finder_entry = self.plugin_factory.get_model_finder_plugin()
         modelfinder_wrapper = model_finder_entry.run(import_from=import_from, import_data=import_data)
@@ -886,14 +959,8 @@ class YR_MPEA_Widget(QWidget):
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
-        # Prepare import data
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
+        # Prepare import data (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
         
         # use PluginFactory to get the plugin
         model_parameter_entry = self.plugin_factory.get_model_parameter_plugin()
@@ -1032,15 +1099,9 @@ class YR_MPEA_Widget(QWidget):
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
-        # Prepare import data
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
-        
+        # Prepare import data (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
+
         # use PluginFactory to get the plugin
         trimal_entry = self.plugin_factory.get_trimal_plugin()
         trimal_wrapper = trimal_entry.run(import_from=import_from, import_data=import_data)
@@ -1056,15 +1117,9 @@ class YR_MPEA_Widget(QWidget):
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
-        # Prepare import data
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
-        
+        # Prepare import data (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
+
         # use PluginFactory to get the plugin
         gblocks_entry = self.plugin_factory.get_gblocks_plugin()
         gblocks_wrapper = gblocks_entry.run(import_from=import_from, import_data=import_data)
@@ -1119,25 +1174,18 @@ class YR_MPEA_Widget(QWidget):
         dialog.setWindowIcon(self.resource_factory.get_icon("dist.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
-
-        # Prepare import data
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
-
+    
+        # Prepare import data (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
+    
         # Use PluginFactory to get the plugin
         ml_distance_entry = self.plugin_factory.get_ml_distance_plugin()
         plugin_wrapper = ml_distance_entry.run(import_from=import_from, import_data=import_data)
         plugin_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
         plugin_wrapper.export_distance_result_signal.connect(self.add_distance_matrix_to_workspace)
-
+    
         dialog.layout().addWidget(plugin_wrapper)
-        dialog.exec_()
-        
+        dialog.exec_()        
     def open_uncorrected_distance_wrapper(self):
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
@@ -1146,14 +1194,8 @@ class YR_MPEA_Widget(QWidget):
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
-        # Prepare import data
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
+        # Prepare import data (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
 
         # Use PluginFactory to get the plugin
         p_distance_entry = self.plugin_factory.get_p_distance_plugin()
@@ -1173,14 +1215,8 @@ class YR_MPEA_Widget(QWidget):
         dialog.setMinimumSize(900, 700)
         dialog.setLayout(QVBoxLayout())
 
-        # Prepare import data
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
+        # Prepare import data (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
 
         # Use PluginFactory to get the plugin
         saturation_entry = self.plugin_factory.get_substitution_saturation_plugin()
@@ -1197,27 +1233,21 @@ class YR_MPEA_Widget(QWidget):
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
-        # Prepare import data
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
+        # Prepare import data (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
+        
+        # 如果是从 YR_MPEA 导入且有模型信息，则添加到导入数据中
         best_model = ""
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
-
-                # 如果工作区中有模型信息，则添加到导入数据中
-                if len(self.workspace.items["models"]) >= 1:
-                    model_data = self.workspace.items["models"][0]
-                    # 处理模型表或单个模型
-                    if isinstance(model_data, dict):
-                        if "type" in model_data and model_data["type"] == "model_table" and model_data["data"]:
-                            # 取模型表中的第一个（最佳）模型
-                            best_model = model_data["data"][0]['Model']
-                        elif "Model" in model_data:
-                            # 直接使用单个模型数据
-                            best_model = model_data
+        if import_from == "YR_MPEA" and import_data and len(self.workspace.items["models"]) >= 1:
+            model_data = self.workspace.items["models"][0]
+            # 处理模型表或单个模型
+            if isinstance(model_data, dict):
+                if "type" in model_data and model_data["type"] == "model_table" and model_data["data"]:
+                    # 取模型表中的第一个（最佳）模型
+                    best_model = model_data["data"][0]['Model']
+                elif "Model" in model_data:
+                    # 直接使用单个模型数据
+                    best_model = model_data
         
         # Use PluginFactory to get the plugin entry
         iqtree_entry = self.plugin_factory.get_iqtree_plugin()
@@ -1729,14 +1759,8 @@ class YR_MPEA_Widget(QWidget):
         dialog.setWindowModality(Qt.NonModal)  # 设置为非模态窗口
         dialog.setAttribute(Qt.WA_DeleteOnClose, False)  # 禁止自动删除
         
-        # 准备导入数据
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
+        # 准备导入数据 (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
         
         # 使用PluginFactory获取MrBayes插件
         mrbayes_entry = self.plugin_factory.get_mrbayes_plugin()
@@ -1779,14 +1803,8 @@ class YR_MPEA_Widget(QWidget):
         dialog.setWindowModality(Qt.NonModal)  # 设置为非模态窗口
         dialog.setAttribute(Qt.WA_DeleteOnClose, False)  # 禁止自动删除
         
-        # 准备导入数据
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
+        # 准备导入数据 (使用抽象层)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
         
         # 使用PluginFactory获取PhyloBayes插件
         phylobayes_entry = self.plugin_factory.get_phylobayes_plugin()
@@ -1972,6 +1990,9 @@ class SingleGeneWorkspace(QWidget):
         
         for dataset in self.dataset_selection_manager.get_all_datasets():
             dataset.selection_state = SELECTION_STATE_NONE
+        
+        # 保存状态
+        self.dataset_selection_manager._save_state()
     
     def _on_item_double_click(self, item_id: str):
         """处理数据项双击事件"""
@@ -2314,11 +2335,13 @@ class SingleGeneWorkspace(QWidget):
         
         # 检查是否已经有这个数据集在管理器中
         dataset_info = None
+        dataset_id = None
         if self.dataset_selection_manager:
             # 查找是否已存在同名数据集
             for ds in self.dataset_selection_manager.get_all_datasets():
                 if ds.name == dataset_name:
                     dataset_info = ds
+                    dataset_id = ds.id
                     break
         
         # 如果不存在，创建新的数据集
@@ -2337,6 +2360,13 @@ class SingleGeneWorkspace(QWidget):
                     # 这里需要将旧格式的 item 转换为 DatasetItem
                     # 暂时跳过，因为需要更复杂的转换逻辑
                     pass
+        
+        # 保存 dataset_id 到 dataset 对象中，以便后续使用
+        if dataset_id:
+            if isinstance(dataset, dict):
+                dataset['dataset_id'] = dataset_id
+            else:
+                setattr(dataset, 'dataset_id', dataset_id)
         
         # 创建 DatasetButton
         if dataset_info:
@@ -2397,6 +2427,9 @@ class SingleGeneWorkspace(QWidget):
             # 使用 selection_engine 选择整个数据集（设置为蓝色上下文高亮）
             self.dataset_selection_manager.selection_engine.select_dataset(dataset_id)
         
+        # 保存状态
+        self.dataset_selection_manager._save_state()
+        
         # 更新所有按钮的样式
         self._update_all_button_styles()
     
@@ -2410,13 +2443,14 @@ class SingleGeneWorkspace(QWidget):
         if dataset_info:
             # 构造 dataset 对象（兼容旧的接口）
             class DatasetObject:
-                def __init__(self, dataset_info):
+                def __init__(self, dataset_info, dataset_id):
                     self.dataset_name = dataset_info.name
+                    self.dataset_id = dataset_id  # 添加 dataset_id 属性
                     self.items = []
                     self.partition_scheme = None
                     self.summary = {}
             
-            dataset = DatasetObject(dataset_info)
+            dataset = DatasetObject(dataset_info, dataset_id)
             self.open_dataset_manager_for_dataset(dataset)
     
     def refresh_workspace_layout(self):
@@ -2536,36 +2570,61 @@ class SingleGeneWorkspace(QWidget):
         try:
             # 直接导入并实例化 DatasetManager 类
             from .methods.dataset_manager import DatasetManager
-            
+
+            # 获取 dataset_id
+            dataset_id = None
+            if isinstance(dataset, dict):
+                dataset_id = dataset.get('dataset_id')
+            else:
+                dataset_id = getattr(dataset, 'dataset_id', None)
+
             # 创建 DatasetManager 实例，传递必要的参数
             dataset_manager = DatasetManager(
                 dataset_name=getattr(dataset, 'dataset_name', 'Dataset'),
                 plugin_factory=self.parent_window.plugin_factory,
                 workspace=self
             )
-            
+
+            # 设置当前 dataset_id（用于保存和恢复设置）
+            if dataset_id:
+                self.current_dataset_id = dataset_id
+
+                # 从 DatasetSelectionManager 加载 items（优先）
+                if self.dataset_selection_manager:
+                    ds = self.dataset_selection_manager.get_dataset(dataset_id)
+                    if ds:
+                        # 清空表格
+                        dataset_manager.table.setRowCount(0)
+                        dataset_manager.dataset_items = []
+
+                        # 加载所有 items
+                        for item_id in ds.items:
+                            item = self.dataset_selection_manager.get_item(item_id)
+                            if item:
+                                # 转换为旧架构的 DatasetItem
+                                from .methods.dataset_manager import DatasetItem as OldDatasetItem
+                                old_item = OldDatasetItem()
+                                old_item.loci_name = item.loci_name
+                                old_item.file_path = item.file_path
+                                old_item.length = item.length
+                                old_item.sequence_count = item.sequence_count
+                                old_item.is_aligned = item.is_aligned
+                                old_item.selected = (item.selection_state == SELECTION_STATE_GREEN)
+                                old_item.sequences = item.sequences
+
+                                dataset_manager.dataset_items.append(old_item)
+                                dataset_manager.add_dataset_to_table(old_item)
+
             # 保存引用防止被垃圾回收
             if not hasattr(self.parent_window, 'dataset_managers'):
                 self.parent_window.dataset_managers = []
             self.parent_window.dataset_managers.append(dataset_manager)
-            
+
             dialog = dataset_manager
-            
-            # 如果dataset包含items数据，加载到dialog中
-            if hasattr(dataset, 'items') and dataset.items:
-                dialog.dataset_items = dataset.items
-                # 重新填充表格
-                dialog.table.setRowCount(0)
-                for item in dataset.items:
-                    dialog.add_dataset_to_table(item)
-            
+
             # 执行对话框
             dialog.show()  # 改为非模态显示
-            # 无论用户如何关闭对话框，都保存数据
-            # 因为DatasetManager没有明确的"Cancel"按钮
-            if hasattr(dialog, 'dataset_items'):
-                dataset.items = dialog.dataset_items
-                    
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open Dataset Manager: {str(e)}")
     

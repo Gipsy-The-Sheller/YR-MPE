@@ -5,8 +5,8 @@ Dataset Manager Module
 import os
 import csv
 from typing import List, Dict, Optional
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, 
-                            QTableWidgetItem, QPushButton, QCheckBox, QLabel, 
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
+                            QTableWidgetItem, QPushButton, QCheckBox, QLabel,
                             QFileDialog, QMessageBox, QMenuBar, QMenu, QAction,
                             QRadioButton, QButtonGroup, QGroupBox, QWidget)
 from PyQt5.QtCore import Qt, pyqtSignal
@@ -16,6 +16,7 @@ from Bio import SeqIO
 # 添加新的导入
 from .export_partitioned_nexus import export_partitioned_nexus
 from .import_partitioned_nexus import import_partitioned_nexus
+from .dataset_models import SELECTION_STATE_GREEN, SELECTION_STATE_NONE
 
 
 class DatasetItem:
@@ -195,6 +196,72 @@ class DatasetManager(QDialog):
         table_layout.addWidget(self.table)
         
         main_layout.addLayout(table_layout)
+        
+        # 恢复保存的设置
+        self._restore_settings()
+        
+    def _restore_settings(self):
+        """从 dataset.settings 恢复保存的设置"""
+        if not self.workspace or not hasattr(self.workspace, 'current_dataset_id'):
+            return
+        
+        dataset_id = self.workspace.current_dataset_id
+        if not dataset_id or not self.workspace.dataset_selection_manager:
+            return
+        
+        dataset = self.workspace.dataset_selection_manager.get_dataset(dataset_id)
+        if not dataset:
+            return
+        
+        # 恢复 topo_linked 和 edge_linked 设置
+        if 'topo_linked' in dataset.settings:
+            self.topo_linked_radio.setChecked(dataset.settings['topo_linked'])
+            self.topo_unlinked_radio.setChecked(not dataset.settings['topo_linked'])
+        
+        if 'edge_linked' in dataset.settings:
+            self.edge_linked_radio.setChecked(dataset.settings['edge_linked'])
+            self.edge_unlinked_radio.setChecked(not dataset.settings['edge_linked'])
+        
+        # 恢复 dataset_items
+        if 'dataset_items' in dataset.settings:
+            saved_items = dataset.settings['dataset_items']
+            for item_data in saved_items:
+                # 创建 DatasetItem
+                item = DatasetItem()
+                item.selected = item_data.get('selected', False)
+                item.loci_name = item_data.get('loci_name', '')
+                item.length = item_data.get('length', 0)
+                item.sequence_count = item_data.get('sequence_count', 0)
+                item.is_aligned = item_data.get('is_aligned', False)
+                item.file_path = item_data.get('file_path', '')
+                item.name = item.loci_name
+                
+                # 处理序列数据
+                sequences_data = item_data.get('sequences')
+                if sequences_data is None:
+                    # 从文件加载
+                    if item.file_path and os.path.exists(item.file_path):
+                        try:
+                            from Bio import SeqIO
+                            sequences = list(SeqIO.parse(item.file_path, 'fasta'))
+                            if sequences:
+                                item.sequences = sequences
+                        except Exception as e:
+                            print(f"Failed to load sequences from {item.file_path}: {e}")
+                elif sequences_data:
+                    # 从保存的序列数据恢复
+                    item.sequences = []
+                    from Bio.SeqRecord import SeqRecord
+                    for seq_dict in sequences_data:
+                        seq = SeqRecord(
+                            seq_dict['sequence'],
+                            id=seq_dict['id'],
+                            description=seq_dict.get('description', '')
+                        )
+                        item.sequences.append(seq)
+                
+                self.dataset_items.append(item)
+                self.add_dataset_to_table(item)
         
     def on_topo_linked_toggled(self, checked: bool):
         """Topology链接状态切换时的处理"""
@@ -765,7 +832,89 @@ class DatasetManager(QDialog):
             self.table.removeRow(row)
             
     def closeEvent(self, event):
-        """关闭事件处理"""
-        # 不再自动添加到workspace，因为现在是在创建时就添加
+        """关闭事件处理 - 保存设置"""
+        if self.workspace and hasattr(self.workspace, 'current_dataset_id'):
+            dataset_id = self.workspace.current_dataset_id
+
+            if dataset_id and self.workspace.dataset_selection_manager:
+                dataset = self.workspace.dataset_selection_manager.get_dataset(dataset_id)
+
+                if dataset:
+                    # 保存 topo_linked 和 edge_linked 设置
+                    dataset.settings['topo_linked'] = self.topo_linked_radio.isChecked()
+                    dataset.settings['edge_linked'] = self.edge_linked_radio.isChecked()
+
+                    # 同步 items 到 DatasetSelectionManager
+                    if hasattr(self, 'dataset_items'):
+                        for item in self.dataset_items:
+                            # 创建 DatasetItem（新架构）
+                            from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT
+
+                            new_item = NewDatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
+                            new_item.loci_name = item.loci_name
+                            new_item.file_path = item.file_path
+                            new_item.length = item.length
+                            new_item.sequence_count = item.sequence_count
+                            new_item.is_aligned = item.is_aligned
+
+                            # 转换序列数据
+                            if hasattr(item, 'sequences') and item.sequences:
+                                new_item.sequences = item.sequences
+
+                            # 设置选择状态
+                            if item.selected:
+                                new_item.selection_state = SELECTION_STATE_GREEN
+                            else:
+                                new_item.selection_state = SELECTION_STATE_NONE
+
+                            # 添加到 DatasetSelectionManager
+                            success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
+
+                            # 如果 item 被选中，手动添加到 selected_items 集合
+                            if item.selected and success:
+                                self.workspace.dataset_selection_manager.selected_items.add(new_item.id)
+
+                    # 保存到 settings（保留向后兼容）
+                    dataset.settings['dataset_items'] = []
+                    for item in self.dataset_items:
+                        # 如果有文件路径且文件存在，只保存文件路径
+                        # 否则保存序列数据
+                        if item.file_path and os.path.exists(item.file_path):
+                            item_data = {
+                                'selected': item.selected,
+                                'loci_name': item.loci_name,
+                                'length': item.length,
+                                'sequence_count': item.sequence_count,
+                                'is_aligned': item.is_aligned,
+                                'file_path': item.file_path,
+                                'sequences': None  # 从文件加载
+                            }
+                        else:
+                            # 没有文件路径或文件不存在，保存序列数据
+                            sequences_dict = []
+                            if hasattr(item, 'sequences') and item.sequences:
+                                for seq in item.sequences:
+                                    sequences_dict.append({
+                                        'id': getattr(seq, 'id', getattr(seq, 'name', 'Unknown')),
+                                        'description': getattr(seq, 'description', ''),
+                                        'sequence': str(seq.seq) if hasattr(seq, 'seq') else str(seq)
+                                    })
+
+                            item_data = {
+                                'selected': item.selected,
+                                'loci_name': item.loci_name,
+                                'length': item.length,
+                                'sequence_count': item.sequence_count,
+                                'is_aligned': item.is_aligned,
+                                'file_path': item.file_path,
+                                'sequences': sequences_dict  # 保存序列数据
+                            }
+
+                        dataset.settings['dataset_items'].append(item_data)
+
+                    # 保存状态
+                    if self.workspace.dataset_selection_manager.workspace_path:
+                        self.workspace.dataset_selection_manager._save_state()
+
         # 继续正常的关闭流程
         super().closeEvent(event)
