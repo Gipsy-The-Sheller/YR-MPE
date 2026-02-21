@@ -584,8 +584,13 @@ class MrBayesPlugin(BasePlugin):
     export_phylogeny_result_signal = pyqtSignal(dict)  # 导出系统发育树结果信号
     export_chain_result_signal = pyqtSignal(object)  # 导出MCMC链文件信号
     
-    def __init__(self, import_from=None, import_data=None, workdir=None):
+    def __init__(self, import_from=None, import_data=None, workdir=None, imported_model=None, model_conversion_result=None, seq_type="DNA"):
         super().__init__(import_from, import_data, workdir=workdir)
+        
+        # 存储导入的模型信息
+        self.imported_model = imported_model
+        self.model_conversion_result = model_conversion_result
+        self.imported_seq_type = seq_type
         
         # 初始化变量
         if not hasattr(self, 'imported_files'):
@@ -914,6 +919,77 @@ class MrBayesPlugin(BasePlugin):
                 self.file_path_edit.setText(self.imported_files[0])
             else:
                 self.file_path_edit.setText(f"{len(self.imported_files)} files selected")
+        
+        # 应用导入的模型参数
+        self._apply_imported_model()
+    
+    def _apply_imported_model(self):
+        """应用导入的模型参数到UI"""
+        if not self.imported_model:
+            return
+        
+        from .partition_mode import MrBayesModelConverter
+        
+        # 解析模型
+        base_model, params = MrBayesModelConverter.parse_modelfinder_model(self.imported_model)
+        
+        if self.imported_seq_type.upper() == "DNA":
+            # DNA模型
+            if self.model_conversion_result and isinstance(self.model_conversion_result, dict):
+                # 应用转换后的参数
+                mrbayes_params = self.model_conversion_result
+                
+                # 设置数据类型为DNA
+                self.datatype_combo.setCurrentIndex(0)
+                
+                # 设置nst
+                if "nst" in mrbayes_params:
+                    self.dna_rate_num_spinbox.setValue(mrbayes_params["nst"])
+                
+                # 设置statefreq
+                if "statefreq" in mrbayes_params:
+                    statefreq = mrbayes_params["statefreq"]
+                    if statefreq == "fixed(equal)":
+                        self.state_freq_pr_combo_dna.setCurrentIndex(1)
+                    elif statefreq == "fixed(empirical)":
+                        self.state_freq_pr_combo_dna.setCurrentIndex(2)
+                    else:  # dirichlet
+                        self.state_freq_pr_combo_dna.setCurrentIndex(0)
+                
+                # 设置速率异质性
+                if "rates" in mrbayes_params:
+                    rates = mrbayes_params["rates"]
+                    if rates == "equal":
+                        self.rate_hetero_combo.setCurrentIndex(0)
+                    elif rates == "gamma":
+                        self.rate_hetero_combo.setCurrentIndex(1)
+                    elif rates == "invgamma":
+                        self.rate_hetero_combo.setCurrentIndex(2)
+                    elif rates == "propinv":
+                        self.rate_hetero_combo.setCurrentIndex(3)
+                    elif rates == "lnorm":
+                        self.rate_hetero_combo.setCurrentIndex(4)
+                    elif rates == "adgamma":
+                        self.rate_hetero_combo.setCurrentIndex(5)
+                
+                # 设置gamma类别数
+                if "ngammacat" in mrbayes_params:
+                    self.gamma_categories_spinbox.setValue(mrbayes_params["ngammacat"])
+        
+        elif self.imported_seq_type.upper() == "PROTEIN":
+            # 蛋白质模型
+            if self.model_conversion_result:
+                # 设置数据类型为Protein
+                self.datatype_combo.setCurrentIndex(1)
+                
+                # 设置氨基酸模型
+                if self.model_conversion_result == "mixed":
+                    self.prot_model_combo.setCurrentText("mixed")
+                else:
+                    # 查找模型在组合框中的位置
+                    model_index = self.prot_model_combo.findText(self.model_conversion_result, Qt.MatchFixedString)
+                    if model_index >= 0:
+                        self.prot_model_combo.setCurrentIndex(model_index)
 
     # ============ MrBayesPlugin 业务逻辑方法 ============
     
@@ -1843,5 +1919,5 @@ class MrBayesPluginEntry:
         self.plugin_path = plugin_path
         # self.config = config_loader()
     
-    def run(self, import_from=None, import_data=None, workdir=None):
-        return MrBayesPlugin(import_from, import_data, workdir=workdir)
+    def run(self, import_from=None, import_data=None, workdir=None, imported_model=None, model_conversion_result=None, seq_type="DNA"):
+        return MrBayesPlugin(import_from, import_data, workdir=workdir, imported_model=imported_model, model_conversion_result=model_conversion_result, seq_type=seq_type)

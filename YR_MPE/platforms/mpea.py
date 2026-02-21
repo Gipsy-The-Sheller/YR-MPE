@@ -1820,8 +1820,11 @@ class YR_MPEA_Widget(QWidget):
             self.mrbayes_dialog.deleteLater()
         
         # 创建MrBayes对话框（非模态窗口，允许后台运行）
-        from PyQt5.QtWidgets import QDialog
+        from PyQt5.QtWidgets import QDialog, QMessageBox
         from PyQt5.QtCore import Qt
+        from .methods.dataset_models import ITEM_TYPE_MODEL, SELECTION_STATE_GREEN
+        from ..plugins.partition_mode import MrBayesModelConverter
+        
         dialog = QDialog(self)  # 设置父窗口
         dialog.setWindowTitle("MrBayes3-MPI-BEAGLE - YR-MPEA")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/mrbayes.svg"))
@@ -1833,13 +1836,68 @@ class YR_MPEA_Widget(QWidget):
         # 准备导入数据 (使用抽象层)
         import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
         
+        # 获取最佳模型（只检查green状态的model）
+        best_model = ""
+        seq_type = "DNA"  # 默认DNA
+        # 从dataset_selection_manager获取green状态的model
+        if self.dataset_selection_manager:
+            green_models = [item for item in self.dataset_selection_manager.get_selected_items() 
+                          if item.item_type == ITEM_TYPE_MODEL]
+            if green_models:
+                model_data = green_models[0].data
+                # 处理模型表或单个模型
+                if isinstance(model_data, dict):
+                    if "type" in model_data and model_data["type"] == "model_table" and model_data["data"]:
+                        # 取模型表中的第一个（最佳）模型
+                        best_model = model_data["data"][0]['Model']
+                        # 尝试获取序列类型
+                        if "Data" in model_data["data"][0]:
+                            seq_type = model_data["data"][0]['Data']
+                    elif "Model" in model_data:
+                        # 直接使用单个模型数据
+                        best_model = model_data
+                        # 尝试获取序列类型
+                        if "Data" in model_data:
+                            seq_type = model_data['Data']
+        
+        # 处理蛋白质模型的转换和警告
+        model_conversion_result = None
+        if best_model:
+            if seq_type.upper() == "PROTEIN":
+                model_conversion_result, warnings = MrBayesModelConverter.convert_model_to_mrbayes(
+                    best_model, seq_type
+                )
+                
+                if warnings:
+                    # 显示警告对话框
+                    warning_text = "\n".join(warnings)
+                    warning_text += "\n\n请选择："
+                    
+                    reply = QMessageBox.warning(
+                        self,
+                        "模型转换警告",
+                        warning_text,
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    
+                    if reply == QMessageBox.Yes:
+                        # 选项1: 使用GTR
+                        model_conversion_result = "gtr"
+                    else:
+                        # 选项2: 使用mixed
+                        model_conversion_result = "mixed"
+        
         # 使用PluginFactory获取MrBayes插件
         mrbayes_entry = self.plugin_factory.get_mrbayes_plugin()
         workdir = self.get_workdir()
         mrbayes_wrapper = mrbayes_entry.run(
             import_from=import_from, 
             import_data=import_data,
-            workdir=workdir
+            workdir=workdir,
+            imported_model=best_model,
+            model_conversion_result=model_conversion_result,
+            seq_type=seq_type
         )
         
         # 连接信号
