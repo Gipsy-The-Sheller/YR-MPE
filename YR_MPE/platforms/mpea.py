@@ -258,19 +258,24 @@ class YR_MPEA_Widget(QWidget):
                    import_from: "DATASET_MANAGER" 或 "YR_MPEA" 或 None
                    import_data: 导入数据的字典或单个数据项
         """
+        print(f"[DEBUG] _prepare_import_data called with workspace_item_types: {workspace_item_types}")
         import_from = None
         import_data = None
         
         # 1. 优先检查是否有选中的 dataset items
         if self.dataset_selection_manager:
+            print("[DEBUG] Checking dataset_selection_manager")
             # 获取状态为 green 的 dataset
             from .methods.dataset_models import SELECTION_STATE_GREEN
             green_datasets = [ds for ds in self.dataset_selection_manager.get_all_datasets()
                              if ds.selection_state == SELECTION_STATE_GREEN]
 
+            print(f"[DEBUG] Found {len(green_datasets)} green datasets")
+            
             if green_datasets:
                 # 获取第一个 green dataset
                 green_dataset = green_datasets[0]
+                print(f"[DEBUG] Using green dataset: {green_dataset.name} ({green_dataset.id})")
 
                 # 获取该 dataset 中所有 selected 的 items（使用 selected_items 集合）
                 selected_items = []
@@ -281,6 +286,8 @@ class YR_MPEA_Widget(QWidget):
                         if item:
                             selected_items.append(item)
 
+                print(f"[DEBUG] Found {len(selected_items)} selected items in green dataset")
+                
                 if selected_items:
                     import_from = "DATASET_MANAGER"
                     import_data = {
@@ -290,18 +297,27 @@ class YR_MPEA_Widget(QWidget):
                             'edge_linked': green_dataset.settings.get('edge_linked', False)
                         }
                     }
+                    print(f"[DEBUG] Returning DATASET_MANAGER with {len(selected_items)} items")
                     return import_from, import_data
+            else:
+                print("[DEBUG] No green datasets found")
         
         # 2. 如果没有选中的 dataset items，则检查 SingleGeneWorkspace
         if workspace_item_types:
+            print("[DEBUG] Checking SingleGeneWorkspace")
             workspace_type = type(self.workspace).__name__
+            print(f"[DEBUG] Workspace type: {workspace_type}")
+            
             if workspace_type == "SingleGeneWorkspace":
                 for item_type in workspace_item_types:
+                    print(f"[DEBUG] Checking item_type: {item_type}")
                     if len(self.workspace.items.get(item_type, [])) >= 1:
                         import_from = "YR_MPEA"
                         import_data = self.workspace.items[item_type][0]
+                        print(f"[DEBUG] Returning YR_MPEA with item from {item_type}")
                         break
         
+        print(f"[DEBUG] Returning import_from={import_from}, import_data={'None' if import_data is None else 'has data'}")
         return import_from, import_data
     
     def _get_dataset_config(self):
@@ -2717,32 +2733,13 @@ class SingleGeneWorkspace(QWidget):
             # 设置当前 dataset_id（用于保存和恢复设置）
             if dataset_id:
                 self.current_dataset_id = dataset_id
-
-                # 从 DatasetSelectionManager 加载 items（优先）
+                
+                # 设置dataset的selection_state为GREEN，表示当前正在编辑
                 if self.dataset_selection_manager:
                     ds = self.dataset_selection_manager.get_dataset(dataset_id)
                     if ds:
-                        # 清空表格
-                        dataset_manager.table.setRowCount(0)
-                        dataset_manager.dataset_items = []
-
-                        # 加载所有 items
-                        for item_id in ds.items:
-                            item = self.dataset_selection_manager.get_item(item_id)
-                            if item:
-                                # 转换为旧架构的 DatasetItem
-                                from .methods.dataset_manager import DatasetItem as OldDatasetItem
-                                old_item = OldDatasetItem()
-                                old_item.loci_name = item.loci_name
-                                old_item.file_path = item.file_path
-                                old_item.length = item.length
-                                old_item.sequence_count = item.sequence_count
-                                old_item.is_aligned = item.is_aligned
-                                old_item.selected = (item.selection_state == SELECTION_STATE_GREEN)
-                                old_item.sequences = item.sequences
-
-                                dataset_manager.dataset_items.append(old_item)
-                                dataset_manager.add_dataset_to_table(old_item)
+                        ds.selection_state = SELECTION_STATE_GREEN
+                        print(f"[DEBUG] Set dataset {ds.name} ({dataset_id}) selection_state to GREEN")
 
             # 保存引用防止被垃圾回收
             if not hasattr(self.parent_window, 'dataset_managers'):

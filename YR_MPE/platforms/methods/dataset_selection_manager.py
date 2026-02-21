@@ -448,6 +448,13 @@ class DatasetSelectionManager:
                      for item_id, item in self.items.items()},
             "selected_items": list(self.selected_items)
         }
+        
+        print(f"[DEBUG] _save_state called")
+        print(f"[DEBUG] Saving {len(self.datasets)} datasets, {len(self.items)} items")
+        for dataset_id, dataset in self.datasets.items():
+            if 'dataset_items' in dataset.settings:
+                print(f"[DEBUG] Dataset {dataset_id} has {len(dataset.settings['dataset_items'])} saved items")
+        print(f"[DEBUG] Saving to: {state_file}")
 
         with open(state_file, 'w', encoding='utf-8') as f:
             json.dump(state, f, indent=2, ensure_ascii=False)
@@ -462,26 +469,74 @@ class DatasetSelectionManager:
             return
 
         try:
+            print(f"[DEBUG] _load_state called")
+            print(f"[DEBUG] Loading from: {state_file}")
+            
             with open(state_file, 'r', encoding='utf-8') as f:
                 state = json.load(f)
 
             # 加载数据集
             for dataset_id, dataset_data in state.get("datasets", {}).items():
                 self.datasets[dataset_id] = DatasetInfo.from_dict(dataset_data)
+                if 'dataset_items' in dataset_data.get('settings', {}):
+                    print(f"[DEBUG] Dataset {dataset_id} has {len(dataset_data['settings']['dataset_items'])} items in settings")
+                else:
+                    print(f"[DEBUG] Dataset {dataset_id} has no 'dataset_items' in settings")
 
             # 加载数据项
             for item_id, item_data in state.get("items", {}).items():
                 self.items[item_id] = DatasetItem.from_dict(item_data)
 
-            # 加载选中项
-            self.selected_items = set(state.get("selected_items", []))
+            print(f"[DEBUG] Loaded {len(self.datasets)} datasets, {len(self.items)} items from JSON")
+
+            # 如果JSON中没有items，尝试从dataset.settings中恢复
+            if len(self.items) == 0:
+                print("[DEBUG] No items in JSON, trying to restore from dataset.settings")
+                for dataset_id, dataset in self.datasets.items():
+                    if 'dataset_items' in dataset.settings:
+                        saved_items = dataset.settings['dataset_items']
+                        print(f"[DEBUG] Restoring {len(saved_items)} items from dataset.settings for {dataset_id}")
+                        
+                        from .dataset_models import ITEM_TYPE_ALIGNMENT
+                        for item_data in saved_items:
+                            # 创建新的DatasetItem
+                            new_item = DatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
+                            new_item.dataset_id = dataset_id
+                            new_item.loci_name = item_data.get('loci_name', '')
+                            new_item.file_path = item_data.get('file_path', '')
+                            new_item.length = item_data.get('length', 0)
+                            new_item.sequence_count = item_data.get('sequence_count', 0)
+                            new_item.is_aligned = item_data.get('is_aligned', False)
+                            
+                            # 设置选择状态
+                            if item_data.get('selected', False):
+                                new_item.selection_state = SELECTION_STATE_GREEN
+                                self.selected_items.add(new_item.id)
+                            else:
+                                new_item.selection_state = SELECTION_STATE_NONE
+                            
+                            # 添加到items
+                            self.items[new_item.id] = new_item
+                            
+                            # 添加到dataset.items
+                            dataset.add_item(new_item.id)
+                            
+                            print(f"[DEBUG] Restored item: {new_item.loci_name}, selected: {item_data.get('selected', False)}")
+
+            # 加载选中项（如果JSON中有）
+            if "selected_items" in state:
+                self.selected_items = set(state.get("selected_items", []))
+            
+            print(f"[DEBUG] Final: {len(self.datasets)} datasets, {len(self.items)} items, {len(self.selected_items)} selected")
 
             # 重建选择树
             for dataset_id in self.datasets.keys():
                 self._build_selection_tree(dataset_id)
 
         except Exception as e:
-            print(f"Failed to load state: {e}")
+            print(f"[DEBUG] Failed to load state: {e}")
+            import traceback
+            traceback.print_exc()
     
     def export_to_dict(self) -> Dict[str, Any]:
         """导出为字典格式"""
