@@ -238,6 +238,17 @@ class DatasetManager(QDialog):
         if 'dataset_items' in dataset.settings:
             saved_items = dataset.settings['dataset_items']
             print(f"[DEBUG] Found {len(saved_items)} saved items")
+            print(f"[DEBUG] Dataset items before restore: {len(dataset.items)}")
+            
+            # 清空dataset.items
+            dataset.items.clear()
+            
+            # 禁用自动保存，避免在恢复过程中保存不完整的数据
+            original_disable_auto_save = self.workspace.dataset_selection_manager.disable_auto_save
+            self.workspace.dataset_selection_manager.disable_auto_save = True
+            
+            from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT
+            
             for item_data in saved_items:
                 print(f"[DEBUG] Restoring item: {item_data.get('loci_name')}, is_aligned: {item_data.get('is_aligned')}, selected: {item_data.get('selected')}")
                 # 创建 DatasetItem（本地类）
@@ -277,22 +288,40 @@ class DatasetManager(QDialog):
                 self.dataset_items.append(item)
                 self.add_dataset_to_table(item)
                 
-                # 更新Dataset Selection Manager中对应item的选择状态
-                # 查找相同loci_name的item
-                for ds_item in self.workspace.dataset_selection_manager.items.values():
-                    if ds_item.loci_name == item.loci_name:
-                        if item.selected:
-                            ds_item.selection_state = SELECTION_STATE_GREEN
-                            self.workspace.dataset_selection_manager.selected_items.add(ds_item.id)
-                            print(f"[DEBUG] Updated selection_state=GREEN for: {ds_item.loci_name} ({ds_item.id})")
-                        else:
-                            ds_item.selection_state = SELECTION_STATE_NONE
-                            if ds_item.id in self.workspace.dataset_selection_manager.selected_items:
-                                self.workspace.dataset_selection_manager.selected_items.remove(ds_item.id)
-                            print(f"[DEBUG] Updated selection_state=NONE for: {ds_item.loci_name} ({ds_item.id})")
-                        break
+                # 创建新格式的DatasetItem并添加到Dataset Selection Manager
+                new_item = NewDatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
+                new_item.dataset_id = dataset_id
+                new_item.loci_name = item.loci_name
+                new_item.file_path = item.file_path
+                new_item.length = item.length
+                new_item.sequence_count = item.sequence_count
+                new_item.is_aligned = item.is_aligned
+                
+                # 转换序列数据
+                if hasattr(item, 'sequences') and item.sequences:
+                    new_item.sequences = item.sequences
+                
+                # 设置选择状态
+                if item.selected:
+                    new_item.selection_state = SELECTION_STATE_GREEN
+                else:
+                    new_item.selection_state = SELECTION_STATE_NONE
+                
+                # 添加到 Dataset Selection Manager（使用add_item来正确更新dataset.items）
+                success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
+                
+                # 如果 item 被选中，添加到 selected_items 集合
+                if item.selected and success:
+                    self.workspace.dataset_selection_manager.selected_items.add(new_item.id)
+                    print(f"[DEBUG] Added to selected_items: {new_item.loci_name} ({new_item.id})")
             
-            print(f"[DEBUG] After restore: dataset_items count = {len(self.dataset_items)}, table rows = {self.table.rowCount()}")
+            # 恢复自动保存设置
+            self.workspace.dataset_selection_manager.disable_auto_save = original_disable_auto_save
+            
+            # 手动保存一次完整的状态
+            self.workspace.dataset_selection_manager._save_state()
+            
+            print(f"[DEBUG] Dataset items after restore: {len(dataset.items)}")
         
     def on_topo_linked_toggled(self, checked: bool):
         """Topology链接状态切换时的处理"""
@@ -314,6 +343,25 @@ class DatasetManager(QDialog):
                     if dataset_item:
                         self.dataset_items.append(dataset_item)
                         self.add_dataset_to_table(dataset_item)
+                        
+                        # 同时创建DatasetItem对象并添加到Dataset Selection Manager
+                        if self.workspace and self.workspace.dataset_selection_manager and hasattr(self.workspace, 'current_dataset_id'):
+                            dataset_id = self.workspace.current_dataset_id
+                            if dataset_id:
+                                from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT
+                                new_item = NewDatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
+                                new_item.dataset_id = dataset_id
+                                new_item.loci_name = dataset_item.loci_name
+                                new_item.file_path = dataset_item.file_path
+                                new_item.length = dataset_item.length
+                                new_item.sequence_count = dataset_item.sequence_count
+                                new_item.is_aligned = dataset_item.is_aligned
+                                new_item.sequences = dataset_item.sequences
+                                new_item.selection_state = SELECTION_STATE_NONE  # 初始状态为NONE
+                                
+                                # 添加到manager
+                                success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
+                                print(f"[DEBUG] add_datasets: Created DatasetItem {dataset_item.loci_name} ({new_item.id}), success={success}")
                 except Exception as e:
                     QMessageBox.warning(
                         self, "Error", 
@@ -446,7 +494,51 @@ class DatasetManager(QDialog):
     def on_selected_changed(self, row: int, state: int):
         """选中状态改变时的处理"""
         if 0 <= row < len(self.dataset_items):
-            self.dataset_items[row].selected = (state == Qt.Checked)
+            item = self.dataset_items[row]
+            is_selected = (state == Qt.Checked)
+            item.selected = is_selected
+            
+            print(f"[DEBUG] on_selected_changed: row={row}, item={item.loci_name}, selected={is_selected}")
+            
+            # 同步到Dataset Selection Manager
+            if self.workspace and self.workspace.dataset_selection_manager and hasattr(self.workspace, 'current_dataset_id'):
+                dataset_id = self.workspace.current_dataset_id
+                print(f"[DEBUG] dataset_id={dataset_id}")
+                if dataset_id:
+                    dataset = self.workspace.dataset_selection_manager.get_dataset(dataset_id)
+                    print(f"[DEBUG] dataset={dataset}")
+                    if dataset:
+                        # 检查是否有任何item被选中
+                        has_selected = any(i.selected for i in self.dataset_items)
+                        if has_selected:
+                            dataset.selection_state = SELECTION_STATE_GREEN
+                        else:
+                            dataset.selection_state = SELECTION_STATE_NONE
+                        print(f"[DEBUG] Dataset selection_state updated to: {dataset.selection_state}")
+                    
+                    # 查找对应的DatasetItem
+                    print(f"[DEBUG] Searching for DatasetItem with loci_name={item.loci_name}, dataset_id={dataset_id}")
+                    print(f"[DEBUG] Total items in manager: {len(self.workspace.dataset_selection_manager.items)}")
+                    
+                    found = False
+                    for ds_item in self.workspace.dataset_selection_manager.items.values():
+                        print(f"[DEBUG] Checking item: {ds_item.loci_name} (dataset_id={ds_item.dataset_id})")
+                        if ds_item.loci_name == item.loci_name and ds_item.dataset_id == dataset_id:
+                            if is_selected:
+                                ds_item.selection_state = SELECTION_STATE_GREEN
+                                self.workspace.dataset_selection_manager.selected_items.add(ds_item.id)
+                                print(f"[DEBUG] Added to selected_items: {ds_item.loci_name} ({ds_item.id})")
+                            else:
+                                ds_item.selection_state = SELECTION_STATE_NONE
+                                if ds_item.id in self.workspace.dataset_selection_manager.selected_items:
+                                    self.workspace.dataset_selection_manager.selected_items.remove(ds_item.id)
+                                print(f"[DEBUG] Removed from selected_items: {ds_item.loci_name} ({ds_item.id})")
+                            found = True
+                            break
+                    
+                    if not found:
+                        print(f"[DEBUG] WARNING: No matching DatasetItem found for {item.loci_name}!")
+                        print(f"[DEBUG] This explains why data can't be imported until the dialog is closed and reopened.")
             
     def view_dataset(self, row: int):
         """查看数据集"""
@@ -536,11 +628,49 @@ class DatasetManager(QDialog):
                     self.table.setRowCount(0)  # 清空表格
                     for item in dataset_items:
                         self.add_dataset_to_table(item)
+                        
+                        # 同时创建DatasetItem对象并添加到Dataset Selection Manager
+                        if self.workspace and self.workspace.dataset_selection_manager and hasattr(self.workspace, 'current_dataset_id'):
+                            dataset_id = self.workspace.current_dataset_id
+                            if dataset_id:
+                                from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT
+                                new_item = NewDatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
+                                new_item.dataset_id = dataset_id
+                                new_item.loci_name = item.loci_name
+                                new_item.file_path = item.file_path
+                                new_item.length = item.length
+                                new_item.sequence_count = item.sequence_count
+                                new_item.is_aligned = item.is_aligned
+                                new_item.sequences = item.sequences
+                                new_item.selection_state = SELECTION_STATE_NONE
+                                
+                                # 添加到manager
+                                success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
+                                print(f"[DEBUG] import_from_partitioned_nexus (replace): Created DatasetItem {item.loci_name} ({new_item.id}), success={success}")
                 elif reply == QMessageBox.No:
                     # 追加到现有数据
                     for item in dataset_items:
                         self.dataset_items.append(item)
                         self.add_dataset_to_table(item)
+                        
+                        # 同时创建DatasetItem对象并添加到Dataset Selection Manager
+                        if self.workspace and self.workspace.dataset_selection_manager and hasattr(self.workspace, 'current_dataset_id'):
+                            dataset_id = self.workspace.current_dataset_id
+                            if dataset_id:
+                                from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT
+                                new_item = NewDatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
+                                new_item.dataset_id = dataset_id
+                                new_item.loci_name = item.loci_name
+                                new_item.file_path = item.file_path
+                                new_item.length = item.length
+                                new_item.sequence_count = item.sequence_count
+                                new_item.is_aligned = item.is_aligned
+                                new_item.sequences = item.sequences
+                                new_item.selection_state = SELECTION_STATE_NONE
+                                
+                                # 添加到manager
+                                success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
+                                print(f"[DEBUG] import_from_partitioned_nexus (append): Created DatasetItem {item.loci_name} ({new_item.id}), success={success}")
                 else:
                     # 取消导入
                     return
@@ -549,6 +679,25 @@ class DatasetManager(QDialog):
                 self.dataset_items = dataset_items
                 for item in dataset_items:
                     self.add_dataset_to_table(item)
+                    
+                    # 同时创建DatasetItem对象并添加到Dataset Selection Manager
+                    if self.workspace and self.workspace.dataset_selection_manager and hasattr(self.workspace, 'current_dataset_id'):
+                        dataset_id = self.workspace.current_dataset_id
+                        if dataset_id:
+                            from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT
+                            new_item = NewDatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
+                            new_item.dataset_id = dataset_id
+                            new_item.loci_name = item.loci_name
+                            new_item.file_path = item.file_path
+                            new_item.length = item.length
+                            new_item.sequence_count = item.sequence_count
+                            new_item.is_aligned = item.is_aligned
+                            new_item.sequences = item.sequences
+                            new_item.selection_state = SELECTION_STATE_NONE
+                            
+                            # 添加到manager
+                            success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
+                            print(f"[DEBUG] import_from_partitioned_nexus: Created DatasetItem {item.loci_name} ({new_item.id}), success={success}")
 
             # 显示成功消息
             message = (

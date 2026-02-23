@@ -297,7 +297,7 @@ class DatasetInfo:
         
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
-        return {
+        result = {
             "id": self.id,
             "name": self.name,
             "description": self.description,
@@ -311,6 +311,8 @@ class DatasetInfo:
             "taxa_count": self.taxa_count,
             "selection_state": self.selection_state
         }
+        print(f"[DEBUG] DatasetInfo.to_dict: {self.name} selection_state={self.selection_state}")
+        return result
         
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'DatasetInfo':
@@ -333,6 +335,7 @@ class DatasetInfo:
         info.taxa_count = data.get("taxa_count", 0)
         info.selection_state = data.get("selection_state", SELECTION_STATE_NONE)
         
+        print(f"[DEBUG] DatasetInfo.from_dict: {info.name} selection_state={info.selection_state}, items={len(info.items)}")
         return info
 
 

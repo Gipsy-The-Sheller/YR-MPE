@@ -91,11 +91,14 @@ class DatasetSelectionManager:
     
     def add_item(self, item: DatasetItem, dataset_id: str) -> bool:
         """添加数据项到数据集"""
+        print(f"[DEBUG] add_item called: item={item.loci_name}, dataset_id={dataset_id}")
         if dataset_id not in self.datasets:
+            print(f"[DEBUG] add_item FAILED: dataset_id {dataset_id} not found")
             return False
         
         # 验证数据项
         if not item.validate():
+            print(f"[DEBUG] add_item FAILED: item validation failed")
             return False
         
         # 设置数据集ID
@@ -106,6 +109,8 @@ class DatasetSelectionManager:
         
         # 添加到数据集
         self.datasets[dataset_id].add_item(item.id)
+        
+        print(f"[DEBUG] add_item SUCCESS: item {item.id} added to dataset {dataset_id}, dataset.items now has {len(self.datasets[dataset_id].items)} items")
         
         # 更新数据集的统计信息
         dataset = self.datasets[dataset_id]
@@ -452,8 +457,9 @@ class DatasetSelectionManager:
         print(f"[DEBUG] _save_state called")
         print(f"[DEBUG] Saving {len(self.datasets)} datasets, {len(self.items)} items")
         for dataset_id, dataset in self.datasets.items():
+            print(f"[DEBUG] Dataset {dataset.name} ({dataset_id}): selection_state={dataset.selection_state}, items={len(dataset.items)}")
             if 'dataset_items' in dataset.settings:
-                print(f"[DEBUG] Dataset {dataset_id} has {len(dataset.settings['dataset_items'])} saved items")
+                print(f"[DEBUG]   - has {len(dataset.settings['dataset_items'])} saved items")
         print(f"[DEBUG] Saving to: {state_file}")
 
         with open(state_file, 'w', encoding='utf-8') as f:

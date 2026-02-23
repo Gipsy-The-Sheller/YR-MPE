@@ -276,6 +276,9 @@ class YR_MPEA_Widget(QWidget):
                 # 获取第一个 green dataset
                 green_dataset = green_datasets[0]
                 print(f"[DEBUG] Using green dataset: {green_dataset.name} ({green_dataset.id})")
+                print(f"[DEBUG] Green dataset selection_state: {green_dataset.selection_state}")
+                print(f"[DEBUG] Green dataset items count: {len(green_dataset.items)}")
+                print(f"[DEBUG] Selected items count in manager: {len(self.dataset_selection_manager.selected_items)}")
 
                 # 获取该 dataset 中所有 selected 的 items（使用 selected_items 集合）
                 selected_items = []
@@ -2738,8 +2741,9 @@ class SingleGeneWorkspace(QWidget):
                 if self.dataset_selection_manager:
                     ds = self.dataset_selection_manager.get_dataset(dataset_id)
                     if ds:
+                        print(f"[DEBUG] Before setting GREEN: dataset {ds.name} ({dataset_id}) selection_state = {ds.selection_state}")
                         ds.selection_state = SELECTION_STATE_GREEN
-                        print(f"[DEBUG] Set dataset {ds.name} ({dataset_id}) selection_state to GREEN")
+                        print(f"[DEBUG] After setting GREEN: dataset {ds.name} ({dataset_id}) selection_state = {ds.selection_state}")
 
             # 保存引用防止被垃圾回收
             if not hasattr(self.parent_window, 'dataset_managers'):
