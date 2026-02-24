@@ -456,6 +456,7 @@ class DatasetSelectionManager:
         
         print(f"[DEBUG] _save_state called")
         print(f"[DEBUG] Saving {len(self.datasets)} datasets, {len(self.items)} items")
+        print(f"[DEBUG] Selected items to save: {list(self.selected_items)}")
         for dataset_id, dataset in self.datasets.items():
             print(f"[DEBUG] Dataset {dataset.name} ({dataset_id}): selection_state={dataset.selection_state}, items={len(dataset.items)}")
             if 'dataset_items' in dataset.settings:
@@ -485,9 +486,13 @@ class DatasetSelectionManager:
             for dataset_id, dataset_data in state.get("datasets", {}).items():
                 self.datasets[dataset_id] = DatasetInfo.from_dict(dataset_data)
                 if 'dataset_items' in dataset_data.get('settings', {}):
-                    print(f"[DEBUG] Dataset {dataset_id} has {len(dataset_data['settings']['dataset_items'])} items in settings")
+                    saved_items = dataset_data['settings']['dataset_items']
+                    print(f"[DEBUG] Dataset {dataset_id} has {len(saved_items)} items in settings")
+                    for i, item_data in enumerate(saved_items):
+                        print(f"[DEBUG]   Item {i}: {item_data.get('loci_name')}, selected={item_data.get('selected')}")
                 else:
                     print(f"[DEBUG] Dataset {dataset_id} has no 'dataset_items' in settings")
+                    print(f"[DEBUG]   Settings keys: {list(dataset_data.get('settings', {}).keys())}")
 
             # 加载数据项
             for item_id, item_data in state.get("items", {}).items():
@@ -531,7 +536,11 @@ class DatasetSelectionManager:
 
             # 加载选中项（如果JSON中有）
             if "selected_items" in state:
-                self.selected_items = set(state.get("selected_items", []))
+                loaded_selected = state.get("selected_items", [])
+                self.selected_items = set(loaded_selected)
+                print(f"[DEBUG] Loaded {len(self.selected_items)} selected items: {loaded_selected}")
+            else:
+                print(f"[DEBUG] No 'selected_items' in JSON")
             
             print(f"[DEBUG] Final: {len(self.datasets)} datasets, {len(self.items)} items, {len(self.selected_items)} selected")
 

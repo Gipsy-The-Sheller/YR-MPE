@@ -27,6 +27,9 @@ QAction, QMenu, QSizePolicy, QGridLayout, QFileDialog, QMessageBox, QDialog)
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QIcon
 
+# 导入selection状态常量
+from .methods.dataset_models import SELECTION_STATE_GREEN, SELECTION_STATE_NONE
+
 # 导入新的模块架构
 from .methods import (
     WorkspaceManager, PluginManager, PluginExecutor,
@@ -2555,6 +2558,7 @@ class SingleGeneWorkspace(QWidget):
     
     def _on_dataset_click(self, dataset_id: str):
         """处理数据集单击事件"""
+        print(f"[DEBUG] _on_dataset_click called for dataset_id: {dataset_id}")
         if not self.dataset_selection_manager:
             return
         
@@ -2563,17 +2567,38 @@ class SingleGeneWorkspace(QWidget):
         if not dataset_info:
             return
         
+        print(f"[DEBUG] Current dataset selection_state: {dataset_info.selection_state}")
+        
         # 切换数据集的选择状态
         if dataset_info.selection_state == SELECTION_STATE_GREEN:
+            print(f"[DEBUG] Dataset is GREEN, clearing all selections...")
             # 如果当前是绿色，取消选择（设为无色）
             dataset_info.selection_state = SELECTION_STATE_NONE
             # 清除所有数据项的选择
             self.dataset_selection_manager.selection_engine.clear_all_selections()
+            print(f"[DEBUG] After clear_all_selections, selected_items count: {len(self.dataset_selection_manager.selected_items)}")
         else:
+            print(f"[DEBUG] Dataset is not GREEN, setting to GREEN...")
             # 如果当前是无色或蓝色，设置为绿色
             dataset_info.selection_state = SELECTION_STATE_GREEN
-            # 使用 selection_engine 选择整个数据集（设置为蓝色上下文高亮）
-            self.dataset_selection_manager.selection_engine.select_dataset(dataset_id)
+            
+            # 从 dataset.settings['dataset_items'] 恢复选中状态，而不是将所有设为蓝色
+            if 'dataset_items' in dataset_info.settings:
+                print(f"[DEBUG] Restoring selected states from settings: {len(dataset_info.settings['dataset_items'])} items")
+                for item_data in dataset_info.settings['dataset_items']:
+                    if item_data.get('selected', False):
+                        loci_name = item_data.get('loci_name', '')
+                        print(f"[DEBUG] Restoring selected state for: {loci_name}")
+                        for ds_item in self.dataset_selection_manager.items.values():
+                            if ds_item.loci_name == loci_name and ds_item.dataset_id == dataset_id:
+                                ds_item.selection_state = SELECTION_STATE_GREEN
+                                self.dataset_selection_manager.selected_items.add(ds_item.id)
+                                break
+                print(f"[DEBUG] After restore: selected_items count = {len(self.dataset_selection_manager.selected_items)}")
+            else:
+                print(f"[DEBUG] No saved items in settings, selecting all items as BLUE...")
+                # 如果没有保存的状态，才将所有数据项设置为蓝色
+                self.dataset_selection_manager.selection_engine.select_dataset(dataset_id)
         
         # 保存状态
         self.dataset_selection_manager._save_state()
@@ -2726,6 +2751,14 @@ class SingleGeneWorkspace(QWidget):
             else:
                 dataset_id = getattr(dataset, 'dataset_id', None)
 
+            # 先设置当前 dataset_id（这样DatasetManager初始化时就能找到它）
+            if dataset_id:
+                self.current_dataset_id = dataset_id
+
+            # 禁用自动保存和selection_engine，防止它们在对话框操作期间修改状态
+            original_disable_auto_save = self.dataset_selection_manager.disable_auto_save
+            self.dataset_selection_manager.disable_auto_save = True
+
             # 创建 DatasetManager 实例，传递必要的参数
             dataset_manager = DatasetManager(
                 dataset_name=getattr(dataset, 'dataset_name', 'Dataset'),
@@ -2733,17 +2766,17 @@ class SingleGeneWorkspace(QWidget):
                 workspace=self
             )
 
-            # 设置当前 dataset_id（用于保存和恢复设置）
-            if dataset_id:
-                self.current_dataset_id = dataset_id
-                
-                # 设置dataset的selection_state为GREEN，表示当前正在编辑
-                if self.dataset_selection_manager:
-                    ds = self.dataset_selection_manager.get_dataset(dataset_id)
-                    if ds:
-                        print(f"[DEBUG] Before setting GREEN: dataset {ds.name} ({dataset_id}) selection_state = {ds.selection_state}")
-                        ds.selection_state = SELECTION_STATE_GREEN
-                        print(f"[DEBUG] After setting GREEN: dataset {ds.name} ({dataset_id}) selection_state = {ds.selection_state}")
+            # 设置dataset的selection_state为GREEN，表示当前正在编辑
+            if dataset_id and self.dataset_selection_manager:
+                ds = self.dataset_selection_manager.get_dataset(dataset_id)
+                if ds:
+                    print(f"[DEBUG] Before setting GREEN: dataset {ds.name} ({dataset_id}) selection_state = {ds.selection_state}")
+                    ds.selection_state = SELECTION_STATE_GREEN
+                    print(f"[DEBUG] After setting GREEN: dataset {ds.name} ({dataset_id}) selection_state = {ds.selection_state}")
+                    
+                    # 从settings中恢复items的选中状态（注意：_restore_settings已经在DatasetManager.__init__中执行过了）
+                    # 这里不需要再次恢复，因为_restore_settings会检查selected状态并更新到DatasetSelectionManager
+                    print(f"[DEBUG] DatasetManager has been initialized, selected_items count = {len(self.dataset_selection_manager.selected_items)}")
 
             # 保存引用防止被垃圾回收
             if not hasattr(self.parent_window, 'dataset_managers'):
@@ -2754,6 +2787,15 @@ class SingleGeneWorkspace(QWidget):
 
             # 执行对话框
             dialog.show()  # 改为非模态显示
+
+            # 对话框关闭后恢复自动保存并手动保存一次
+            def on_dialog_closed():
+                print(f"[DEBUG] DatasetManager dialog closed, restoring auto_save and saving state")
+                self.dataset_selection_manager.disable_auto_save = original_disable_auto_save
+                self.dataset_selection_manager._save_state()
+                print(f"[DEBUG] After dialog close: selected_items count = {len(self.dataset_selection_manager.selected_items)}")
+            
+            dialog.finished.connect(on_dialog_closed)
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open Dataset Manager: {str(e)}")
