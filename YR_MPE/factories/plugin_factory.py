@@ -116,3 +116,7 @@ class PluginFactory:
     def get_astral_plugin(self):
         """获取ASTRAL插件"""
         return self.load_plugin("YR_MPE.plugins.astral_plugin", "AstralPluginEntry")
+    
+    def get_mpboot_plugin(self):
+        """获取MPBoot插件"""
+        return self.load_plugin("YR_MPE.plugins.mpboot_plugin", "MPBootPluginEntry")

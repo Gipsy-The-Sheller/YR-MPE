@@ -627,6 +627,11 @@ class YR_MPEA_Widget(QWidget):
 
         # TODO: MP Programs: TNT
 
+        # 添加Maximum Parsimony (MPBoot)选项
+        cons_mp_action = QAction("Maximum Parsimony (MPBoot)", phylogeny_button)
+        cons_mp_action.setIcon(self.resource_factory.get_icon("mp.svg"))
+        cons_mp_action.triggered.connect(self.open_mpboot_wrapper)
+
         cons_distance_action = QAction("Distance Methods (DecentTree)", phylogeny_button)
         cons_distance_action.setIcon(self.resource_factory.get_icon("bionj.svg"))
         cons_distance_action.triggered.connect(self.open_decenttree_wrapper)
@@ -645,6 +650,7 @@ class YR_MPEA_Widget(QWidget):
         phylogeny_button_menu.addAction(cons_bi_action)
         phylogeny_button_menu.addSeparator()
         # phylogeny_button_menu.addAction(cons_mp_action)
+        phylogeny_button_menu.addAction(cons_mp_action)
         phylogeny_button_menu.addSeparator()
         phylogeny_button_menu.addAction(cons_distance_action)
         phylogeny_button_menu.addSeparator()
@@ -1426,6 +1432,35 @@ class YR_MPEA_Widget(QWidget):
         decenttree_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
 
         dialog.layout().addWidget(decenttree_wrapper)
+        dialog.exec_()
+
+    def open_mpboot_wrapper(self):
+        """打开 MPBoot 插件"""
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle("Maximum Parsimony (MPBoot) - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("mp.svg"))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        # Prepare import data (使用抽象层，支持两种导入方式)
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
+        
+        # Use PluginFactory to get the plugin
+        mpboot_entry = self.plugin_factory.get_mpboot_plugin()
+        
+        # 获取工作目录
+        workdir = self.get_workdir()
+        
+        mpboot_wrapper = mpboot_entry.run(
+            import_from=import_from,
+            import_data=import_data,
+            workdir=workdir  # 添加工作目录参数
+        )
+        
+        mpboot_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
+        
+        dialog.layout().addWidget(mpboot_wrapper)
         dialog.exec_()
 
     def open_pdguide_wrapper(self):
