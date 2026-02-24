@@ -104,3 +104,15 @@ class PluginFactory:
     def get_model_parameter_plugin(self):
         """获取Model Parameter Estimation插件"""
         return self.load_plugin("YR_MPE.plugins.model_parameter_plugin", "ModelParameterPluginEntry")
+    
+    def get_mrbayes_plugin(self):
+        """获取MrBayes插件"""
+        return self.load_plugin("YR_MPE.plugins.mrbayes_plugin", "MrBayesPluginEntry")
+    
+    def get_phylobayes_plugin(self):
+        """获取PhyloBayes插件"""
+        return self.load_plugin("YR_MPE.plugins.phylobayes_plugin", "PhyloBayesPluginEntry")
+    
+    def get_astral_plugin(self):
+        """获取ASTRAL插件"""
+        return self.load_plugin("YR_MPE.plugins.astral_plugin", "AstralPluginEntry")
