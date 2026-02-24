@@ -156,32 +156,22 @@ class ModelFinderPlugin(BasePlugin):
 
     def handle_dataset_import(self, import_data):
         """处理从DatasetManager导入的数据"""
-        print("[DEBUG] ModelFinder.handle_dataset_import called")
-        print(f"[DEBUG] import_data type: {type(import_data)}")
-        print(f"[DEBUG] import_data keys: {import_data.keys() if isinstance(import_data, dict) else 'N/A'}")
         
         try:
             # import_data 应该是一个包含 dataset items 和配置信息的字典
             if not isinstance(import_data, dict):
                 QMessageBox.warning(self, "Import Error", "Invalid dataset import data format")
-                print("[DEBUG] Invalid import data format")
                 return
 
             # 获取 dataset items 和配置
             dataset_items = import_data.get('dataset_items', [])
             dataset_config = import_data.get('dataset_config', {})
-            
-            print(f"[DEBUG] dataset_items count: {len(dataset_items)}")
-            print(f"[DEBUG] dataset_config: {dataset_config}")
 
             # dataset_items 应该已经是选中的 items（由 _prepare_import_data 过滤）
             selected_items = dataset_items
             if not selected_items:
                 QMessageBox.warning(self, "No Selection", "No partitions selected from dataset. Please select at least one partition.")
-                print("[DEBUG] No selected items")
                 return
-            
-            print(f"[DEBUG] Selected items: {[item.loci_name for item in selected_items]}")
             
             # 检查所有选中的 partition 是否已比对
             unaligned_items = [item for item in selected_items if not item.is_aligned]
@@ -191,14 +181,11 @@ class ModelFinderPlugin(BasePlugin):
                 warning_msg += "\n\nPlease align these partitions first or select only aligned partitions."
                 QMessageBox.warning(self, "Alignment Required", warning_msg)
                 # 强制打断自动导入，剩余一个空界面
-                print("[DEBUG] Found unaligned items, aborting import")
                 return
             
             # 获取 dataset 的设置（topo-linked/topo-unlinked, edge-linked/edge-unlinked）
             topo_linked = dataset_config.get('topo_linked', False)
             edge_linked = dataset_config.get('edge_linked', False)
-            
-            print(f"[DEBUG] topo_linked: {topo_linked}, edge_linked: {edge_linked}")
             
             # 映射到 partition mode
             # topo-unlinked -> Separate Tree (TUL)
@@ -219,10 +206,8 @@ class ModelFinderPlugin(BasePlugin):
             # 获取所有序列名称（假设所有 partition 有相同的序列）
             if selected_items:
                 all_seq_names = [seq.id for seq in selected_items[0].sequences]
-                print(f"[DEBUG] Sequence names: {all_seq_names}")
             else:
                 all_seq_names = []
-                print("[DEBUG] No sequences found")
             
             # 合并序列
             for seq_name in all_seq_names:
@@ -237,11 +222,8 @@ class ModelFinderPlugin(BasePlugin):
                         supermatrix_seq += "?" * item.length
                 supermatrix_sequences[seq_name] = supermatrix_seq
             
-            print(f"[DEBUG] Supermatrix created with {len(supermatrix_sequences)} sequences")
-            
             # 创建 supermatrix 临时文件
             temp_file = self.create_temp_file(suffix='.fas')
-            print(f"[DEBUG] Creating temp file: {temp_file}")
             
             with open(temp_file, 'w') as f:
                 for seq_name, seq_content in supermatrix_sequences.items():
@@ -249,8 +231,6 @@ class ModelFinderPlugin(BasePlugin):
             
             self.import_file = temp_file
             self.imported_files = [temp_file]
-            
-            print(f"[DEBUG] Import file created: {self.import_file}")
             
             # 计算 partition 坐标并创建 partition definitions
             for item in selected_items:
@@ -266,7 +246,6 @@ class ModelFinderPlugin(BasePlugin):
                 current_pos = end_pos + 1
             
             self.partition_definitions = partition_definitions
-            print(f"[DEBUG] Partition definitions created: {len(partition_definitions)}")
             
             # 检测序列类型冲突
             self._detect_sequence_type_conflicts(selected_items, partition_definitions)

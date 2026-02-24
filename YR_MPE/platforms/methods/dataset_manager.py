@@ -202,27 +202,18 @@ class DatasetManager(QDialog):
         
     def _restore_settings(self):
         """从 dataset.settings 恢复保存的设置"""
-        print("[DEBUG] _restore_settings called")
-        print(f"[DEBUG] Before restore: dataset_items count = {len(self.dataset_items)}")
         if not self.workspace or not hasattr(self.workspace, 'current_dataset_id'):
-            print("[DEBUG] No workspace or current_dataset_id")
             return
         
         dataset_id = self.workspace.current_dataset_id
-        print(f"[DEBUG] dataset_id: {dataset_id}")
         if not dataset_id or not self.workspace.dataset_selection_manager:
-            print("[DEBUG] No dataset_id or dataset_selection_manager")
             return
         
         dataset = self.workspace.dataset_selection_manager.get_dataset(dataset_id)
-        print(f"[DEBUG] dataset: {dataset}")
         if not dataset:
-            print("[DEBUG] Dataset not found")
             return
         
         # 清空现有的dataset_items和表格
-        print(f"[DEBUG] Clearing existing {len(self.dataset_items)} items and table")
-        self.dataset_items.clear()
         self.table.setRowCount(0)
         
         # 恢复 topo_linked 和 edge_linked 设置
@@ -237,13 +228,6 @@ class DatasetManager(QDialog):
         # 恢复 dataset_items
         if 'dataset_items' in dataset.settings:
             saved_items = dataset.settings['dataset_items']
-            print(f"[DEBUG] Found {len(saved_items)} saved items in settings")
-            print(f"[DEBUG] Dataset items before restore: {len(dataset.items)}")
-            for i, item_data in enumerate(saved_items):
-                print(f"[DEBUG]   Item {i}: {item_data.get('loci_name')}, selected={item_data.get('selected')}, is_aligned={item_data.get('is_aligned')}")
-        else:
-            print(f"[DEBUG] No 'dataset_items' found in settings")
-            print(f"[DEBUG] Settings keys: {list(dataset.settings.keys())}")
         
         # 不清空dataset.items，保留现有的UUID，只更新selection_state
         # 禁用自动保存，避免在恢复过程中保存不完整的数据
@@ -254,7 +238,6 @@ class DatasetManager(QDialog):
         
         if 'dataset_items' in dataset.settings:
             for item_data in saved_items:
-                print(f"[DEBUG] Restoring item: {item_data.get('loci_name')}, is_aligned: {item_data.get('is_aligned')}, selected: {item_data.get('selected')}")
                 # 创建 DatasetItem（本地类）
                 item = DatasetItem()
                 item.selected = item_data.get('selected', False)
@@ -307,7 +290,6 @@ class DatasetManager(QDialog):
                     else:
                         if existing_item.id in self.workspace.dataset_selection_manager.selected_items:
                             self.workspace.dataset_selection_manager.selected_items.remove(existing_item.id)
-                    print(f"[DEBUG] Updated existing DatasetItem: {existing_item.loci_name} ({existing_item.id})")
                 else:
                     # 创建新格式的DatasetItem并添加到Dataset Selection Manager
                     new_item = NewDatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
@@ -329,17 +311,9 @@ class DatasetManager(QDialog):
                         
                     # 添加到 Dataset Selection Manager（使用add_item来正确更新dataset.items）
                     success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
-                    print(f"[DEBUG] Created new DatasetItem: {new_item.loci_name} ({new_item.id}), success={success}")
             
             # 恢复自动保存设置
             self.workspace.dataset_selection_manager.disable_auto_save = original_disable_auto_save
-            
-            # 不在这里保存状态，让状态在完全恢复后再保存（例如在closeEvent时）
-            # self.workspace.dataset_selection_manager._save_state()
-            
-            print(f"[DEBUG] Dataset items after restore: {len(dataset.items)}")
-            print(f"[DEBUG] Total items in manager: {len(self.workspace.dataset_selection_manager.items)}")
-            print(f"[DEBUG] Selected items count: {len(self.workspace.dataset_selection_manager.selected_items)}")
         
     def on_topo_linked_toggled(self, checked: bool):
         """Topology链接状态切换时的处理"""
@@ -379,7 +353,6 @@ class DatasetManager(QDialog):
                                 
                                 # 添加到manager
                                 success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
-                                print(f"[DEBUG] add_datasets: Created DatasetItem {dataset_item.loci_name} ({new_item.id}), success={success}")
                 except Exception as e:
                     QMessageBox.warning(
                         self, "Error", 
@@ -439,7 +412,6 @@ class DatasetManager(QDialog):
         
     def add_dataset_to_table(self, item: DatasetItem):
         """将DatasetItem添加到表格中"""
-        print(f"[DEBUG] add_dataset_to_table called for: {item.loci_name}, current dataset_items count = {len(self.dataset_items)}")
         row = self.table.rowCount()
         self.table.insertRow(row)
         
@@ -516,15 +488,11 @@ class DatasetManager(QDialog):
             is_selected = (state == Qt.Checked)
             item.selected = is_selected
             
-            print(f"[DEBUG] on_selected_changed: row={row}, item={item.loci_name}, selected={is_selected}")
-            
             # 同步到Dataset Selection Manager
             if self.workspace and self.workspace.dataset_selection_manager and hasattr(self.workspace, 'current_dataset_id'):
                 dataset_id = self.workspace.current_dataset_id
-                print(f"[DEBUG] dataset_id={dataset_id}")
                 if dataset_id:
                     dataset = self.workspace.dataset_selection_manager.get_dataset(dataset_id)
-                    print(f"[DEBUG] dataset={dataset}")
                     if dataset:
                         # 检查是否有任何item被选中
                         has_selected = any(i.selected for i in self.dataset_items)
@@ -532,31 +500,19 @@ class DatasetManager(QDialog):
                             dataset.selection_state = SELECTION_STATE_GREEN
                         else:
                             dataset.selection_state = SELECTION_STATE_NONE
-                        print(f"[DEBUG] Dataset selection_state updated to: {dataset.selection_state}")
-                    
-                    # 查找对应的DatasetItem
-                    print(f"[DEBUG] Searching for DatasetItem with loci_name={item.loci_name}, dataset_id={dataset_id}")
-                    print(f"[DEBUG] Total items in manager: {len(self.workspace.dataset_selection_manager.items)}")
                     
                     found = False
                     for ds_item in self.workspace.dataset_selection_manager.items.values():
-                        print(f"[DEBUG] Checking item: {ds_item.loci_name} (dataset_id={ds_item.dataset_id})")
                         if ds_item.loci_name == item.loci_name and ds_item.dataset_id == dataset_id:
                             if is_selected:
                                 ds_item.selection_state = SELECTION_STATE_GREEN
                                 self.workspace.dataset_selection_manager.selected_items.add(ds_item.id)
-                                print(f"[DEBUG] Added to selected_items: {ds_item.loci_name} ({ds_item.id})")
                             else:
                                 ds_item.selection_state = SELECTION_STATE_NONE
                                 if ds_item.id in self.workspace.dataset_selection_manager.selected_items:
                                     self.workspace.dataset_selection_manager.selected_items.remove(ds_item.id)
-                                print(f"[DEBUG] Removed from selected_items: {ds_item.loci_name} ({ds_item.id})")
                             found = True
                             break
-                    
-                    if not found:
-                        print(f"[DEBUG] WARNING: No matching DatasetItem found for {item.loci_name}!")
-                        print(f"[DEBUG] This explains why data can't be imported until the dialog is closed and reopened.")
             
     def view_dataset(self, row: int):
         """查看数据集"""
@@ -664,7 +620,6 @@ class DatasetManager(QDialog):
                                 
                                 # 添加到manager
                                 success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
-                                print(f"[DEBUG] import_from_partitioned_nexus (replace): Created DatasetItem {item.loci_name} ({new_item.id}), success={success}")
                 elif reply == QMessageBox.No:
                     # 追加到现有数据
                     for item in dataset_items:
@@ -688,7 +643,6 @@ class DatasetManager(QDialog):
                                 
                                 # 添加到manager
                                 success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
-                                print(f"[DEBUG] import_from_partitioned_nexus (append): Created DatasetItem {item.loci_name} ({new_item.id}), success={success}")
                 else:
                     # 取消导入
                     return
@@ -715,7 +669,6 @@ class DatasetManager(QDialog):
                             
                             # 添加到manager
                             success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
-                            print(f"[DEBUG] import_from_partitioned_nexus: Created DatasetItem {item.loci_name} ({new_item.id}), success={success}")
 
             # 显示成功消息
             message = (
@@ -1032,19 +985,13 @@ class DatasetManager(QDialog):
             
     def closeEvent(self, event):
         """关闭事件处理 - 保存设置"""
-        print("[DEBUG] DatasetManager.closeEvent called")
         if self.workspace and hasattr(self.workspace, 'current_dataset_id'):
             dataset_id = self.workspace.current_dataset_id
-            print(f"[DEBUG] Saving settings for dataset_id: {dataset_id}")
 
             if dataset_id and self.workspace.dataset_selection_manager:
                 dataset = self.workspace.dataset_selection_manager.get_dataset(dataset_id)
 
                 if dataset:
-                    print(f"[DEBUG] Dataset found: {dataset.name}")
-                    print(f"[DEBUG] Current dataset_items count: {len(self.dataset_items)}")
-                    print(f"[DEBUG] Before save: dataset.settings keys = {list(dataset.settings.keys())}")
-                    print(f"[DEBUG] Before save: selected_items = {list(self.workspace.dataset_selection_manager.selected_items)}")
                     
                     # 保存 topo_linked 和 edge_linked 设置
                     dataset.settings['topo_linked'] = self.topo_linked_radio.isChecked()
@@ -1055,7 +1002,6 @@ class DatasetManager(QDialog):
                         # 保存到 settings（保留向后兼容）
                         dataset.settings['dataset_items'] = []
                         for item in self.dataset_items:
-                            print(f"[DEBUG] Saving item: {item.loci_name}, selected={item.selected}, is_aligned={item.is_aligned}")
                             # 如果有文件路径且文件存在，只保存文件路径
                             # 否则保存序列数据
                             if item.file_path and os.path.exists(item.file_path):
@@ -1090,21 +1036,10 @@ class DatasetManager(QDialog):
                                 }
 
                             dataset.settings['dataset_items'].append(item_data)
-                        
-                        print(f"[DEBUG] Saved {len(dataset.settings['dataset_items'])} items to settings")
-                    else:
-                        print("[DEBUG] No dataset_items to save, preserving existing settings")
 
                     # 保存状态
                     if self.workspace.dataset_selection_manager.workspace_path:
                         self.workspace.dataset_selection_manager._save_state()
-                        print("[DEBUG] State saved to file")
-                else:
-                    print("[DEBUG] Dataset not found")
-            else:
-                print("[DEBUG] No dataset_id or dataset_selection_manager")
-        else:
-            print("[DEBUG] No workspace or current_dataset_id")
 
         # 继续正常的关闭流程
         super().closeEvent(event)

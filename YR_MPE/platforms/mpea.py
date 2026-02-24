@@ -261,27 +261,20 @@ class YR_MPEA_Widget(QWidget):
                    import_from: "DATASET_MANAGER" 或 "YR_MPEA" 或 None
                    import_data: 导入数据的字典或单个数据项
         """
-        print(f"[DEBUG] _prepare_import_data called with workspace_item_types: {workspace_item_types}")
         import_from = None
         import_data = None
         
         # 1. 优先检查是否有选中的 dataset items
         if self.dataset_selection_manager:
-            print("[DEBUG] Checking dataset_selection_manager")
             # 获取状态为 green 的 dataset
             from .methods.dataset_models import SELECTION_STATE_GREEN
             green_datasets = [ds for ds in self.dataset_selection_manager.get_all_datasets()
                              if ds.selection_state == SELECTION_STATE_GREEN]
 
-            print(f"[DEBUG] Found {len(green_datasets)} green datasets")
             
             if green_datasets:
                 # 获取第一个 green dataset
                 green_dataset = green_datasets[0]
-                print(f"[DEBUG] Using green dataset: {green_dataset.name} ({green_dataset.id})")
-                print(f"[DEBUG] Green dataset selection_state: {green_dataset.selection_state}")
-                print(f"[DEBUG] Green dataset items count: {len(green_dataset.items)}")
-                print(f"[DEBUG] Selected items count in manager: {len(self.dataset_selection_manager.selected_items)}")
 
                 # 获取该 dataset 中所有 selected 的 items（使用 selected_items 集合）
                 selected_items = []
@@ -292,7 +285,6 @@ class YR_MPEA_Widget(QWidget):
                         if item:
                             selected_items.append(item)
 
-                print(f"[DEBUG] Found {len(selected_items)} selected items in green dataset")
                 
                 if selected_items:
                     import_from = "DATASET_MANAGER"
@@ -303,27 +295,20 @@ class YR_MPEA_Widget(QWidget):
                             'edge_linked': green_dataset.settings.get('edge_linked', False)
                         }
                     }
-                    print(f"[DEBUG] Returning DATASET_MANAGER with {len(selected_items)} items")
                     return import_from, import_data
             else:
-                print("[DEBUG] No green datasets found")
+                pass
         
         # 2. 如果没有选中的 dataset items，则检查 SingleGeneWorkspace
         if workspace_item_types:
-            print("[DEBUG] Checking SingleGeneWorkspace")
             workspace_type = type(self.workspace).__name__
-            print(f"[DEBUG] Workspace type: {workspace_type}")
             
             if workspace_type == "SingleGeneWorkspace":
                 for item_type in workspace_item_types:
-                    print(f"[DEBUG] Checking item_type: {item_type}")
                     if len(self.workspace.items.get(item_type, [])) >= 1:
                         import_from = "YR_MPEA"
                         import_data = self.workspace.items[item_type][0]
-                        print(f"[DEBUG] Returning YR_MPEA with item from {item_type}")
                         break
-        
-        print(f"[DEBUG] Returning import_from={import_from}, import_data={'None' if import_data is None else 'has data'}")
         return import_from, import_data
     
     def _get_dataset_config(self):
@@ -2558,7 +2543,6 @@ class SingleGeneWorkspace(QWidget):
     
     def _on_dataset_click(self, dataset_id: str):
         """处理数据集单击事件"""
-        print(f"[DEBUG] _on_dataset_click called for dataset_id: {dataset_id}")
         if not self.dataset_selection_manager:
             return
         
@@ -2567,36 +2551,27 @@ class SingleGeneWorkspace(QWidget):
         if not dataset_info:
             return
         
-        print(f"[DEBUG] Current dataset selection_state: {dataset_info.selection_state}")
-        
         # 切换数据集的选择状态
         if dataset_info.selection_state == SELECTION_STATE_GREEN:
-            print(f"[DEBUG] Dataset is GREEN, clearing all selections...")
             # 如果当前是绿色，取消选择（设为无色）
             dataset_info.selection_state = SELECTION_STATE_NONE
             # 清除所有数据项的选择
             self.dataset_selection_manager.selection_engine.clear_all_selections()
-            print(f"[DEBUG] After clear_all_selections, selected_items count: {len(self.dataset_selection_manager.selected_items)}")
         else:
-            print(f"[DEBUG] Dataset is not GREEN, setting to GREEN...")
             # 如果当前是无色或蓝色，设置为绿色
             dataset_info.selection_state = SELECTION_STATE_GREEN
             
             # 从 dataset.settings['dataset_items'] 恢复选中状态，而不是将所有设为蓝色
             if 'dataset_items' in dataset_info.settings:
-                print(f"[DEBUG] Restoring selected states from settings: {len(dataset_info.settings['dataset_items'])} items")
                 for item_data in dataset_info.settings['dataset_items']:
                     if item_data.get('selected', False):
                         loci_name = item_data.get('loci_name', '')
-                        print(f"[DEBUG] Restoring selected state for: {loci_name}")
                         for ds_item in self.dataset_selection_manager.items.values():
                             if ds_item.loci_name == loci_name and ds_item.dataset_id == dataset_id:
                                 ds_item.selection_state = SELECTION_STATE_GREEN
                                 self.dataset_selection_manager.selected_items.add(ds_item.id)
                                 break
-                print(f"[DEBUG] After restore: selected_items count = {len(self.dataset_selection_manager.selected_items)}")
             else:
-                print(f"[DEBUG] No saved items in settings, selecting all items as BLUE...")
                 # 如果没有保存的状态，才将所有数据项设置为蓝色
                 self.dataset_selection_manager.selection_engine.select_dataset(dataset_id)
         
@@ -2770,13 +2745,7 @@ class SingleGeneWorkspace(QWidget):
             if dataset_id and self.dataset_selection_manager:
                 ds = self.dataset_selection_manager.get_dataset(dataset_id)
                 if ds:
-                    print(f"[DEBUG] Before setting GREEN: dataset {ds.name} ({dataset_id}) selection_state = {ds.selection_state}")
                     ds.selection_state = SELECTION_STATE_GREEN
-                    print(f"[DEBUG] After setting GREEN: dataset {ds.name} ({dataset_id}) selection_state = {ds.selection_state}")
-                    
-                    # 从settings中恢复items的选中状态（注意：_restore_settings已经在DatasetManager.__init__中执行过了）
-                    # 这里不需要再次恢复，因为_restore_settings会检查selected状态并更新到DatasetSelectionManager
-                    print(f"[DEBUG] DatasetManager has been initialized, selected_items count = {len(self.dataset_selection_manager.selected_items)}")
 
             # 保存引用防止被垃圾回收
             if not hasattr(self.parent_window, 'dataset_managers'):
@@ -2790,10 +2759,8 @@ class SingleGeneWorkspace(QWidget):
 
             # 对话框关闭后恢复自动保存并手动保存一次
             def on_dialog_closed():
-                print(f"[DEBUG] DatasetManager dialog closed, restoring auto_save and saving state")
                 self.dataset_selection_manager.disable_auto_save = original_disable_auto_save
                 self.dataset_selection_manager._save_state()
-                print(f"[DEBUG] After dialog close: selected_items count = {len(self.dataset_selection_manager.selected_items)}")
             
             dialog.finished.connect(on_dialog_closed)
 

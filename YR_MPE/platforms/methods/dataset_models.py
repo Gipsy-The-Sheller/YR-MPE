@@ -311,7 +311,6 @@ class DatasetInfo:
             "taxa_count": self.taxa_count,
             "selection_state": self.selection_state
         }
-        print(f"[DEBUG] DatasetInfo.to_dict: {self.name} selection_state={self.selection_state}")
         return result
         
     @classmethod
@@ -334,8 +333,7 @@ class DatasetInfo:
         info.loci_count = data.get("loci_count", 0)
         info.taxa_count = data.get("taxa_count", 0)
         info.selection_state = data.get("selection_state", SELECTION_STATE_NONE)
-        
-        print(f"[DEBUG] DatasetInfo.from_dict: {info.name} selection_state={info.selection_state}, items={len(info.items)}")
+
         return info
 
 
