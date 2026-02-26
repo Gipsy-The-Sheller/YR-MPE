@@ -20,7 +20,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, 
                              QMessageBox, QGroupBox, QFormLayout, QLineEdit, 
                              QSpinBox, QCheckBox, QLabel, QComboBox, QTextEdit,
-                             QTabWidget, QToolButton, QApplication, QFrame, QDoubleSpinBox)
+                             QTabWidget, QToolButton, QApplication, QFrame, QDoubleSpinBox, QDialog)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 import tempfile
@@ -30,6 +30,126 @@ from typing import List, Optional, Dict
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
 import subprocess
+
+
+class MPBootAdvancedDialog(QDialog):
+    """MPBoot 高级参数对话框"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("MPBoot Advanced Parameters")
+        self.setMinimumSize(500, 400)
+        self.setLayout(QVBoxLayout())
+        
+        # 树搜索参数组
+        tree_search_group = QGroupBox("Tree Search Parameters")
+        tree_search_layout = QFormLayout()
+        tree_search_group.setLayout(tree_search_layout)
+        
+        # 初始简约树数量
+        self.initial_tree_spinbox = QSpinBox()
+        self.initial_tree_spinbox.setRange(1, 10000)
+        self.initial_tree_spinbox.setValue(50)  # 从 100 降低到 50
+        tree_search_layout.addRow("Initial Trees:", self.initial_tree_spinbox)
+        
+        # 最佳简约树数量
+        self.best_tree_spinbox = QSpinBox()
+        self.best_tree_spinbox.setRange(1, 1000)
+        self.best_tree_spinbox.setValue(10)  # 从 20 降低到 10
+        tree_search_layout.addRow("Best Trees:", self.best_tree_spinbox)
+        
+        # 候选树集合大小
+        self.can_tree_spinbox = QSpinBox()
+        self.can_tree_spinbox.setRange(1, 100)
+        self.can_tree_spinbox.setValue(5)
+        tree_search_layout.addRow("Candidate Trees:", self.can_tree_spinbox)
+        
+        # 迭代模式
+        iter_layout = QHBoxLayout()
+        self.iters_combo = QComboBox()
+        self.iters_combo.addItems(["auto", "fixed"])
+        self.fixed_iters_value_spinbox = QSpinBox()
+        self.fixed_iters_value_spinbox.setRange(1, 10000)
+        self.fixed_iters_value_spinbox.setValue(100)
+        self.fixed_iters_value_spinbox.setEnabled(False)
+        self.iters_combo.currentTextChanged.connect(
+            lambda text: self.fixed_iters_value_spinbox.setEnabled(text == "fixed")
+        )
+        iter_layout.addWidget(self.iters_combo)
+        iter_layout.addWidget(self.fixed_iters_value_spinbox)
+        tree_search_layout.addRow("Iterations:", iter_layout)
+        
+        # 树搜索方法
+        self.method_combo = QComboBox()
+        self.method_combo.addItems(["auto", "IQP", "IQPNNI (old)"])
+        tree_search_layout.addRow("Method:", self.method_combo)
+        
+        # 扰动强度
+        self.perturbation_doublespinbox = QDoubleSpinBox()
+        self.perturbation_doublespinbox.setRange(0.0, 1.0)
+        self.perturbation_doublespinbox.setSingleStep(0.1)
+        self.perturbation_doublespinbox.setValue(0.5)
+        tree_search_layout.addRow("Perturbation Strength:", self.perturbation_doublespinbox)
+        
+        self.layout().addWidget(tree_search_group)
+        
+        # MPBoot 参数组
+        mpboot_group = QGroupBox("MPBoot Parameters")
+        mpboot_layout = QFormLayout()
+        mpboot_group.setLayout(mpboot_layout)
+        
+        # Ratchet 参数
+        self.ratchet_iter_spinbox = QSpinBox()
+        self.ratchet_iter_spinbox.setRange(0, 100)
+        self.ratchet_iter_spinbox.setValue(1)
+        self.ratchet_iter_spinbox.setSpecialValueText("Default")
+        mpboot_layout.addRow("Ratchet Iterations:", self.ratchet_iter_spinbox)
+        
+        self.ratchet_wgt_spinbox = QSpinBox()
+        self.ratchet_wgt_spinbox.setRange(0, 100)
+        self.ratchet_wgt_spinbox.setValue(1)
+        mpboot_layout.addRow("Ratchet Weight:", self.ratchet_wgt_spinbox)
+        
+        self.ratchet_percent_spinbox = QSpinBox()
+        self.ratchet_percent_spinbox.setRange(0, 100)
+        self.ratchet_percent_spinbox.setValue(50)
+        mpboot_layout.addRow("Ratchet Percent:", self.ratchet_percent_spinbox)
+        
+        self.ratchet_off_checkbox = QCheckBox("Turn off Ratchet")
+        mpboot_layout.addRow("", self.ratchet_off_checkbox)
+        
+        # SPR 半径
+        self.spr_rad_spinbox = QSpinBox()
+        self.spr_rad_spinbox.setRange(1, 100)
+        self.spr_rad_spinbox.setValue(3)
+        mpboot_layout.addRow("SPR Radius:", self.spr_rad_spinbox)
+        
+        # 候选树截断
+        self.cand_cutoff_spinbox = QSpinBox()
+        self.cand_cutoff_spinbox.setRange(1, 100)
+        self.cand_cutoff_spinbox.setValue(10)
+        mpboot_layout.addRow("Candidate Cutoff (%):", self.cand_cutoff_spinbox)
+        
+        # 其他 MPBoot 选项
+        self.opt_btree_off_checkbox = QCheckBox("Turn off tree refinement")
+        mpboot_layout.addRow("", self.opt_btree_off_checkbox)
+        
+        self.nni_pars_checkbox = QCheckBox("Use NNI instead of SPR")
+        self.nni_pars_checkbox.setChecked(True)  # 默认勾选，更稳定
+        mpboot_layout.addRow("", self.nni_pars_checkbox)
+        
+        self.layout().addWidget(mpboot_group)
+        
+        # 添加按钮
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addStretch()
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        self.layout().addLayout(button_layout)
 
 
 class MPBootThread(BaseProcessThread):
@@ -113,6 +233,24 @@ class MPBootPlugin(BasePlugin):
         if import_from == "YR_MPEA" and import_data is not None:
             self.handle_import_data(import_data)
         
+        # 初始化高级参数的默认值（用于 get_parameters 方法）
+        # 使用更保守的默认值以避免潜在的断言失败
+        self.initial_tree_value = 50  # 从 100 降低到 50
+        self.best_tree_value = 10     # 从 20 降低到 10
+        self.can_tree_value = 5
+        self.iters_value = "auto"
+        self.fixed_iters_value = 100
+        self.method_value = "auto"
+        self.perturbation_value = 0.5
+        self.ratchet_iter_value = 1
+        self.ratchet_wgt_value = 1
+        self.ratchet_percent_value = 50
+        self.ratchet_off_value = False
+        self.spr_rad_value = 3
+        self.cand_cutoff_value = 10
+        self.opt_btree_off_value = False
+        self.nni_pars_value = True  # 默认使用 NNI 代替 SPR，更稳定
+        
     def init_plugin_info(self):
         """初始化插件信息"""
         self.plugin_name = "MPBoot Phylogeny"
@@ -184,122 +322,50 @@ class MPBootPlugin(BasePlugin):
         basic_params_group.setLayout(basic_params_layout)
         layout.addWidget(basic_params_group)
         
-        # 序列类型
+        # 序列类型和线程数放在同一行
+        basic_row_layout = QHBoxLayout()
+        
+        basic_row_left = QWidget()
+        basic_row_left_layout = QFormLayout()
+        basic_row_left_layout.setContentsMargins(0, 0, 0, 0)
+        basic_row_left.setLayout(basic_row_left_layout)
+        
         self.seq_type_combo = QComboBox()
         self.seq_type_combo.addItems(["AUTO", "BIN", "DNA", "AA", "CODON", "MORPH"])
-        basic_params_layout.addRow("Sequence Type:", self.seq_type_combo)
+        basic_row_left_layout.addRow("Sequence Type:", self.seq_type_combo)
         
-        # 线程数
+        basic_row_right = QWidget()
+        basic_row_right_layout = QFormLayout()
+        basic_row_right_layout.setContentsMargins(0, 0, 0, 0)
+        basic_row_right.setLayout(basic_row_right_layout)
+        
         self.threads_spinbox = QSpinBox()
         self.threads_spinbox.setRange(1, 5)
         self.threads_spinbox.setValue(1)
         self.threads_spinbox.setSpecialValueText("AUTO")
-        basic_params_layout.addRow("Threads:", self.threads_spinbox)
+        basic_row_right_layout.addRow("Threads:", self.threads_spinbox)
         
-        # 树搜索参数组
-        tree_search_group = QGroupBox("Tree Search Parameters")
-        tree_search_layout = QFormLayout()
-        tree_search_group.setLayout(tree_search_layout)
-        layout.addWidget(tree_search_group)
+        basic_row_layout.addWidget(basic_row_left)
+        basic_row_layout.addWidget(basic_row_right)
+        basic_params_layout.addRow("", basic_row_layout)
         
-        # 初始简约树数量
-        self.initial_tree_spinbox = QSpinBox()
-        self.initial_tree_spinbox.setRange(1, 10000)
-        self.initial_tree_spinbox.setValue(100)
-        tree_search_layout.addRow("Initial Trees:", self.initial_tree_spinbox)
+        # 高级参数按钮
+        self.advanced_params_btn = QPushButton("Advanced Parameters...")
+        self.advanced_params_btn.clicked.connect(self.open_advanced_dialog)
+        basic_params_layout.addRow("", self.advanced_params_btn)
         
-        # 最佳简约树数量
-        self.best_tree_spinbox = QSpinBox()
-        self.best_tree_spinbox.setRange(1, 1000)
-        self.best_tree_spinbox.setValue(20)
-        tree_search_layout.addRow("Best Trees:", self.best_tree_spinbox)
+        # 初始化高级参数对话框引用
+        self.advanced_dialog = None
         
-        # 候选树集合大小
-        self.can_tree_spinbox = QSpinBox()
-        self.can_tree_spinbox.setRange(1, 100)
-        self.can_tree_spinbox.setValue(5)
-        tree_search_layout.addRow("Candidate Trees:", self.can_tree_spinbox)
-        
-        # 迭代模式
-        iter_layout = QHBoxLayout()
-        self.iters_combo = QComboBox()
-        self.iters_combo.addItems(["auto", "fixed"])
-        self.iters_combo.currentTextChanged.connect(self.on_iters_changed)
-        self.fixed_iters_value_spinbox = QSpinBox()
-        self.fixed_iters_value_spinbox.setRange(1, 10000)
-        self.fixed_iters_value_spinbox.setValue(100)
-        self.fixed_iters_value_spinbox.setEnabled(False)
-        iter_layout.addWidget(self.iters_combo)
-        iter_layout.addWidget(self.fixed_iters_value_spinbox)
-        tree_search_layout.addRow("Iterations:", iter_layout)
-        
-        # 树搜索方法
-        self.method_combo = QComboBox()
-        self.method_combo.addItems(["auto", "IQP", "IQPNNI (old)"])
-        tree_search_layout.addRow("Method:", self.method_combo)
-        
-        # 扰动强度
-        self.perturbation_doublespinbox = QDoubleSpinBox()
-        self.perturbation_doublespinbox.setRange(0.0, 1.0)
-        self.perturbation_doublespinbox.setSingleStep(0.1)
-        self.perturbation_doublespinbox.setValue(0.5)
-        tree_search_layout.addRow("Perturbation Strength:", self.perturbation_doublespinbox)
-        
-        # MPBoot 参数组
-        mpboot_group = QGroupBox("MPBoot Parameters")
-        mpboot_layout = QFormLayout()
-        mpboot_group.setLayout(mpboot_layout)
-        layout.addWidget(mpboot_group)
-        
-        # Ratchet 参数
-        ratchet_layout = QHBoxLayout()
-        self.ratchet_iter_spinbox = QSpinBox()
-        self.ratchet_iter_spinbox.setRange(0, 100)
-        self.ratchet_iter_spinbox.setValue(1)
-        self.ratchet_iter_spinbox.setSpecialValueText("Default")
-        mpboot_layout.addRow("Ratchet Iterations:", self.ratchet_iter_spinbox)
-        
-        self.ratchet_wgt_spinbox = QSpinBox()
-        self.ratchet_wgt_spinbox.setRange(0, 100)
-        self.ratchet_wgt_spinbox.setValue(1)
-        mpboot_layout.addRow("Ratchet Weight:", self.ratchet_wgt_spinbox)
-        
-        self.ratchet_percent_spinbox = QSpinBox()
-        self.ratchet_percent_spinbox.setRange(0, 100)
-        self.ratchet_percent_spinbox.setValue(50)
-        mpboot_layout.addRow("Ratchet Percent:", self.ratchet_percent_spinbox)
-        
-        self.ratchet_off_checkbox = QCheckBox("Turn off Ratchet")
-        mpboot_layout.addRow("", self.ratchet_off_checkbox)
-        
-        # SPR 半径
-        self.spr_rad_spinbox = QSpinBox()
-        self.spr_rad_spinbox.setRange(1, 100)
-        self.spr_rad_spinbox.setValue(3)
-        mpboot_layout.addRow("SPR Radius:", self.spr_rad_spinbox)
-        
-        # 候选树截断
-        self.cand_cutoff_spinbox = QSpinBox()
-        self.cand_cutoff_spinbox.setRange(1, 100)
-        self.cand_cutoff_spinbox.setValue(10)
-        mpboot_layout.addRow("Candidate Cutoff (%):", self.cand_cutoff_spinbox)
-        
-        # 其他 MPBoot 选项
-        self.opt_btree_off_checkbox = QCheckBox("Turn off tree refinement")
-        mpboot_layout.addRow("", self.opt_btree_off_checkbox)
-        
-        self.nni_pars_checkbox = QCheckBox("Use NNI instead of SPR")
-        mpboot_layout.addRow("", self.nni_pars_checkbox)
-        
-        # Bootstrap 参数组
-        bootstrap_group = QGroupBox("Bootstrap Parameters")
+        # Bootstrap && Consensus 参数组
+        bootstrap_group = QGroupBox("Bootstrap && Consensus")
         bootstrap_layout = QFormLayout()
         bootstrap_group.setLayout(bootstrap_layout)
         layout.addWidget(bootstrap_group)
         
         # UFBoot 参数
         ufboot_layout = QHBoxLayout()
-        self.ufboot_checkbox = QCheckBox("Enable Bootstrap")
+        self.ufboot_checkbox = QCheckBox("Ultrafast Bootstrap (UFboot)")
         self.ufboot_checkbox.setChecked(True)
         self.ufboot_spinbox = QSpinBox()
         self.ufboot_spinbox.setRange(100, 100000)
@@ -312,50 +378,89 @@ class MPBootPlugin(BasePlugin):
         ufboot_layout.addWidget(self.ufboot_spinbox)
         bootstrap_layout.addRow("Bootstrap:", ufboot_layout)
         
-        # 最大迭代次数
+        # Max / Stop iterations 放在同一行
+        iterations_row_layout = QHBoxLayout()
+        
+        iterations_left = QWidget()
+        iterations_left_layout = QFormLayout()
+        iterations_left_layout.setContentsMargins(0, 0, 0, 0)
+        iterations_left.setLayout(iterations_left_layout)
+        
         self.nm_spinbox = QSpinBox()
         self.nm_spinbox.setRange(100, 10000)
         self.nm_spinbox.setValue(1000)
-        bootstrap_layout.addRow("Max Iterations:", self.nm_spinbox)
+        iterations_left_layout.addRow("Max Iterations:", self.nm_spinbox)
         
-        # 停止规则迭代次数
+        iterations_right = QWidget()
+        iterations_right_layout = QFormLayout()
+        iterations_right_layout.setContentsMargins(0, 0, 0, 0)
+        iterations_right.setLayout(iterations_right_layout)
+        
         self.nstep_spinbox = QSpinBox()
         self.nstep_spinbox.setRange(10, 1000)
         self.nstep_spinbox.setValue(100)
-        bootstrap_layout.addRow("Stop Iterations:", self.nstep_spinbox)
+        iterations_right_layout.addRow("Stop Iterations:", self.nstep_spinbox)
         
-        # 最小相关系数
+        iterations_row_layout.addWidget(iterations_left)
+        iterations_row_layout.addWidget(iterations_right)
+        bootstrap_layout.addRow("", iterations_row_layout)
+        
+        # bcor 和 epsilon 放在同一行
+        epsilon_row_layout = QHBoxLayout()
+        
+        epsilon_left = QWidget()
+        epsilon_left_layout = QFormLayout()
+        epsilon_left_layout.setContentsMargins(0, 0, 0, 0)
+        epsilon_left.setLayout(epsilon_left_layout)
+        
         self.bcor_doublespinbox = QDoubleSpinBox()
         self.bcor_doublespinbox.setRange(0.0, 1.0)
         self.bcor_doublespinbox.setSingleStep(0.01)
         self.bcor_doublespinbox.setValue(0.99)
-        bootstrap_layout.addRow("Min Correlation:", self.bcor_doublespinbox)
+        epsilon_left_layout.addRow("Min Correlation:", self.bcor_doublespinbox)
         
-        # RELL epsilon
+        epsilon_right = QWidget()
+        epsilon_right_layout = QFormLayout()
+        epsilon_right_layout.setContentsMargins(0, 0, 0, 0)
+        epsilon_right.setLayout(epsilon_right_layout)
+        
         self.beps_doublespinbox = QDoubleSpinBox()
         self.beps_doublespinbox.setRange(0.0, 1.0)
         self.beps_doublespinbox.setSingleStep(0.1)
         self.beps_doublespinbox.setValue(0.5)
-        bootstrap_layout.addRow("RELL Epsilon:", self.beps_doublespinbox)
+        epsilon_right_layout.addRow("RELL Epsilon:", self.beps_doublespinbox)
         
-        # Consensus 参数
-        consensus_group = QGroupBox("Consensus Parameters")
-        consensus_layout = QFormLayout()
-        consensus_group.setLayout(consensus_layout)
-        layout.addWidget(consensus_group)
+        epsilon_row_layout.addWidget(epsilon_left)
+        epsilon_row_layout.addWidget(epsilon_right)
+        bootstrap_layout.addRow("", epsilon_row_layout)
         
-        # 最小分裂支持阈值
+        # Threshold 和 Burnin 放在同一行
+        consensus_row_layout = QHBoxLayout()
+        
+        consensus_left = QWidget()
+        consensus_left_layout = QFormLayout()
+        consensus_left_layout.setContentsMargins(0, 0, 0, 0)
+        consensus_left.setLayout(consensus_left_layout)
+        
         self.t_threshold_doublespinbox = QDoubleSpinBox()
         self.t_threshold_doublespinbox.setRange(0.0, 1.0)
         self.t_threshold_doublespinbox.setSingleStep(0.1)
-        self.t_threshold_doublespinbox.setValue(0.0)
-        consensus_layout.addRow("Threshold:", self.t_threshold_doublespinbox)
+        self.t_threshold_doublespinbox.setValue(0.50)  # 默认 0.50 (50% majority-rule consensus)
+        consensus_left_layout.addRow("Threshold:", self.t_threshold_doublespinbox)
         
-        # Burnin
+        consensus_right = QWidget()
+        consensus_right_layout = QFormLayout()
+        consensus_right_layout.setContentsMargins(0, 0, 0, 0)
+        consensus_right.setLayout(consensus_right_layout)
+        
         self.bi_spinbox = QSpinBox()
         self.bi_spinbox.setRange(0, 10000)
         self.bi_spinbox.setValue(0)
-        consensus_layout.addRow("Burnin:", self.bi_spinbox)
+        consensus_right_layout.addRow("Burnin:", self.bi_spinbox)
+        
+        consensus_row_layout.addWidget(consensus_left)
+        consensus_row_layout.addWidget(consensus_right)
+        bootstrap_layout.addRow("Consensus", consensus_row_layout)
         
         layout.addStretch()
         
@@ -364,6 +469,47 @@ class MPBootPlugin(BasePlugin):
             self.imported_files = []  # List of imported file paths
         if not hasattr(self, 'file_tags'):
             self.file_tags = []  # List of file tag widgets
+    
+    def open_advanced_dialog(self):
+        """打开高级参数对话框"""
+        if self.advanced_dialog is None:
+            self.advanced_dialog = MPBootAdvancedDialog(self)
+        
+        # 设置对话框的当前值
+        self.advanced_dialog.initial_tree_spinbox.setValue(self.initial_tree_value)
+        self.advanced_dialog.best_tree_spinbox.setValue(self.best_tree_value)
+        self.advanced_dialog.can_tree_spinbox.setValue(self.can_tree_value)
+        self.advanced_dialog.iters_combo.setCurrentText(self.iters_value)
+        self.advanced_dialog.fixed_iters_value_spinbox.setValue(self.fixed_iters_value)
+        self.advanced_dialog.method_combo.setCurrentText(self.method_value)
+        self.advanced_dialog.perturbation_doublespinbox.setValue(self.perturbation_value)
+        self.advanced_dialog.ratchet_iter_spinbox.setValue(self.ratchet_iter_value)
+        self.advanced_dialog.ratchet_wgt_spinbox.setValue(self.ratchet_wgt_value)
+        self.advanced_dialog.ratchet_percent_spinbox.setValue(self.ratchet_percent_value)
+        self.advanced_dialog.ratchet_off_checkbox.setChecked(self.ratchet_off_value)
+        self.advanced_dialog.spr_rad_spinbox.setValue(self.spr_rad_value)
+        self.advanced_dialog.cand_cutoff_spinbox.setValue(self.cand_cutoff_value)
+        self.advanced_dialog.opt_btree_off_checkbox.setChecked(self.opt_btree_off_value)
+        self.advanced_dialog.nni_pars_checkbox.setChecked(self.nni_pars_value)
+        
+        # 从对话框复制参数值到主界面
+        if self.advanced_dialog.exec_() == QDialog.Accepted:
+            # 保存对话框中的参数值
+            self.initial_tree_value = self.advanced_dialog.initial_tree_spinbox.value()
+            self.best_tree_value = self.advanced_dialog.best_tree_spinbox.value()
+            self.can_tree_value = self.advanced_dialog.can_tree_spinbox.value()
+            self.iters_value = self.advanced_dialog.iters_combo.currentText()
+            self.fixed_iters_value = self.advanced_dialog.fixed_iters_value_spinbox.value()
+            self.method_value = self.advanced_dialog.method_combo.currentText()
+            self.perturbation_value = self.advanced_dialog.perturbation_doublespinbox.value()
+            self.ratchet_iter_value = self.advanced_dialog.ratchet_iter_spinbox.value()
+            self.ratchet_wgt_value = self.advanced_dialog.ratchet_wgt_spinbox.value()
+            self.ratchet_percent_value = self.advanced_dialog.ratchet_percent_spinbox.value()
+            self.ratchet_off_value = self.advanced_dialog.ratchet_off_checkbox.isChecked()
+            self.spr_rad_value = self.advanced_dialog.spr_rad_spinbox.value()
+            self.cand_cutoff_value = self.advanced_dialog.cand_cutoff_spinbox.value()
+            self.opt_btree_off_value = self.advanced_dialog.opt_btree_off_checkbox.isChecked()
+            self.nni_pars_value = self.advanced_dialog.nni_pars_checkbox.isChecked()
     
     def on_iters_changed(self, text):
         """处理迭代模式变化"""
@@ -495,12 +641,11 @@ class MPBootPlugin(BasePlugin):
         layout = QVBoxLayout()
         self.output_tab.setLayout(layout)
         
-        # 输出预览
-        self.output_preview = QTextEdit()
-        self.output_preview.setReadOnly(True)
-        self.output_preview.setFont(QFont("Courier", 10))
-        layout.addWidget(QLabel("Phylogenetic Tree Preview (Newick Format):"))
-        layout.addWidget(self.output_preview)
+        # 添加状态信息标签
+        self.output_info = QLabel("No tree available yet.")
+        self.output_info.setAlignment(Qt.AlignCenter)
+        self.output_info.setStyleSheet("color: #6c757d; font-style: italic; padding: 20px;")
+        layout.addWidget(self.output_info)
     
     def setup_control_panel(self):
         """设置控制面板"""
@@ -556,43 +701,44 @@ class MPBootPlugin(BasePlugin):
             params.extend(["-st", seq_type])
         
         # 树搜索参数
-        params.extend(["-numpars", str(self.initial_tree_spinbox.value())])
-        params.extend(["-toppars", str(self.best_tree_spinbox.value())])
-        params.extend(["-numcand", str(self.can_tree_spinbox.value())])
+        # 确保初始树数量不超过最佳树数量
+        initial_trees = min(self.initial_tree_value, self.best_tree_value * 5)
+        params.extend(["-numpars", str(initial_trees)])
+        params.extend(["-toppars", str(self.best_tree_value)])
+        params.extend(["-numcand", str(self.can_tree_value)])
         
         # 迭代模式
-        if self.iters_combo.currentText() == "fixed":
-            params.extend(["-n", str(self.fixed_iters_value_spinbox.value())])
+        if self.iters_value == "fixed":
+            params.extend(["-n", str(self.fixed_iters_value)])
         
         # 扰动强度
-        params.extend(["-pers", str(self.perturbation_doublespinbox.value())])
+        params.extend(["-pers", str(self.perturbation_value)])
         
         # 树搜索方法
-        method = self.method_combo.currentText()
-        if method == "IQP":
+        if self.method_value == "IQP":
             params.extend(["-iqp"])
-        elif method == "IQPNNI (old)":
+        elif self.method_value == "IQPNNI (old)":
             params.extend(["-iqpnni"])
         
         # MPBoot 参数
-        if self.ratchet_iter_spinbox.value() > 0:
-            params.extend(["-ratchet_iter", str(self.ratchet_iter_spinbox.value())])
+        if self.ratchet_iter_value > 0:
+            params.extend(["-ratchet_iter", str(self.ratchet_iter_value)])
         
-        if self.ratchet_wgt_spinbox.value() > 0:
-            params.extend(["-ratchet_wgt", str(self.ratchet_wgt_spinbox.value())])
+        if self.ratchet_wgt_value > 0:
+            params.extend(["-ratchet_wgt", str(self.ratchet_wgt_value)])
         
-        params.extend(["-ratchet_percent", str(self.ratchet_percent_spinbox.value())])
+        params.extend(["-ratchet_percent", str(self.ratchet_percent_value)])
         
-        if self.ratchet_off_checkbox.isChecked():
+        if self.ratchet_off_value:
             params.extend(["-ratchet_off"])
         
-        params.extend(["-spr_rad", str(self.spr_rad_spinbox.value())])
-        params.extend(["-cand_cutoff", str(self.cand_cutoff_spinbox.value())])
+        params.extend(["-spr_rad", str(self.spr_rad_value)])
+        params.extend(["-cand_cutoff", str(self.cand_cutoff_value)])
         
-        if self.opt_btree_off_checkbox.isChecked():
+        if self.opt_btree_off_value:
             params.extend(["-opt_btree_off"])
         
-        if self.nni_pars_checkbox.isChecked():
+        if self.nni_pars_value:
             params.extend(["-nni_pars"])
         
         # Bootstrap 参数
@@ -713,7 +859,7 @@ class MPBootPlugin(BasePlugin):
     def display_results(self, output_files):
         """显示结果，使用IcyTree展示系统发育树"""
         if not output_files:
-            QMessageBox.information(self, "error", "No output files generated")
+            QMessageBox.warning(self, "Error", "No output files generated")
             return
             
         # 查找.treefile文件并显示
@@ -731,16 +877,18 @@ class MPBootPlugin(BasePlugin):
                 
                 # 确保树内容不为空
                 if not tree_content:
-                    QMessageBox.information(self, "error", "Tree file is empty")
+                    QMessageBox.warning(self, "Error", "Tree file is empty")
                     return
                 
-                # 导入IcyTree插件
-                from .icytree import IcyTreePlugin
-                import os
+                # 导入IcyTree插件（使用正确的相对路径）
+                from ..icytree import IcyTreePlugin
                 
                 # 创建IcyTree插件实例
                 plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
                 icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
+                
+                # 连接信号，在树加载后移除 output_info 标签
+                icytree_plugin.status_changed.connect(lambda status: self._on_icytree_status_changed(status, icytree_plugin))
                 
                 # 设置Newick字符串并显示
                 icytree_plugin.set_newick_string(tree_content)
@@ -748,7 +896,7 @@ class MPBootPlugin(BasePlugin):
                 # 在输出标签页中显示IcyTree
                 output_layout = self.output_tab.layout()
                 if output_layout:
-                    # 清除现有部件
+                    # 清除现有部件（除了 output_info）
                     for i in reversed(range(output_layout.count())):
                         widget = output_layout.itemAt(i).widget()
                         if widget and widget != self.output_info:
@@ -757,19 +905,33 @@ class MPBootPlugin(BasePlugin):
                 # 添加IcyTree插件到输出标签页
                 output_layout.addWidget(icytree_plugin)
                 
-                QMessageBox.information(self, "success", f"Phylogenetic tree visualization ready: {os.path.basename(treefile)}")
+                # 添加控制台消息
+                self.add_console_message(f"Phylogenetic tree loaded: {os.path.basename(treefile)}", "info")
                 
             except ImportError:
                 # 如果无法导入IcyTree插件，显示错误信息
-                QMessageBox.information(self, "error", "Error: IcyTree plugin not available")
+                if hasattr(self, 'output_info') and self.output_info:
+                    self.output_info.setText("Error: IcyTree plugin not available")
                 
             except Exception as e:
                 error_msg = f"Error processing tree file: {str(e)}"
-                QMessageBox.information(self, "error", error_msg)
                 self.add_console_message(error_msg, "error")
+                if hasattr(self, 'output_info') and self.output_info:
+                    self.output_info.setText(error_msg)
         else:
             # 没有找到树文件，显示信息
-            QMessageBox.information(self, "error", f"No treefile found. Generated {len(output_files)} file(s).")
+            msg = f"No treefile found. Generated {len(output_files)} file(s)."
+            self.add_console_message(msg, "warning")
+            if hasattr(self, 'output_info') and self.output_info:
+                self.output_info.setText(msg)
+    
+    def _on_icytree_status_changed(self, status, icytree_plugin):
+        """Handle IcyTree status changes"""
+        if status == "Tree loaded to IcyTree":
+            # Remove the "No tree available yet." label when tree is loaded
+            if hasattr(self, 'output_info') and self.output_info:
+                self.output_info.setParent(None)
+                self.output_info = None
     
     def import_to_platform(self):
         """将结果导入到当前平台"""
