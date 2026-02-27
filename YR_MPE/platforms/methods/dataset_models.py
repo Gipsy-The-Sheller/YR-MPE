@@ -120,6 +120,13 @@ class DatasetItem:
         self.is_valid: bool = True
         self.validation_errors: List[str] = []
         
+        # 模型类型属性（仅当 item_type == ITEM_TYPE_MODEL 时有效）
+        # model_sub_type: "single" (单一模型) 或 "partitioned" (分区模型)
+        self.model_sub_type: str = "single"
+        # partition_mode: 分区模式，仅当 model_sub_type == "partitioned" 时有效
+        # 可选值: "EL" (Edge-linked), "EUL" (Edge-unlinked), "TUL" (Separate Tree)
+        self.partition_mode: str = ""
+        
         # 兼容性：保留旧属性
         self.selected = False
         self.name = ""
