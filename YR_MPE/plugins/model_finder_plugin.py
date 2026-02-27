@@ -1183,50 +1183,11 @@ class ModelFinderPlugin(BasePlugin):
         # 添加控制台消息
         self.add_console_message(f"ModelFinder completed successfully! Found {len(output_files)} result file(s)", "info")
         
-        # 根据是否启用分区模式发送不同的数据格式
-        if self.partition_mode_enabled and output_files:
-            # 解析分区结果并发送分区模型数据
-            partition_results = self.parse_partition_results(output_files[0])
-            if partition_results:
-                # 统一使用一种键名格式
-                aicc_value = partition_results.get('aicc_score', partition_results.get('aicc', 0.0))
-                bic_value = partition_results.get('bic_score', partition_results.get('bic', 0.0))
-                
-                # 构建分区模型数据
-                model_data = {
-                    "type": "partitioned",
-                    "partition_mode": self.partition_mode.value,
-                    "best_scheme": partition_results.get('overall_model', ''),
-                    "partitions": [],
-                    "statistics": {
-                        "logL": partition_results.get('log_likelihood', 0.0),
-                        "aicc": aicc_value,
-                        "bic": bic_value
-                    }
-                }
-                
-                # 添加分区信息
-                for partition in self.partition_definitions:
-                    partition_name = partition.name
-                    partition_range = partition.model_range  # 使用原始位点范围
-                    
-                    # 通过位点范围匹配获取模型
-                    best_model = self._get_partition_model_by_range(
-                        partition_name, partition_range, partition_results
-                    )
-                    
-                    model_data["partitions"].append({
-                        "name": partition_name,
-                        "range": partition.get_display_range(),
-                        "best_model": best_model,
-                        "logL": 0.0  # IQ-TREE 输出中可能没有每个分区的 logL
-                    })
-                
-                # 发送信号
-                self.export_model_result_signal.emit(model_data)
+        # 保存结果供手动导入使用
+        self.analysis_output_files = output_files
         
-        # 显示导入按钮（仅在从平台导入数据时显示）
-        if self.import_from == "YR_MPEA":
+        # 显示导入按钮（分区模式下总是显示，普通模式仅从平台导入时显示）
+        if self.partition_mode_enabled or self.import_from == "YR_MPEA":
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)
@@ -1289,7 +1250,52 @@ class ModelFinderPlugin(BasePlugin):
         if self.results_table.rowCount() == 0:
             QMessageBox.warning(self, "Warning", "No model results to export.")
             return
-            
+        
+        # 根据是否启用分区模式选择不同的导出格式
+        if self.partition_mode_enabled and self.analysis_output_files:
+            # 分区模式导出
+            partition_results = self.parse_partition_results(self.analysis_output_files[0])
+            if partition_results:
+                # 统一使用一种键名格式
+                aicc_value = partition_results.get('aicc_score', partition_results.get('aicc', 0.0))
+                bic_value = partition_results.get('bic_score', partition_results.get('bic', 0.0))
+                
+                # 构建分区模型数据
+                model_data = {
+                    "type": "partitioned",
+                    "partition_mode": self.partition_mode.value,
+                    "best_scheme": partition_results.get('overall_model', ''),
+                    "partitions": [],
+                    "statistics": {
+                        "logL": partition_results.get('log_likelihood', 0.0),
+                        "aicc": aicc_value,
+                        "bic": bic_value
+                    }
+                }
+                
+                # 添加分区信息
+                for partition in self.partition_definitions:
+                    partition_name = partition.name
+                    partition_range = partition.model_range  # 使用原始位点范围
+                    
+                    # 通过位点范围匹配获取模型
+                    best_model = self._get_partition_model_by_range(
+                        partition_name, partition_range, partition_results
+                    )
+                    
+                    model_data["partitions"].append({
+                        "name": partition_name,
+                        "range": partition.get_display_range(),
+                        "best_model": best_model,
+                        "logL": 0.0  # IQ-TREE 输出中可能没有每个分区的 logL
+                    })
+                
+                # 发送信号
+                self.export_model_result_signal.emit(model_data)
+                QMessageBox.information(self, "Success", f"Partition model with {len(model_data['partitions'])} partitions exported to YR-MPEA successfully!")
+                return
+        
+        # 常规模型表格导出
         # 获取完整的模型表数据
         model_table_data = []
         headers = []
