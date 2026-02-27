@@ -133,9 +133,9 @@ class ModelFinderPartitionDialog(QDialog):
             "Edge-linked Proportional (-p)",
             "Edge-linked Equal (-q)",
             "Edge-unlinked (-Q)",
-            "Separate Tree (-S)"
+            "Topo-unlinked (-S)"
         ])
-        self.mode_combo.setCurrentIndex(0)  # 默认选择EL模式
+        self.mode_combo.setCurrentIndex(0)  # Default EL mode
         self.mode_combo.currentIndexChanged.connect(self.on_mode_changed)
         mode_layout.addRow("Mode:", self.mode_combo)
         
@@ -241,7 +241,7 @@ class ModelFinderPartitionDialog(QDialog):
         """设置分区模式"""
         self.current_partition_mode = mode
         
-        # 更新下拉框
+        # Update dropdown
         mode_map = {
             PartitionMode.EL: 0,
             PartitionMode.TL: 1,
@@ -289,7 +289,7 @@ class ModelFinderPartitionDialog(QDialog):
         self.accept()
     
     def on_mode_changed(self, index: int):
-        """模式改变处理"""
+        """Mode change handler"""
         mode_names = [PartitionMode.EL, PartitionMode.TL, PartitionMode.EUL, PartitionMode.TUL]
         self.current_partition_mode = mode_names[index]
     

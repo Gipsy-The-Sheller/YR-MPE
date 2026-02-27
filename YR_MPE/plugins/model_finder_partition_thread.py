@@ -24,6 +24,7 @@ ModelFinder分区模式线程类
 
 import os
 import tempfile
+import re
 from typing import List, Dict, Optional
 from ..templates.base_process_thread import BaseProcessThread
 from .partition_mode import PartitionDefinition, PartitionMode, PartitionFileIO
@@ -184,7 +185,12 @@ class ModelFinderPartitionThread(BaseProcessThread):
                 if os.path.exists(log_file):
                     output_files.append(log_file)
                 
-                # 查找.best_model.nex文件（如果存在）
+                # 查找.best_scheme.nex文件（如果存在，包含分区合并后的最终方案）
+                best_scheme_file = f"{output_prefix}.best_scheme.nex"
+                if os.path.exists(best_scheme_file):
+                    output_files.append(best_scheme_file)
+                
+                # 查找.best_model.nex文件（如果存在，旧版本IQ-TREE使用）
                 best_model_file = f"{output_prefix}.best_model.nex"
                 if os.path.exists(best_model_file):
                     output_files.append(best_model_file)
@@ -250,8 +256,6 @@ class PartitionResultParser:
                 r"Best model for (.+): (.+)"
             ]
             
-            import re
-            
             for pattern in partition_patterns:
                 matches = re.findall(pattern, content)
                 if matches:
@@ -301,7 +305,216 @@ class PartitionResultParser:
                         results['bic'] = float(match.group(4))
                     break
             
+            # 解析 "TREE USED FOR ModelFinder" 部分的详细信息
+            # Log-likelihood of the tree: -1519.5139 (s.e. 51.6783)
+            tree_logl_pattern = r"Log-likelihood of the tree:\s+([+-]?[\d\.]+)\s+\(s\.e\.\s+([+-]?[\d\.]+)\)"
+            tree_logl_match = re.search(tree_logl_pattern, content)
+            if tree_logl_match:
+                results['tree_log_likelihood'] = float(tree_logl_match.group(1))
+                results['tree_log_likelihood_se'] = float(tree_logl_match.group(2))
+            
+            # Unconstrained log-likelihood (without tree): -2518.4649
+            unconstrained_logl_pattern = r"Unconstrained log-likelihood \(without tree\):\s+([+-]?[\d\.]+)"
+            unconstrained_logl_match = re.search(unconstrained_logl_pattern, content)
+            if unconstrained_logl_match:
+                results['unconstrained_log_likelihood'] = float(unconstrained_logl_match.group(1))
+            
+            # Number of free parameters (#branches + #model parameters): 65
+            free_params_pattern = r"Number of free parameters.*?:\s+(\d+)"
+            free_params_match = re.search(free_params_pattern, content)
+            if free_params_match:
+                results['free_parameters'] = int(free_params_match.group(1))
+            
+            # Akaike information criterion (AIC) score: 3169.0278
+            aic_score_pattern = r"Akaike information criterion \(AIC\) score:\s+([+-]?[\d\.]+)"
+            aic_score_match = re.search(aic_score_pattern, content)
+            if aic_score_match:
+                results['aic_score'] = float(aic_score_match.group(1))
+            
+            # Corrected Akaike information criterion (AICc) score: 3182.4340
+            aicc_score_pattern = r"Corrected Akaike information criterion \(AICc\) score:\s+([+-]?[\d\.]+)"
+            aicc_score_match = re.search(aicc_score_pattern, content)
+            if aicc_score_match:
+                results['aicc_score'] = float(aicc_score_match.group(1))
+            
+            # Bayesian information criterion (BIC) score: 3465.4028
+            bic_score_pattern = r"Bayesian information criterion \(BIC\) score:\s+([+-]?[\d\.]+)"
+            bic_score_match = re.search(bic_score_pattern, content)
+            if bic_score_match:
+                results['bic_score'] = float(bic_score_match.group(1))
+            
+            # Total tree length (sum of branch lengths): 0.2410
+            tree_length_pattern = r"Total tree length.*?:\s+([+-]?[\d\.]+)"
+            tree_length_match = re.search(tree_length_pattern, content)
+            if tree_length_match:
+                results['tree_length'] = float(tree_length_match.group(1))
+            
+            # Sum of internal branch lengths: 0.0263 (10.8978% of tree length)
+            internal_branch_length_pattern = r"Sum of internal branch lengths:\s+([+-]?[\d\.]+)\s+\(([\d\.]+)%\s+of tree length\)"
+            internal_branch_match = re.search(internal_branch_length_pattern, content)
+            if internal_branch_match:
+                results['internal_branch_length'] = float(internal_branch_match.group(1))
+                results['internal_branch_length_percent'] = float(internal_branch_match.group(2))
+            
+            # 解析每个分区的 Speed 和完整参数
+            # 格式: ID  Model           Speed  Parameters
+            #        1  TIM2e+G4       1.0000  TIM2e{2.2081,4.37413,11.5914}+FQ+G4{0.275195}
+            substitution_process_pattern = r"SUBSTITUTION PROCESS\s*-+\s*Edge-linked.*?\s+ID\s+Model\s+Speed\s+Parameters\s*(.*?)(?=\n[A-Z]|\Z)"
+            substitution_process_match = re.search(substitution_process_pattern, content, re.DOTALL)
+            if substitution_process_match:
+                partition_details = substitution_process_match.group(1).strip()
+                # 每行格式: ID  Model  Speed  Parameters
+                for line in partition_details.split('\n'):
+                    line = line.strip()
+                    if not line or not line[0].isdigit():
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        # 假设格式: ID Model Speed Parameters
+                        # 参数部分可能包含空格，所以需要特殊处理
+                        id_num = parts[0]
+                        model_name = parts[1]
+                        speed = parts[2]
+                        # Parameters 是剩余部分
+                        parameters = ' '.join(parts[3:])
+                        
+                        # 找到对应的分区并添加 Speed 和 Parameters
+                        for partition_name, model_info in results['partition_models'].items():
+                            if model_info.get('model', '') == model_name:
+                                model_info['speed'] = float(speed)
+                                model_info['parameters'] = parameters
+                                break
+            
         except Exception as e:
             raise ValueError(f"Failed to parse IQ-TREE file: {str(e)}")
+    
+    @staticmethod
+    def parse_best_scheme_nex(best_scheme_file: str) -> Dict:
+        """
+        从 .best_scheme.nex 文件解析最终的分区方案（推荐使用，因为它包含分区合并后的结果）
+        
+        Args:
+            best_scheme_file: .best_scheme.nex 文件路径
+            
+        Returns:
+            包含解析结果的字典
+        """
+        results = {
+            'overall_model': '',
+            'partition_models': {},
+            'charset_ranges': {},  # 新增：存储每个 charset 的位点范围
+            'log_likelihood': 0.0,
+            'aic': 0.0,
+            'aicc': 0.0,
+            'bic': 0.0,
+            'num_partitions': 0
+        }
+        
+        try:
+            with open(best_scheme_file, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # 检查是否是NEXUS格式
+            if not content.lower().startswith('#nexus'):
+                raise ValueError("File is not in NEXUS format")
+            
+            # 步骤1：解析 charset 定义（获取分区名称和位点范围）
+            # 格式: charset partition_name = 1-100  200-300;
+            charset_pattern = r'charset\s+([^\s=]+)\s*=\s*([^;]+);'
+            charset_matches = re.findall(charset_pattern, content, re.IGNORECASE)
+            
+            # 存储每个 charset 的名称和位点范围列表
+            charset_data = {}
+            for charset_name, range_str in charset_matches:
+                charset_name = charset_name.strip()
+                # 解析位点范围（可能有多个，用空格分隔）
+                ranges = [r.strip() for r in range_str.split()]
+                charset_data[charset_name] = ranges
+                results['charset_ranges'][charset_name] = ranges
+            
+            # 步骤2：解析 charpartition 命令（获取模型分配）
+            # 格式: charpartition mymodels = MODEL: partition_name, MODEL: partition_name;
+            charpartition_pattern = r'charpartition\s+\w+\s*=\s*([^;]+);'
+            charpartition_match = re.search(charpartition_pattern, content, re.IGNORECASE | re.DOTALL)
+            
+            if charpartition_match:
+                partition_defs = charpartition_match.group(1)
+                
+                # 逐行解析分区定义
+                lines = partition_defs.strip().split('\n')
+                
+                for line in lines:
+                    line = line.strip()
+                    
+                    # 跳过空行和注释行
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    # 移除尾部的逗号
+                    line = line.rstrip(',')
+                    
+                    # 使用正则匹配: MODEL: partition_name1, partition_name2
+                    partition_match = re.match(r'^(.+?)\s*:\s*(.+)$', line)
+                    
+                    if partition_match:
+                        model_str = partition_match.group(1).strip()
+                        partition_names_str = partition_match.group(2).strip()
+                        
+                        # 分割多个分区名称（可能有逗号）
+                        partition_names = [name.strip() for name in partition_names_str.split(',')]
+                        
+                        # 为每个分区分配模型
+                        for partition_name in partition_names:
+                            if partition_name:  # 确保名称不为空
+                                results['partition_models'][partition_name] = {
+                                    'model': model_str,
+                                    'description': ''
+                                }
+                
+                # 更新分区数量
+                results['num_partitions'] = len(results['partition_models'])
+                
+                # 构建整体模型描述
+                if results['partition_models']:
+                    models = [pm['model'] for pm in results['partition_models'].values()]
+                    # 如果所有分区使用相同模型，显示一个；否则显示数量
+                    unique_models = list(set(models))
+                    if len(unique_models) == 1:
+                        results['overall_model'] = unique_models[0]
+                    else:
+                        results['overall_model'] = f"{len(unique_models)} different models"
+            
+            # 从 .iqtree 文件读取统计信息（如果存在）
+            iqtree_file = best_scheme_file.replace('.best_scheme.nex', '.iqtree')
+            if os.path.exists(iqtree_file):
+                try:
+                    with open(iqtree_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        iqtree_content = f.read()
+                    
+                    # 解析统计信息
+                    stats_patterns = [
+                        r"Log-likelihood:\s+([+-]?[\d\.]+).*?AICc:\s+([+-]?[\d\.]+).*?BIC:\s+([+-]?[\d\.]+)",
+                        r"Log-likelihood:\s+([+-]?[\d\.]+).*?AIC:\s+([+-]?[\d\.]+).*?AICc:\s+([+-]?[\d\.]+).*?BIC:\s+([+-]?[\d\.]+)"
+                    ]
+                    for pattern in stats_patterns:
+                        match = re.search(pattern, iqtree_content, re.DOTALL)
+                        if match:
+                            if len(match.groups()) == 3:
+                                results['log_likelihood'] = float(match.group(1))
+                                results['aicc'] = float(match.group(2))
+                                results['bic'] = float(match.group(3))
+                            elif len(match.groups()) == 4:
+                                results['log_likelihood'] = float(match.group(1))
+                                results['aic'] = float(match.group(2))
+                                results['aicc'] = float(match.group(3))
+                                results['bic'] = float(match.group(4))
+                            break
+                except:
+                    pass  # 统计信息解析失败不影响主要结果
+            
+        except Exception as e:
+            raise ValueError(f"Failed to parse .best_scheme.nex file: {str(e)}")
+        
+        return results
         
         return results

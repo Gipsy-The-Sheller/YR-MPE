@@ -183,18 +183,18 @@ class ModelFinderPlugin(BasePlugin):
                 # 强制打断自动导入，剩余一个空界面
                 return
             
-            # 获取 dataset 的设置（topo-linked/topo-unlinked, edge-linked/edge-unlinked）
+            # Get dataset settings (topo-linked/topo-unlinked, edge-linked/edge-unlinked)
             topo_linked = dataset_config.get('topo_linked', False)
             edge_linked = dataset_config.get('edge_linked', False)
             
-            # 映射到 partition mode
-            # topo-unlinked -> Separate Tree (TUL)
+            # Map to partition mode
+            # topo-unlinked -> Topo-unlinked (TUL)
             # edge-linked -> Edge-linked Equal (TL)
             # edge-unlinked -> Edge-unlinked (EUL)
             if not topo_linked:
-                self.partition_mode = PartitionMode.TUL  # Separate tree
+                self.partition_mode = PartitionMode.TUL  # Topo-unlinked
             elif edge_linked:
-                self.partition_mode = PartitionMode.TL  # Edge-linked equal
+                self.partition_mode = PartitionMode.TL  # Edge-linked Equal
             else:
                 self.partition_mode = PartitionMode.EUL  # Edge-unlinked
             
@@ -382,7 +382,6 @@ class ModelFinderPlugin(BasePlugin):
         
         # 分区状态标签（初始隐藏）
         self.partition_status_label = QLabel("No partitions defined")
-        self.partition_status_label.setStyleSheet("color: #6c757d; font-style: italic;")
         self.partition_status_label.setVisible(False)
         input_layout.addRow("", self.partition_status_label)
         
@@ -638,14 +637,15 @@ class ModelFinderPlugin(BasePlugin):
         self.add_console_message(f"Received {len(partitions)} partition definitions", "info")
     
     def update_partition_status(self):
-        """更新分区状态显示"""
+        """Update partition status display"""
         if not self.partition_definitions:
             self.partition_status_label.setText("No partitions defined")
         else:
             mode_text = {
                 PartitionMode.EL: "Edge-linked",
+                PartitionMode.TL: "Edge-linked",
                 PartitionMode.EUL: "Edge-unlinked",
-                PartitionMode.TUL: "Tree-unlinked"
+                PartitionMode.TUL: "Topo-unlinked"
             }.get(self.partition_mode, "Unknown")
             
             partition_names = [p.name for p in self.partition_definitions]
@@ -810,14 +810,102 @@ class ModelFinderPlugin(BasePlugin):
             self.add_console_message(f"Error parsing .iqtree file: {str(e)}", "error")
             return []
     
+    def parse_partition_results(self, iqtree_file_path):
+        """解析分区模式的.iqtree文件并提取分区模型信息"""
+        from .model_finder_partition_thread import PartitionResultParser
+        import os
+        
+        try:
+            # 优先尝试从 .best_scheme.nex 文件解析（包含分区合并后的最终结果）
+            best_scheme_file = iqtree_file_path.replace('.iqtree', '.best_scheme.nex')
+            if os.path.exists(best_scheme_file):
+                self.add_console_message(f"Parsing partition results from .best_scheme.nex file...", "info")
+                results = PartitionResultParser.parse_best_scheme_nex(best_scheme_file)
+                return results
+            else:
+                # 回退到从 .iqtree 文件解析
+                self.add_console_message(f"Parsing partition results from .iqtree file...", "info")
+                results = PartitionResultParser.parse_partition_results(iqtree_file_path)
+                return results
+        except Exception as e:
+            self.add_console_message(f"Error parsing partition results: {str(e)}", "error")
+            return None
+    
+    def _match_partition_by_range(self, partition_range: str, charset_ranges: Dict[str, List[str]]) -> str:
+        """
+        通过位点范围匹配分区到 charset 名称
+        
+        Args:
+            partition_range: 分区的位点范围（如 "1-744"）
+            charset_ranges: charset 名称到位点范围列表的映射
+            
+        Returns:
+            匹配的 charset 名称，如果没有匹配则返回 None
+        """
+        try:
+            # 解析分区范围
+            start, end = map(int, partition_range.split('-'))
+            
+            # 检查每个 charset 的范围
+            for charset_name, ranges in charset_ranges.items():
+                for range_str in ranges:
+                    # 解析 charset 范围
+                    cs_start, cs_end = map(int, range_str.split('-'))
+                    # 检查是否在范围内
+                    if start >= cs_start and end <= cs_end:
+                        return charset_name
+            
+            return None
+        except:
+            return None
+    
+    def _get_partition_model_by_range(self, partition_name: str, partition_range: str, 
+                                      partition_results: Dict) -> str:
+        """
+        通过位点范围获取分区的模型
+        
+        Args:
+            partition_name: 原始分区名称
+            partition_range: 分区的位点范围
+            partition_results: 分区结果字典
+            
+        Returns:
+            模型字符串
+        """
+        partition_models = partition_results.get('partition_models', {})
+        charset_ranges = partition_results.get('charset_ranges', {})
+        
+        # 直接匹配分区名称
+        if partition_name in partition_models:
+            return partition_models[partition_name]['model']
+        
+        # 通过位点范围匹配
+        if charset_ranges:
+            matched_charset = self._match_partition_by_range(partition_range, charset_ranges)
+            if matched_charset and matched_charset in partition_models:
+                return partition_models[matched_charset]['model']
+        
+        # 如果没有匹配，返回空字符串
+        return ''
+    
     def display_results(self, iqtree_files):
         """在输出标签页中显示结果"""
         if not iqtree_files:
             self.results_table.setRowCount(0)
             return
-            
-        # 解析第一个文件的结果（如果有多个文件，只显示第一个）
-        models_data = self.parse_iqtree_file(iqtree_files[0])
+        
+        # 根据是否启用分区模式选择不同的显示方式
+        if self.partition_mode_enabled:
+            # 分区模式显示
+            self.display_partition_results(iqtree_files[0])
+        else:
+            # 常规模型显示
+            self.display_single_model_results(iqtree_files[0])
+    
+    def display_single_model_results(self, iqtree_file):
+        """显示单一模型结果"""
+        # 解析结果
+        models_data = self.parse_iqtree_file(iqtree_file)
         
         # 更新表格
         self.results_table.setRowCount(len(models_data))
@@ -834,11 +922,67 @@ class ModelFinderPlugin(BasePlugin):
         self.results_table.resizeColumnsToContents()
         
         # 更新输出信息
-        self.output_info.setText(f"Results from: {os.path.basename(iqtree_files[0])}")
+        self.output_info.setText(f"Results from: {os.path.basename(iqtree_file)}")
+    
+    def display_partition_results(self, iqtree_file):
+        """显示分区模型结果"""
+        # 解析分区结果
+        partition_results = self.parse_partition_results(iqtree_file)
         
-        # 显示导出按钮
-        # self.export_to_mpea_btn.setVisible(True)
-        # self.export_table_to_mpea_btn.setVisible(True)
+        if not partition_results:
+            self.results_table.setRowCount(1)
+            self.results_table.setColumnCount(1)
+            item = QTableWidgetItem("Failed to parse partition results")
+            self.results_table.setItem(0, 0, item)
+            self.output_info.setText(f"Results from: {os.path.basename(iqtree_file)} (Parse Error)")
+            return
+        
+        # 修改表格为分区显示格式
+        self.results_table.setColumnCount(4)
+        self.results_table.setHorizontalHeaderLabels([
+            "Partition", "Range", "Best Model", "LogL"
+        ])
+        
+        # 填充分区数据
+        row = 0
+        
+        # 遍历分区定义
+        for partition in self.partition_definitions:
+            partition_name = partition.name
+            partition_range = partition.get_display_range()
+            
+            # 通过位点范围匹配获取模型
+            best_model = self._get_partition_model_by_range(
+                partition_name, partition.model_range, partition_results
+            )
+            
+            if not best_model:
+                best_model = 'Unknown'
+            
+            # 设置表格项
+            self.results_table.setItem(row, 0, QTableWidgetItem(partition_name))
+            self.results_table.setItem(row, 1, QTableWidgetItem(partition_range))
+            self.results_table.setItem(row, 2, QTableWidgetItem(best_model))
+            self.results_table.setItem(row, 3, QTableWidgetItem('N/A'))
+            
+            row += 1
+        
+        # 设置行高
+        self.results_table.resizeRowsToContents()
+        
+        # 调整列宽
+        self.results_table.resizeColumnsToContents()
+        
+        # 更新输出信息
+        mode_text = {
+            "EL": "Edge-linked partition model",
+            "TL": "Edge-linked partition model",
+            "EUL": "Edge-unlinked partition model",
+            "TUL": "Topo-unlinked partition model"
+        }.get(self.partition_mode.value, "Unknown partition model")
+        
+        info_text = f"{mode_text} | Partitions: {len(self.partition_definitions)}"
+        self.output_info.setText(info_text)
     
     def run_analysis(self):
         """运行ModelFinder分析"""
@@ -922,15 +1066,50 @@ class ModelFinderPlugin(BasePlugin):
         # 添加控制台消息
         self.add_console_message(f"ModelFinder completed successfully! Found {len(output_files)} result file(s)", "info")
         
+        # 根据是否启用分区模式发送不同的数据格式
+        if self.partition_mode_enabled and output_files:
+            # 解析分区结果并发送分区模型数据
+            partition_results = self.parse_partition_results(output_files[0])
+            if partition_results:
+                # 构建分区模型数据
+                model_data = {
+                    "type": "partitioned",
+                    "partition_mode": self.partition_mode.value,
+                    "best_scheme": partition_results.get('overall_model', ''),
+                    "partitions": [],
+                    "statistics": {
+                        "logL": partition_results.get('log_likelihood', 0.0),
+                        "aicc": partition_results.get('aicc', 0.0),
+                        "bic": partition_results.get('bic', 0.0)
+                    }
+                }
+                
+                # 添加分区信息
+                for partition in self.partition_definitions:
+                    partition_name = partition.name
+                    partition_range = partition.model_range  # 使用原始位点范围
+                    
+                    # 通过位点范围匹配获取模型
+                    best_model = self._get_partition_model_by_range(
+                        partition_name, partition_range, partition_results
+                    )
+                    
+                    model_data["partitions"].append({
+                        "name": partition_name,
+                        "range": partition.get_display_range(),
+                        "best_model": best_model,
+                        "logL": 0.0  # IQ-TREE 输出中可能没有每个分区的 logL
+                    })
+                
+                # 发送信号
+                self.export_model_result_signal.emit(model_data)
+        
         # 显示导入按钮（仅在从平台导入数据时显示）
         if self.import_from == "YR_MPEA":
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)
             
-        # 显示导出按钮
-        # self.export_to_mpea_btn.setVisible(True)
-        
         # 保存输出文件路径供导入使用
         self.alignment_output_files = output_files
         

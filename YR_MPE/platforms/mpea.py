@@ -2291,9 +2291,22 @@ class SingleGeneWorkspace(QWidget):
         # 存储模型数据
         if isinstance(model, dict):
             dataset_item.data = model
-            model_name = model.get("name", model.get("model", "Unknown Model"))
+            
+            # 检测模型类型（单一模型 vs 分区模型）
+            model_type = model.get("type", "single")
+            if model_type == "partitioned":
+                # 分区模型
+                dataset_item.model_sub_type = "partitioned"
+                dataset_item.partition_mode = model.get("partition_mode", "")
+                model_name = f"PartitionedModel_{model.get('partition_mode', '')}"
+            else:
+                # 单一模型
+                dataset_item.model_sub_type = "single"
+                model_name = model.get("name", model.get("model", "Unknown Model"))
         else:
+            # 兼容旧格式
             dataset_item.data = {"model": getattr(model, 'model_name', 'Unknown Model')}
+            dataset_item.model_sub_type = "single"
             model_name = getattr(model, 'model_name', 'Unknown Model')
         
         # 保留旧的数据结构（向后兼容）
@@ -2310,13 +2323,27 @@ class SingleGeneWorkspace(QWidget):
                 QMessageBox.warning(self, "Warning", "Failed to retrieve added model")
                 return
         
+        # 根据模型类型选择图标
+        if dataset_item.model_sub_type == "partitioned":
+            # 分区模型：根据分区模式选择图标
+            icon_map = {
+                "EL": "file/modelset-el.svg",
+                "TL": "file/modelset-el.svg",
+                "EUL": "file/modelset-eul.svg",
+                "TUL": "file/modelset-tul.svg"
+            }
+            icon_name = icon_map.get(dataset_item.partition_mode, "file/model.svg")
+        else:
+            # 单一模型
+            icon_name = "file/model.svg"
+        
         # 创建按钮
         self._create_item_button(
             dataset_item=dataset_item,
             item_type_key="models",
             row=1,
             col=len(self.item_buttons["models"]),
-            icon_name="file/model.svg"
+            icon_name=icon_name
         )
     
     def add_distance(self, distance):
@@ -2795,7 +2822,7 @@ class SingleGeneWorkspace(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to open alignment viewer: {str(e)}")
     
     def view_model_result(self, model_result):
-        """查看模型选择结果 - 增强版支持替换矩阵可视化"""
+        """查看模型选择结果 - 增强版支持替换矩阵可视化和分区模型显示"""
         try:
             from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QTabWidget, QWidget, QLabel, QTableWidget, QTableWidgetItem, QHeaderView
             from PyQt5.QtCore import Qt
@@ -2812,8 +2839,65 @@ class SingleGeneWorkspace(QWidget):
             tab_widget = QTabWidget()
             layout.addWidget(tab_widget)
             
-            # 格式化模型结果显示
-            if isinstance(model_result, dict) and "type" in model_result and model_result["type"] == "model_table":
+            # 检测是否为分区模型
+            if isinstance(model_result, dict) and model_result.get("type") == "partitioned":
+                # 显示分区模型结果
+                partition_mode = model_result.get("partition_mode", "")
+                best_scheme = model_result.get("best_scheme", "")
+                partitions = model_result.get("partitions", [])
+                statistics = model_result.get("statistics", {})
+                
+                # 分区模型标签页
+                partition_tab = QWidget()
+                partition_layout = QVBoxLayout()
+                
+                # 添加分区模式信息
+                mode_label = QLabel(f"Partition Mode: {partition_mode}")
+                mode_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+                partition_layout.addWidget(mode_label)
+                
+                # 添加最优方案信息
+                scheme_label = QLabel(f"Best Partition Scheme: {best_scheme}")
+                scheme_label.setStyleSheet("font-weight: bold; color: #007bff;")
+                partition_layout.addWidget(scheme_label)
+                
+                # 创建分区表格
+                partition_table = QTableWidget()
+                partition_table.setColumnCount(4)
+                partition_table.setHorizontalHeaderLabels(["Partition", "Range", "Best Model", "LogL"])
+                partition_table.setRowCount(len(partitions))
+                
+                # 填充分区数据
+                for row, partition in enumerate(partitions):
+                    partition_table.setItem(row, 0, QTableWidgetItem(partition.get("name", "")))
+                    partition_table.setItem(row, 1, QTableWidgetItem(partition.get("range", "")))
+                    partition_table.setItem(row, 2, QTableWidgetItem(partition.get("best_model", "")))
+                    partition_table.setItem(row, 3, QTableWidgetItem(str(partition.get("logL", "N/A"))))
+                
+                # 调整列宽
+                partition_table.resizeColumnsToContents()
+                partition_table.setAlternatingRowColors(True)
+                partition_layout.addWidget(partition_table)
+                
+                # 添加统计信息
+                stats_label = QLabel("\nOverall Statistics:")
+                stats_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+                partition_layout.addWidget(stats_label)
+                
+                stats_text = f"Log-likelihood: {statistics.get('logL', 'N/A')}\n"
+                stats_text += f"AICc: {statistics.get('aicc', 'N/A')}\n"
+                stats_text += f"BIC: {statistics.get('bic', 'N/A')}"
+                
+                stats_edit = QTextEdit()
+                stats_edit.setReadOnly(True)
+                stats_edit.setText(stats_text)
+                stats_edit.setMaximumHeight(100)
+                partition_layout.addWidget(stats_edit)
+                
+                partition_tab.setLayout(partition_layout)
+                tab_widget.addTab(partition_tab, "Partition Models")
+                
+            elif isinstance(model_result, dict) and "type" in model_result and model_result["type"] == "model_table":
                 # 显示模型表 - 使用QTableWidget而不是QTextEdit
                 headers = model_result.get("headers", ["Model", "AIC", "BIC"])
                 model_data = model_result.get("data", [])

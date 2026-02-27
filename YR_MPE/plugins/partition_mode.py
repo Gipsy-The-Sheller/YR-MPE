@@ -31,14 +31,14 @@ import tempfile
 
 
 class PartitionMode(Enum):
-    """分区模式枚举"""
+    """Partition mode enumeration"""
     EL = "EL"  # Edge-linked Proportional (-p)
-    TL = "TL"  # Edge-linked Equal (-q)
+    TL = "TL"  # Edge-linked Equal (-q) [Note: TL maps to -q parameter]
     EUL = "EUL"  # Edge-unlinked (-Q)
-    TUL = "TUL"  # Separate Tree Inference (-S)
+    TUL = "TUL"  # Topo-unlinked (-S)
     
     def get_iqtree_parameter(self) -> str:
-        """获取IQ-TREE对应的命令行参数"""
+        """Get IQ-TREE command line parameter"""
         mapping = {
             PartitionMode.EL: "-p",
             PartitionMode.TL: "-q",
@@ -48,12 +48,12 @@ class PartitionMode(Enum):
         return mapping[self]
     
     def get_description(self) -> str:
-        """获取模式描述"""
+        """Get mode description"""
         descriptions = {
-            PartitionMode.EL: "Edge-linked Proportional - 共享拓扑和共享分支长度（按比例缩放）",
-            PartitionMode.TL: "Edge-linked Equal - 共享拓扑和相等分支长度",
-            PartitionMode.EUL: "Edge-unlinked - 共享拓扑和独立分支长度",
-            PartitionMode.TUL: "Separate Tree Inference - 独立拓扑和独立分支长度"
+            PartitionMode.EL: "Edge-linked Proportional (-p) - Shared topology and branch lengths (scaled)",
+            PartitionMode.TL: "Edge-linked Equal (-q) - Shared topology and equal branch lengths",
+            PartitionMode.EUL: "Edge-unlinked (-Q) - Shared topology and independent branch lengths",
+            PartitionMode.TUL: "Topo-unlinked (-S) - Independent topology and branch lengths"
         }
         return descriptions[self]
 
@@ -1035,7 +1035,7 @@ def dataset_to_model_finder_partitions(dataset_info, dataset_items: List) -> Tup
     # - topo_linked=True, edge_linked=False → EUL (Edge-unlinked)
     # - topo_linked=True, edge_linked=True → TL (Edge-linked Equal)
     if not topo_linked:
-        partition_mode = PartitionMode.TUL  # Separate Tree
+        partition_mode = PartitionMode.TUL  # Topo-unlinked
     elif edge_linked:
         partition_mode = PartitionMode.TL   # Edge-linked Equal
     else:
