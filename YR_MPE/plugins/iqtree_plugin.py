@@ -20,18 +20,23 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, 
                              QMessageBox, QGroupBox, QFormLayout, QLineEdit, 
                              QSpinBox, QCheckBox, QLabel, QComboBox, QTextEdit,
-                             QTabWidget, QToolButton, QApplication, QFrame, QDoubleSpinBox)
+                             QTabWidget, QToolButton, QApplication, QFrame, QDoubleSpinBox, QDialog)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QTextCursor, QIcon
 import tempfile
 import os
 import re
-from typing import List, Optional
+from typing import List, Optional, Dict
+from Bio import SeqIO
 
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
 import subprocess
-from Bio import SeqIO
+
+# 导入分区模式相关模块
+from .partition_mode import PartitionDefinition, PartitionMode
+from .iqtree_partition_ui import IQTreePartitionDialog
+from .iqtree_partition_thread import IQTreePartitionThread
 
 
 class IQTreeThread(BaseProcessThread):
@@ -110,9 +115,17 @@ class IQTreePlugin(BasePlugin):
     export_model_result_signal = pyqtSignal(dict)  # 导出模型结果信号
     export_phylogeny_result_signal = pyqtSignal(dict)  # 导出系统发育树结果信号
     
-    def __init__(self, import_from=None, import_data=None):
+    def __init__(self, import_from=None, import_data=None, **kwargs):
         """初始化IQ-TREE插件"""
-        super().__init__(import_from, import_data)
+        super().__init__(import_from, import_data, **kwargs)
+        
+        # 初始化分区模式相关变量
+        self.partition_mode_enabled = False
+        self.partition_definitions: List[PartitionDefinition] = []
+        self.partition_mode = PartitionMode.EL
+        self.partition_bootstrap_enabled = True
+        self.partition_bootstrap_replicates = 1000
+        self.partition_dialog = None
         
         # 特别处理YR-MPEA导入的数据
         if import_from == "YR_MPEA" and import_data is not None:
@@ -163,6 +176,27 @@ class IQTreePlugin(BasePlugin):
         self.sequence_text.setMaximumHeight(200)
         self.sequence_text.textChanged.connect(self.on_text_changed)
         input_layout.addRow("Sequence text:", self.sequence_text)
+        
+        # 分区模式复选框
+        self.partition_mode_checkbox = QCheckBox("Enable Partition Mode")
+        self.partition_mode_checkbox.setChecked(False)
+        self.partition_mode_checkbox.stateChanged.connect(self.on_partition_mode_toggled)
+        input_layout.addRow("", self.partition_mode_checkbox)
+        
+        # 分区模式配置按钮（初始隐藏）
+        partition_config_layout = QHBoxLayout()
+        self.partition_config_btn = QPushButton("Configure Partitions")
+        self.partition_config_btn.clicked.connect(self.open_partition_dialog)
+        self.partition_config_btn.setVisible(False)
+        partition_config_layout.addWidget(self.partition_config_btn)
+        partition_config_layout.addStretch()
+        input_layout.addRow("", partition_config_layout)
+        
+        # 分区状态标签（初始隐藏）
+        self.partition_status_label = QLabel("No partitions defined")
+        self.partition_status_label.setStyleSheet("color: #6c757d; font-style: italic;")
+        self.partition_status_label.setVisible(False)
+        input_layout.addRow("", self.partition_status_label)
         
         # 处理导入的数据
         if self.import_file:
@@ -614,9 +648,17 @@ class IQTreePlugin(BasePlugin):
         if not self.tool_path or not os.path.exists(self.tool_path):
             QMessageBox.critical(self, "Error", "IQ-TREE executable file not found!")
             return
+        
+        # 如果启用了分区模式但没有定义分区
+        if self.partition_mode_enabled and not self.partition_definitions:
+            QMessageBox.warning(self, "Warning", "Partition mode is enabled but no partitions are defined. Please configure partitions first.")
+            return
             
         # 添加控制台消息
-        self.add_console_message("Starting phylogenetic inference...", "info")
+        if self.partition_mode_enabled:
+            self.add_console_message(f"Starting IQ-TREE phylogenetic inference with partition mode ({self.partition_mode.value})...", "info")
+        else:
+            self.add_console_message("Starting IQ-TREE phylogenetic inference...", "info")
         
         # 准备输入文件
         input_files = self.prepare_input_files()
@@ -630,10 +672,30 @@ class IQTreePlugin(BasePlugin):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # 未知进度
         
-        # 在单独的线程中运行IQ-TREE
-        self.analysis_thread = IQTreeThread(
-            self.tool_path, input_files, self.get_parameters(), self.imported_files
-        )
+        # 根据是否启用分区模式选择不同的线程类
+        if self.partition_mode_enabled:
+            # 使用分区模式线程
+            model_params = {
+                'seq_type': self.seq_type_combo.currentText(),
+                'model': self.build_model_string(),
+                'threads': self.threads_spinbox.value()
+            }
+            
+            self.analysis_thread = IQTreePartitionThread(
+                self.tool_path,
+                input_files[0] if len(input_files) == 1 else input_files,
+                self.partition_definitions,
+                self.partition_mode,
+                model_params,
+                self.partition_bootstrap_enabled,
+                self.partition_bootstrap_replicates
+            )
+        else:
+            # 使用常规线程
+            self.analysis_thread = IQTreeThread(
+                self.tool_path, input_files, self.get_parameters(), self.imported_files
+            )
+        
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
         self.analysis_thread.finished.connect(self.analysis_finished)
         self.analysis_thread.error.connect(self.analysis_error)
@@ -758,7 +820,7 @@ class IQTreePlugin(BasePlugin):
         if not hasattr(self, 'current_output_files') or not self.current_output_files:
             QMessageBox.warning(self, "Warning", "No phylogenetic results to import.")
             return
-            
+
         try:
             # 读取系统发育树文件内容
             phylogenies = []
@@ -768,19 +830,20 @@ class IQTreePlugin(BasePlugin):
                         content = f.read()
                         phylogenies.append({
                             'filename': os.path.basename(output_file),
-                            'content': content
+                            'content': content,
+                            'file_path': output_file  # 添加文件路径
                         })
-            
+
             if not phylogenies:
                 QMessageBox.warning(self, "Warning", "No phylogenetic trees found in results.")
                 return
-                
+
             # 发送信号将数据导入到平台
             self.import_phylogenies_to_platform(phylogenies)
-            
+
             # 显示成功消息
             QMessageBox.information(self, "Success", f"Successfully imported {len(phylogenies)} phylogenetic tree(s) to the platform.")
-            
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to import phylogenetic trees: {str(e)}")
     
@@ -807,6 +870,142 @@ class IQTreePlugin(BasePlugin):
         else:
             self.import_file = None
             self.imported_files = []
+    
+    def on_partition_mode_toggled(self, state):
+        """处理分区模式复选框切换"""
+        self.partition_mode_enabled = (state == Qt.Checked)
+        
+        if self.partition_mode_enabled:
+            # 启用分区模式
+            self.partition_config_btn.setVisible(True)
+            self.partition_status_label.setVisible(True)
+            self.add_console_message("Partition mode enabled. Please configure partitions.", "info")
+            
+            # 禁用Substitution Model Options（分区模式下使用MFP+MERGE）
+            self.model_combo.setEnabled(False)
+            self.gamma_checkbox.setEnabled(False)
+            self.gamma_spinbox.setEnabled(False)
+            self.invar_checkbox.setEnabled(False)
+            self.freerate_checkbox.setEnabled(False)
+            self.ascertain_bias_checkbox.setEnabled(False)
+            self.state_freq_combo.setEnabled(False)
+            
+            # UFBOOT保持启用（分区模式下仍然需要Bootstrap）
+            # 不禁用UFBOOT
+        else:
+            # 禁用分区模式
+            self.partition_config_btn.setVisible(False)
+            self.partition_status_label.setVisible(False)
+            self.partition_definitions = []
+            self.add_console_message("Partition mode disabled.", "info")
+            
+            # 启用Substitution Model Options
+            self.model_combo.setEnabled(True)
+            self.gamma_checkbox.setEnabled(True)
+            self.gamma_spinbox.setEnabled(self.gamma_checkbox.isChecked())
+            self.invar_checkbox.setEnabled(True)
+            self.freerate_checkbox.setEnabled(True)
+            self.ascertain_bias_checkbox.setEnabled(True)
+            self.state_freq_combo.setEnabled(True)
+            
+            # UFBOOT保持启用
+            self.ufboot_checkbox.setEnabled(True)
+            self.ufboot_spinbox.setEnabled(self.ufboot_checkbox.isChecked())
+    
+    def open_partition_dialog(self):
+        """打开分区配置对话框"""
+        try:
+            # 创建分区对话框
+            if self.partition_dialog is None:
+                self.partition_dialog = IQTreePartitionDialog(parent=self)
+                # 连接信号
+                self.partition_dialog.partitions_selected.connect(self.handle_partitions_selected)
+            
+            # 设置当前分区定义
+            if self.partition_definitions:
+                self.partition_dialog.set_partitions(self.partition_definitions)
+                self.partition_dialog.set_partition_mode(self.partition_mode)
+            
+            # 显示对话框
+            if self.partition_dialog.exec_() == QDialog.Accepted:
+                # 用户点击了OK
+                partitions = self.partition_dialog.get_partitions()
+                mode = self.partition_dialog.get_partition_mode()
+                bootstrap_enabled = self.partition_dialog.enable_bootstrap.isChecked()
+                bootstrap_replicates = self.partition_dialog.bootstrap_replicates.value()
+                
+                # 更新分区定义
+                self.partition_definitions = partitions
+                self.partition_mode = mode
+                self.partition_bootstrap_enabled = bootstrap_enabled
+                self.partition_bootstrap_replicates = bootstrap_replicates
+                
+                # 更新状态显示
+                self.update_partition_status()
+                
+                self.add_console_message(f"Partition configuration updated: {len(partitions)} partitions, mode: {mode.value}", "info")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open partition dialog: {str(e)}")
+    
+    def handle_partitions_selected(self, partitions: List[PartitionDefinition]):
+        """处理分区定义信号"""
+        self.partition_definitions = partitions
+        self.update_partition_status()
+        self.add_console_message(f"Received {len(partitions)} partition definitions", "info")
+    
+    def update_partition_status(self):
+        """更新分区状态显示"""
+        if not self.partition_definitions:
+            self.partition_status_label.setText("No partitions defined")
+        else:
+            mode_text = {
+                PartitionMode.EL: "Edge-linked",
+                PartitionMode.TL: "Edge-linked",
+                PartitionMode.EUL: "Edge-unlinked",
+                PartitionMode.TUL: "Topo-unlinked"
+            }.get(self.partition_mode, "Unknown")
+            
+            partition_names = [p.name for p in self.partition_definitions]
+            if len(partition_names) <= 3:
+                names_text = ", ".join(partition_names)
+            else:
+                names_text = f"{partition_names[0]}, {partition_names[1]}, ... ({len(partition_names)} total)"
+            
+            bootstrap_text = f", Bootstrap: {self.partition_bootstrap_replicates}" if self.partition_bootstrap_enabled else ""
+            self.partition_status_label.setText(f"Mode: {mode_text} | Partitions: {names_text}{bootstrap_text}")
+    
+    def build_model_string(self) -> str:
+        """构建模型字符串（用于分区模式）"""
+        # 如果分区中已指定模型，使用MFP+MERGE进行模型选择和合并
+        has_models = any(p.selected_model for p in self.partition_definitions)
+        
+        if has_models:
+            return "MFP+MERGE"
+        else:
+            # 使用用户指定的模型
+            model_text = self.model_combo.currentText()
+            model = model_text
+            
+            if " (" in model_text and ")" in model_text:
+                model = model_text.split(" (")[0]
+            
+            if self.gamma_checkbox.isChecked():
+                model += f"+G{self.gamma_spinbox.value()}"
+            
+            if self.invar_checkbox.isChecked():
+                model += "+I"
+                
+            if self.freerate_checkbox.isChecked():
+                model += "+R"
+
+            if self.ascertain_bias_checkbox.isChecked():
+                model += "+ASC"
+
+            stfreq = self.state_freq_combo.currentText()
+            model += {"Estimated": "", "Empirical (+F)": "+F", "ML-optimized (+FO)": "+FO", "Equal (+FQ)": "+FQ"}[stfreq]
+            
+            return model
 
 
 # 插件入口点
@@ -817,5 +1016,5 @@ class IQTreePluginEntry:
         self.config = config
         self.plugin_path = plugin_path
     
-    def run(self, import_from=None, import_data=None):
-        return IQTreePlugin(import_from=import_from, import_data=import_data)
+    def run(self, import_from=None, import_data=None, **kwargs):
+        return IQTreePlugin(import_from=import_from, import_data=import_data, **kwargs)
