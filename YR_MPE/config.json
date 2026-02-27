@@ -12,7 +12,55 @@
         "path": "/bin/mafft/mafft.bat"
     },
     {
-        "name": "IQ-Tree 3",
-        "path": "/bin/iqtree/iqtree3.exe"
+        "name": "IQ-TREE 3",
+        "path": "/bin/iqtree3/iqtree3.exe"
+    },
+    {
+        "name": "TrimAl",
+        "path": "/bin/trimAl/bin/trimal.exe"
+    },
+    {
+        "name": "GBlocks",
+        "path": "/bin/Gblocks/GBlocks.exe"
+    },
+    {
+        "name": "PhyloBayes-mpi",
+        "path": "/bin/pbmpi-1.9/pb_mpi.exe"
+    },
+    {
+        "name": "MPIRun",
+        "path": "/bin/msmpi/mpiexec.exe"
+    },
+    {
+        "name": "PhyloBayes-bpcomp",
+        "path": "/bin/pbmpi-1.9/bpcomp.exe"
+    },
+    {
+        "name": "MrBayes-MPI-BEAGLE",
+        "path": "/bin/mb/mb.exe"
+    },
+    {
+        "name": "caster-site",
+        "path": "/bin/aster/caster-site.exe"
+    },
+    {
+        "name": "astral",
+        "path": "/bin/aster/astral.bat"
+    },
+    {
+        "name": "MACSE2",
+        "path": "/bin/macse/macse.bat"
+    },
+    {
+        "name": "LSD2",
+        "path": "/bin/lsd2/lsd2.exe"
+    },
+    {
+        "name": "DecentTree",
+        "path": "/bin/decenttree/decenttree.exe"
+    },
+    {
+        "name": "MPBoot",
+        "path": "/bin/mpboot/mpboot.exe"
     }
 ]
