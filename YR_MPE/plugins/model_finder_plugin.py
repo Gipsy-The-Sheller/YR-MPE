@@ -815,20 +815,53 @@ class ModelFinderPlugin(BasePlugin):
         from .model_finder_partition_thread import PartitionResultParser
         import os
         
+        self.add_console_message(f"Starting to parse partition results from: {os.path.basename(iqtree_file_path)}", "info")
+        
         try:
-            # 优先尝试从 .best_scheme.nex 文件解析（包含分区合并后的最终结果）
+            # 先从 .iqtree 文件获取统计信息和分区模型
+            self.add_console_message(f"Parsing statistics from .iqtree file...", "info")
+            iqt_results = PartitionResultParser.parse_partition_results(iqtree_file_path)
+            
+            # 检查 .iqtree 文件解析结果
+            if not iqt_results:
+                self.add_console_message("Failed to parse .iqtree file", "error")
+                return None
+            
+            self.add_console_message(f"IQ-TREE parsed: {len(iqt_results.get('partition_models', {}))} partitions, LogL={iqt_results.get('log_likelihood', 'N/A')}", "info")
+            
+            # 然后尝试从 .best_scheme.nex 文件获取分区定义（如果存在）
             best_scheme_file = iqtree_file_path.replace('.iqtree', '.best_scheme.nex')
             if os.path.exists(best_scheme_file):
-                self.add_console_message(f"Parsing partition results from .best_scheme.nex file...", "info")
-                results = PartitionResultParser.parse_best_scheme_nex(best_scheme_file)
-                return results
-            else:
-                # 回退到从 .iqtree 文件解析
-                self.add_console_message(f"Parsing partition results from .iqtree file...", "info")
-                results = PartitionResultParser.parse_partition_results(iqtree_file_path)
-                return results
+                self.add_console_message(f"Parsing partition definitions from .best_scheme.nex file...", "info")
+                try:
+                    bs_results = PartitionResultParser.parse_best_scheme_nex(best_scheme_file)
+                    
+                    if bs_results:
+                        # 合并结果：使用 .best_scheme.nex 的分区定义，.iqtree 的统计信息
+                        bs_results['log_likelihood'] = iqt_results.get('log_likelihood', 0.0)
+                        bs_results['aic'] = iqt_results.get('aic', 0.0)
+                        bs_results['aicc'] = iqt_results.get('aicc', 0.0)
+                        bs_results['bic'] = iqt_results.get('bic', 0.0)
+                        bs_results['aic_score'] = iqt_results.get('aic_score', 0.0)
+                        bs_results['aicc_score'] = iqt_results.get('aicc_score', 0.0)
+                        bs_results['bic_score'] = iqt_results.get('bic_score', 0.0)
+                        self.add_console_message(f"Combined results: {len(bs_results.get('partition_models', {}))} partitions", "info")
+                        return bs_results
+                    else:
+                        self.add_console_message("parse_best_scheme_nex returned None, using .iqtree results only", "warning")
+                except Exception as e:
+                    import traceback
+                    self.add_console_message(f"Failed to parse .best_scheme.nex: {str(e)}", "warning")
+                    self.add_console_message(f"Traceback: {traceback.format_exc()}", "warning")
+            
+            # 使用 .iqtree 文件的结果
+            self.add_console_message(f"Using .iqtree results: {len(iqt_results.get('partition_models', {}))} partitions", "info")
+            return iqt_results
+            
         except Exception as e:
+            import traceback
             self.add_console_message(f"Error parsing partition results: {str(e)}", "error")
+            self.add_console_message(f"Traceback: {traceback.format_exc()}", "error")
             return None
     
     def _match_partition_by_range(self, partition_range: str, charset_ranges: Dict[str, List[str]]) -> str:
@@ -836,15 +869,23 @@ class ModelFinderPlugin(BasePlugin):
         通过位点范围匹配分区到 charset 名称
         
         Args:
-            partition_range: 分区的位点范围（如 "1-744"）
+            partition_range: 分区的位点范围（如 "1-744" 或 "gene1.fas:1-1000"）
             charset_ranges: charset 名称到位点范围列表的映射
             
         Returns:
             匹配的 charset 名称，如果没有匹配则返回 None
         """
         try:
+            # 提取纯数字范围（去除文件前缀）
+            if ':' in partition_range:
+                # 格式: "file:range"，提取range部分
+                pure_range = partition_range.split(':', 1)[1]
+            else:
+                # 格式: "range"
+                pure_range = partition_range
+            
             # 解析分区范围
-            start, end = map(int, partition_range.split('-'))
+            start, end = map(int, pure_range.split('-'))
             
             # 检查每个 charset 的范围
             for charset_name, ranges in charset_ranges.items():
@@ -859,35 +900,44 @@ class ModelFinderPlugin(BasePlugin):
         except:
             return None
     
-    def _get_partition_model_by_range(self, partition_name: str, partition_range: str, 
-                                      partition_results: Dict) -> str:
-        """
-        通过位点范围获取分区的模型
-        
-        Args:
-            partition_name: 原始分区名称
-            partition_range: 分区的位点范围
-            partition_results: 分区结果字典
+    def _get_partition_model_by_range(self, partition_name: str, partition_range: str,
+                                          partition_results: Dict) -> str:
+            """
+            通过位点范围获取分区的模型
             
-        Returns:
-            模型字符串
-        """
-        partition_models = partition_results.get('partition_models', {})
-        charset_ranges = partition_results.get('charset_ranges', {})
-        
-        # 直接匹配分区名称
-        if partition_name in partition_models:
-            return partition_models[partition_name]['model']
-        
-        # 通过位点范围匹配
-        if charset_ranges:
-            matched_charset = self._match_partition_by_range(partition_range, charset_ranges)
-            if matched_charset and matched_charset in partition_models:
-                return partition_models[matched_charset]['model']
-        
-        # 如果没有匹配，返回空字符串
-        return ''
-    
+            Args:
+                partition_name: 原始分区名称
+                partition_range: 分区的位点范围
+                partition_results: 分区结果字典
+                
+            Returns:
+                模型字符串
+            """
+            partition_models = partition_results.get('partition_models', {})
+            charset_ranges = partition_results.get('charset_ranges', {})
+            
+            self.add_console_message(f"_get_partition_model_by_range: partition_name={partition_name}, partition_range={partition_range}", "info")
+            self.add_console_message(f"_get_partition_model_by_range: partition_models keys={list(partition_models.keys())}", "info")
+            self.add_console_message(f"_get_partition_model_by_range: charset_ranges={charset_ranges}", "info")
+            
+            # 直接匹配分区名称
+            if partition_name in partition_models:
+                model = partition_models[partition_name]['model']
+                self.add_console_message(f"_get_partition_model_by_range: Direct match found! model={model}", "info")
+                return model
+            
+            # 通过位点范围匹配
+            if charset_ranges:
+                matched_charset = self._match_partition_by_range(partition_range, charset_ranges)
+                self.add_console_message(f"_get_partition_model_by_range: Matched charset={matched_charset}", "info")
+                if matched_charset and matched_charset in partition_models:
+                    model = partition_models[matched_charset]['model']
+                    self.add_console_message(f"_get_partition_model_by_range: Range match found! model={model}", "info")
+                    return model
+            
+            # 如果没有匹配，返回空字符串
+            self.add_console_message(f"_get_partition_model_by_range: No match found, returning empty string", "info")
+            return ''    
     def display_results(self, iqtree_files):
         """在输出标签页中显示结果"""
         if not iqtree_files:
@@ -937,11 +987,30 @@ class ModelFinderPlugin(BasePlugin):
             self.output_info.setText(f"Results from: {os.path.basename(iqtree_file)} (Parse Error)")
             return
         
+        # 调试：输出 partition_results 的所有键
+        self.add_console_message(f"Partition results keys: {list(partition_results.keys())}", "info")
+        self.add_console_message(f"Log-likelihood value: {partition_results.get('log_likelihood', 'N/A')}", "info")
+        self.add_console_message(f"AICc values: aicc_score={partition_results.get('aicc_score', 'N/A')}, aicc={partition_results.get('aicc', 'N/A')}", "info")
+        self.add_console_message(f"BIC values: bic_score={partition_results.get('bic_score', 'N/A')}, bic={partition_results.get('bic', 'N/A')}", "info")
+        
+        # 调试：输出 partition_models 数据
+        partition_models = partition_results.get('partition_models', {})
+        self.add_console_message(f"Partition models: {partition_models}", "info")
+        
+        # 调试：输出 partition_definitions 数据
+        self.add_console_message(f"Partition definitions count: {len(self.partition_definitions)}", "info")
+        for p in self.partition_definitions:
+            self.add_console_message(f"  Partition: name={p.name}, range={p.model_range}, display_range={p.get_display_range()}", "info")
+        
         # 修改表格为分区显示格式
         self.results_table.setColumnCount(4)
         self.results_table.setHorizontalHeaderLabels([
             "Partition", "Range", "Best Model", "LogL"
         ])
+        
+        # 先设置表格行数（在填充项目之前）
+        total_rows = len(self.partition_definitions)
+        self.results_table.setRowCount(total_rows)
         
         # 填充分区数据
         row = 0
@@ -951,10 +1020,14 @@ class ModelFinderPlugin(BasePlugin):
             partition_name = partition.name
             partition_range = partition.get_display_range()
             
+            self.add_console_message(f"Processing partition: name={partition_name}, model_range={partition.model_range}, display_range={partition_range}", "info")
+            
             # 通过位点范围匹配获取模型
             best_model = self._get_partition_model_by_range(
                 partition_name, partition.model_range, partition_results
             )
+            
+            self.add_console_message(f"Best model for partition '{partition_name}': {best_model}", "info")
             
             if not best_model:
                 best_model = 'Unknown'
@@ -972,8 +1045,12 @@ class ModelFinderPlugin(BasePlugin):
         
         # 调整列宽
         self.results_table.resizeColumnsToContents()
+        self.results_table.setAlternatingRowColors(True)
         
-        # 更新输出信息
+        # 获取 info_label（第一个子组件）
+        info_label = self.output_tab.layout().itemAt(0).widget()
+        
+        # 构建分区模式信息
         mode_text = {
             "EL": "Edge-linked partition model",
             "TL": "Edge-linked partition model",
@@ -981,8 +1058,48 @@ class ModelFinderPlugin(BasePlugin):
             "TUL": "Topo-unlinked partition model"
         }.get(self.partition_mode.value, "Unknown partition model")
         
-        info_text = f"{mode_text} | Partitions: {len(self.partition_definitions)}"
-        self.output_info.setText(info_text)
+        # 构建统计信息 - 优先使用 score 后缀的键，否则使用无后缀的键
+        logl = partition_results.get('log_likelihood', 
+               partition_results.get('tree_log_likelihood', 'N/A'))
+        aicc = partition_results.get('aicc_score', 
+              partition_results.get('aicc', 'N/A'))
+        bic = partition_results.get('bic_score', 
+             partition_results.get('bic', 'N/A'))
+        
+        # 如果仍然是 'N/A' 或空值，检查是否有其他键名
+        if aicc == 'N/A' or aicc == '':
+            # 尝试从 partition_models 中获取第一个分区的 AICc
+            partition_models = partition_results.get('partition_models', {})
+            if partition_models:
+                first_partition = list(partition_models.values())[0]
+                self.add_console_message(f"First partition data: {first_partition}", "info")
+                if 'aic' in first_partition:
+                    aicc = first_partition['aic']
+        
+        if bic == 'N/A' or bic == '':
+            # 尝试从 partition_models 中获取第一个分区的 BIC
+            partition_models = partition_results.get('partition_models', {})
+            if partition_models:
+                first_partition = list(partition_models.values())[0]
+                if 'bic' in first_partition:
+                    bic = first_partition['bic']
+        
+        # 格式化数值显示
+        if logl != 'N/A' and isinstance(logl, float):
+            logl = f"{logl:.4f}"
+        if aicc != 'N/A' and isinstance(aicc, float):
+            aicc = f"{aicc:.4f}"
+        if bic != 'N/A' and isinstance(bic, float):
+            bic = f"{bic:.4f}"
+        
+        # 调试：输出最终值
+        self.add_console_message(f"Final display values - LogL: {logl}, AICc: {aicc}, BIC: {bic}", "info")
+        
+        # 更新 info_label 显示分区模式
+        info_label.setText(f"{mode_text}")
+        
+        # 更新 output_info 显示统计信息
+        self.output_info.setText(f"Log-likelihood: {logl} | AICc: {aicc} | BIC: {bic}")
     
     def run_analysis(self):
         """运行ModelFinder分析"""
@@ -1071,6 +1188,10 @@ class ModelFinderPlugin(BasePlugin):
             # 解析分区结果并发送分区模型数据
             partition_results = self.parse_partition_results(output_files[0])
             if partition_results:
+                # 统一使用一种键名格式
+                aicc_value = partition_results.get('aicc_score', partition_results.get('aicc', 0.0))
+                bic_value = partition_results.get('bic_score', partition_results.get('bic', 0.0))
+                
                 # 构建分区模型数据
                 model_data = {
                     "type": "partitioned",
@@ -1079,8 +1200,8 @@ class ModelFinderPlugin(BasePlugin):
                     "partitions": [],
                     "statistics": {
                         "logL": partition_results.get('log_likelihood', 0.0),
-                        "aicc": partition_results.get('aicc', 0.0),
-                        "bic": partition_results.get('bic', 0.0)
+                        "aicc": aicc_value,
+                        "bic": bic_value
                     }
                 }
                 

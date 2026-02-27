@@ -2843,7 +2843,6 @@ class SingleGeneWorkspace(QWidget):
             if isinstance(model_result, dict) and model_result.get("type") == "partitioned":
                 # 显示分区模型结果
                 partition_mode = model_result.get("partition_mode", "")
-                best_scheme = model_result.get("best_scheme", "")
                 partitions = model_result.get("partitions", [])
                 statistics = model_result.get("statistics", {})
                 
@@ -2852,14 +2851,15 @@ class SingleGeneWorkspace(QWidget):
                 partition_layout = QVBoxLayout()
                 
                 # 添加分区模式信息
-                mode_label = QLabel(f"Partition Mode: {partition_mode}")
-                mode_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-                partition_layout.addWidget(mode_label)
+                mode_text = {
+                    "EL": "Edge-linked partition model",
+                    "TL": "Edge-linked partition model",
+                    "EUL": "Edge-unlinked partition model",
+                    "TUL": "Topo-unlinked partition model"
+                }.get(partition_mode, "Unknown partition model")
                 
-                # 添加最优方案信息
-                scheme_label = QLabel(f"Best Partition Scheme: {best_scheme}")
-                scheme_label.setStyleSheet("font-weight: bold; color: #007bff;")
-                partition_layout.addWidget(scheme_label)
+                mode_label = QLabel(mode_text)
+                partition_layout.addWidget(mode_label)
                 
                 # 创建分区表格
                 partition_table = QTableWidget()
@@ -2880,19 +2880,10 @@ class SingleGeneWorkspace(QWidget):
                 partition_layout.addWidget(partition_table)
                 
                 # 添加统计信息
-                stats_label = QLabel("\nOverall Statistics:")
-                stats_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+                stats_text = f"Log-likelihood: {statistics.get('logL', 'N/A')} | AICc: {statistics.get('aicc', 'N/A')} | BIC: {statistics.get('bic', 'N/A')}"
+                
+                stats_label = QLabel(stats_text)
                 partition_layout.addWidget(stats_label)
-                
-                stats_text = f"Log-likelihood: {statistics.get('logL', 'N/A')}\n"
-                stats_text += f"AICc: {statistics.get('aicc', 'N/A')}\n"
-                stats_text += f"BIC: {statistics.get('bic', 'N/A')}"
-                
-                stats_edit = QTextEdit()
-                stats_edit.setReadOnly(True)
-                stats_edit.setText(stats_text)
-                stats_edit.setMaximumHeight(100)
-                partition_layout.addWidget(stats_edit)
                 
                 partition_tab.setLayout(partition_layout)
                 tab_widget.addTab(partition_tab, "Partition Models")

@@ -286,62 +286,81 @@ class PartitionResultParser:
             # 更新分区数量
             results['num_partitions'] = len(results['partition_models'])
             
-            # 解析统计信息（IQ-TREE 3格式）
-            stats_patterns = [
-                r"Log-likelihood:\s+([+-]?[\d\.]+).*?AICc:\s+([+-]?[\d\.]+).*?BIC:\s+([+-]?[\d\.]+)",
-                r"Log-likelihood:\s+([+-]?[\d\.]+).*?AIC:\s+([+-]?[\d\.]+).*?AICc:\s+([+-]?[\d\.]+).*?BIC:\s+([+-]?[\d\.]+)"
-            ]
-            for pattern in stats_patterns:
-                match = re.search(pattern, content, re.DOTALL)
-                if match:
-                    if len(match.groups()) == 3:
-                        results['log_likelihood'] = float(match.group(1))
-                        results['aicc'] = float(match.group(2))
-                        results['bic'] = float(match.group(3))
-                    elif len(match.groups()) == 4:
-                        results['log_likelihood'] = float(match.group(1))
-                        results['aic'] = float(match.group(2))
-                        results['aicc'] = float(match.group(3))
-                        results['bic'] = float(match.group(4))
-                    break
+            # 解析统计信息（IQ-TREE 3格式）- 尝试两种模式
+            try:
+                stats_patterns = [
+                    r"Log-likelihood:\s+([+-]?[\d\.]+).*?AICc:\s+([+-]?[\d\.]+).*?BIC:\s+([+-]?[\d\.]+)",
+                    r"Log-likelihood:\s+([+-]?[\d\.]+).*?AIC:\s+([+-]?[\d\.]+).*?AICc:\s+([+-]?[\d\.]+).*?BIC:\s+([+-]?[\d\.]+)"
+                ]
+                
+                # 先尝试第一种模式
+                for pattern in stats_patterns:
+                    match = re.search(pattern, content, re.DOTALL)
+                    if match:
+                        if len(match.groups()) == 3:
+                            results['log_likelihood'] = float(match.group(1))
+                            results['aicc'] = float(match.group(2))
+                            results['bic'] = float(match.group(3))
+                        elif len(match.groups()) == 4:
+                            results['log_likelihood'] = float(match.group(1))
+                            results['aic'] = float(match.group(2))
+                            results['aicc'] = float(match.group(3))
+                            results['bic'] = float(match.group(4))
+                        break
+            except Exception as e:
+                pass  # 统计信息解析失败不影响主要结果
             
-            # 解析 "TREE USED FOR ModelFinder" 部分的详细信息
-            # Log-likelihood of the tree: -1519.5139 (s.e. 51.6783)
-            tree_logl_pattern = r"Log-likelihood of the tree:\s+([+-]?[\d\.]+)\s+\(s\.e\.\s+([+-]?[\d\.]+)\)"
-            tree_logl_match = re.search(tree_logl_pattern, content)
-            if tree_logl_match:
-                results['tree_log_likelihood'] = float(tree_logl_match.group(1))
-                results['tree_log_likelihood_se'] = float(tree_logl_match.group(2))
+            # 解析 "TREE USED FOR ModelFinder" 部分的详细信息（优先级更高）
+            try:
+                # Log-likelihood of the tree: -1519.5139 (s.e. 51.6783)
+                tree_logl_pattern = r"Log-likelihood of the tree:\s+([+-]?[\d\.]+)\s+\(s\.e\.\s+([+-]?[\d\.]+)\)"
+                tree_logl_match = re.search(tree_logl_pattern, content)
+                if tree_logl_match:
+                    results['log_likelihood'] = float(tree_logl_match.group(1))
+                    results['tree_log_likelihood'] = float(tree_logl_match.group(1))
+                    results['tree_log_likelihood_se'] = float(tree_logl_match.group(2))
+                
+                # Unconstrained log-likelihood (without tree): -2518.4649
+                unconstrained_logl_pattern = r"Unconstrained log-likelihood \(without tree\):\s+([+-]?[\d\.]+)"
+                unconstrained_logl_match = re.search(unconstrained_logl_pattern, content)
+                if unconstrained_logl_match:
+                    results['unconstrained_log_likelihood'] = float(unconstrained_logl_match.group(1))
+                
+                # Number of free parameters (#branches + #model parameters): 65
+                free_params_pattern = r"Number of free parameters.*?:\s+(\d+)"
+                free_params_match = re.search(free_params_pattern, content)
+                if free_params_match:
+                    results['free_parameters'] = int(free_params_match.group(1))
+                
+                # Akaike information criterion (AIC) score: 3169.0278
+                aic_score_pattern = r"Akaike information criterion \(AIC\) score:\s+([+-]?[\d\.]+)"
+                aic_score_match = re.search(aic_score_pattern, content)
+                if aic_score_match:
+                    results['aic_score'] = float(aic_score_match.group(1))
+                    results['aic'] = float(aic_score_match.group(1))
+                
+                # Corrected Akaike information criterion (AICc) score: 3182.4340
+                aicc_score_pattern = r"Corrected Akaike information criterion \(AICc\) score:\s+([+-]?[\d\.]+)"
+                aicc_score_match = re.search(aicc_score_pattern, content)
+                if aicc_score_match:
+                    results['aicc_score'] = float(aicc_score_match.group(1))
+                    results['aicc'] = float(aicc_score_match.group(1))
+                
+                # Bayesian information criterion (BIC) score: 3465.4028
+                bic_score_pattern = r"Bayesian information criterion \(BIC\) score:\s+([+-]?[\d\.]+)"
+                bic_score_match = re.search(bic_score_pattern, content)
+                if bic_score_match:
+                    results['bic_score'] = float(bic_score_match.group(1))
+                    results['bic'] = float(bic_score_match.group(1))
+            except Exception as e:
+                pass  # 统计信息解析失败不影响主要结果
             
-            # Unconstrained log-likelihood (without tree): -2518.4649
-            unconstrained_logl_pattern = r"Unconstrained log-likelihood \(without tree\):\s+([+-]?[\d\.]+)"
-            unconstrained_logl_match = re.search(unconstrained_logl_pattern, content)
-            if unconstrained_logl_match:
-                results['unconstrained_log_likelihood'] = float(unconstrained_logl_match.group(1))
+            return results
             
-            # Number of free parameters (#branches + #model parameters): 65
-            free_params_pattern = r"Number of free parameters.*?:\s+(\d+)"
-            free_params_match = re.search(free_params_pattern, content)
-            if free_params_match:
-                results['free_parameters'] = int(free_params_match.group(1))
-            
-            # Akaike information criterion (AIC) score: 3169.0278
-            aic_score_pattern = r"Akaike information criterion \(AIC\) score:\s+([+-]?[\d\.]+)"
-            aic_score_match = re.search(aic_score_pattern, content)
-            if aic_score_match:
-                results['aic_score'] = float(aic_score_match.group(1))
-            
-            # Corrected Akaike information criterion (AICc) score: 3182.4340
-            aicc_score_pattern = r"Corrected Akaike information criterion \(AICc\) score:\s+([+-]?[\d\.]+)"
-            aicc_score_match = re.search(aicc_score_pattern, content)
-            if aicc_score_match:
-                results['aicc_score'] = float(aicc_score_match.group(1))
-            
-            # Bayesian information criterion (BIC) score: 3465.4028
-            bic_score_pattern = r"Bayesian information criterion \(BIC\) score:\s+([+-]?[\d\.]+)"
-            bic_score_match = re.search(bic_score_pattern, content)
-            if bic_score_match:
-                results['bic_score'] = float(bic_score_match.group(1))
+        except Exception as e:
+            import traceback
+            error_msg = f"Failed to parse IQ-TREE file: {str(e)}\nTraceback: {traceback.format_exc()}"
+            raise ValueError(error_msg)
             
             # Total tree length (sum of branch lengths): 0.2410
             tree_length_pattern = r"Total tree length.*?:\s+([+-]?[\d\.]+)"
