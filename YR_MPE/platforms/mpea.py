@@ -2662,7 +2662,9 @@ class SingleGeneWorkspace(QWidget):
             with open(temp_file, 'w') as f:
                 f.write('\n'.join(trees))
             
-            # 调用 parent_window 的 astral 相关方法
+            # 打开 ASTRAL 插件
+            # 注意：这里需要访问 parent_window 的 astral 相关方法
+            # 由于访问限制，我们需要通过 parent_window 来调用
             # 先检查 parent_window 是否有 astral 相关方法
             if hasattr(self.parent_window, 'open_astral_wrapper'):
                 self.parent_window.open_astral_wrapper(import_data=temp_file)
