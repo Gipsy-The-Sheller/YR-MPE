@@ -114,20 +114,28 @@ class IQTreePartitionThread(BaseProcessThread):
     
     def create_temp_partition_file(self) -> str:
         """创建临时分区定义文件"""
+        # 使用 .nex 扩展名，NEXUS 格式
         temp_file = self.create_temp_file(suffix='.nex')
         
         with open(temp_file, 'w') as f:
             f.write("#nexus\n")
             f.write("begin sets;\n")
             
+            # 写入 charset 定义
             for partition in self.partitions:
-                # 写入字符集定义
-                if partition.file_path:
-                    # 如果有单独的文件，使用文件路径格式
-                    f.write(f"    charset {partition.name} = {partition.file_path}: {partition.model_range};\n")
-                else:
-                    # 否则使用位点范围格式
-                    f.write(f"    charset {partition.name} = {partition.model_range};\n")
+                f.write(f"    charset {partition.name} = {partition.model_range};\n")
+            
+            # 如果分区中有指定模型，写入 charpartition 定义
+            has_models = any(p.selected_model for p in self.partitions)
+            if has_models:
+                # 构建 charpartition 命令
+                f.write("    charpartition models = ")
+                partition_models = []
+                for partition in self.partitions:
+                    model = partition.selected_model if partition.selected_model else "GTR+G"
+                    partition_models.append(f"{model}:{partition.name}")
+                f.write(", ".join(partition_models))
+                f.write(";\n")
             
             f.write("end;\n")
         
@@ -135,15 +143,17 @@ class IQTreePartitionThread(BaseProcessThread):
     
     def build_iqtree_command(self, partition_file: str) -> List[str]:
         """构建IQ-TREE分区命令"""
+        # 根据IQ-Tree 3.0.1文档，正确的方式是：-s 指定超级矩阵文件，然后用 -p/-q/-Q/-S 指定分区文件
         cmd = [self.tool_path, "-s", self.input_file]
         
         # 添加分区模式参数
         mode_flag = self.get_mode_flag()
         cmd.extend([mode_flag, partition_file])
         
-        # 添加模型参数
+        # 添加模型参数（如果有）
         model = self.build_model_string()
-        cmd.extend(["-m", model])
+        if model:  # 只有在 model 不为 None 时才添加 -m 参数
+            cmd.extend(["-m", model])
         
         # 添加Bootstrap参数
         if self.bootstrap_enabled:
@@ -155,9 +165,10 @@ class IQTreePartitionThread(BaseProcessThread):
         # 添加线程数
         threads = self.model_params.get('threads', 1)
         if threads > 1:
-            cmd.extend(["-nt", str(threads)])
+            cmd.extend(["-T", str(threads)])
         else:
-            cmd.append("-nt AUTO")
+            # cmd.append("-T AUTO")
+            pass
         
         # 添加输出前缀
         cmd.extend(["--prefix", self.output_prefix])
@@ -171,6 +182,7 @@ class IQTreePartitionThread(BaseProcessThread):
         """获取分区模式标志"""
         mode_map = {
             PartitionMode.EL: "-p",   # Edge-linked proportional
+            PartitionMode.TL: "-q",   # Edge-linked equal
             PartitionMode.EUL: "-Q",  # Edge-unlinked
             PartitionMode.TUL: "-S"   # Separate tree (topo unlinked)
         }
@@ -178,25 +190,17 @@ class IQTreePartitionThread(BaseProcessThread):
     
     def build_model_string(self) -> str:
         """构建模型字符串"""
-        # 如果分区中已指定模型，使用MFP+MERGE进行模型选择和合并
-        # 否则使用用户指定的模型
-        
         # 检查是否有分区指定了模型
         has_models = any(p.selected_model for p in self.partitions)
         
         if has_models:
-            # 如果有指定模型，使用MFP+MERGE
-            return "MFP+MERGE"
+            # 如果分区文件中有指定模型（通过 charpartition 命令），
+            # 不需要在命令行使用 -m 参数
+            # 返回空字符串表示不添加 -m 参数
+            return None
         else:
-            # 否则使用用户指定的模型
-            seq_type = self.model_params.get('seq_type', 'AUTO')
-            
-            if seq_type == "AUTO":
-                return "MFP+MERGE"
-            else:
-                # 构建模型字符串
-                model = self.model_params.get('model', 'GTR+G')
-                return model
+            # 如果没有指定模型，使用 MFP+MERGE 进行模型选择和合并
+            return "MFP+MERGE"
     
     def collect_output_files(self) -> List[str]:
         """收集输出文件"""

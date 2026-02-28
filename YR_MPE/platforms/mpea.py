@@ -23,7 +23,7 @@ from typing import Optional, Dict, List, Any
 from Bio import SeqIO
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
 QMenuBar, QToolBar, QToolButton, QGroupBox, QLabel,
-QAction, QMenu, QSizePolicy, QGridLayout, QFileDialog, QMessageBox, QDialog)
+QAction, QMenu, QSizePolicy, QGridLayout, QFileDialog, QMessageBox, QDialog, QPushButton)
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QIcon
 
@@ -863,8 +863,13 @@ class YR_MPEA_Widget(QWidget):
         dialog.layout().addWidget(caster_site_wrapper)
         dialog.exec_()
 
-    def open_astral_wrapper(self):
-        """打开ASTRAL插件"""
+    def open_astral_wrapper(self, import_data=None):
+        """打开ASTRAL插件
+        
+        Args:
+            import_data: 可选，包含多棵基因树的newick文件路径
+                        如果提供，将直接使用这个文件作为ASTRAL的输入
+        """
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
         dialog.setWindowTitle("ASTRAL - YR-MPEA")
@@ -872,18 +877,17 @@ class YR_MPEA_Widget(QWidget):
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
-        # Prepare import data
-        import_from = None
-        import_data = None
-        workspace_type = type(self.workspace).__name__
-        if workspace_type == "SingleGeneWorkspace":
-            if len(self.workspace.items["alignments"]) >= 1:
-                import_from = "YR_MPEA"
-                import_data = self.workspace.items["alignments"][0]
-
         # use PluginFactory to get the plugin
         astral_entry = self.plugin_factory.get_astral_plugin()
-        astral_wrapper = astral_entry.run(import_from=import_from, import_data=import_data)
+        
+        # 如果提供了import_data（包含多棵基因树的newick文件），则直接使用
+        if import_data and os.path.exists(import_data):
+            import_from = "YR_MPEA"
+            astral_wrapper = astral_entry.run(import_from=import_from, import_data=import_data)
+        else:
+            # 否则打开空的ASTRAL插件
+            astral_wrapper = astral_entry.run()
+        
         # 连接信号，如果插件发出新序列或结果，添加到工作区
         # 注意：根据插件实际情况决定是否需要连接信号
         dialog.layout().addWidget(astral_wrapper)
@@ -1071,33 +1075,26 @@ class YR_MPEA_Widget(QWidget):
             icytree_wrapper = plugin_entry.run()
             
             # 如果提供了phylogeny_data，自动加载该树文件
-            if phylogeny_data and isinstance(phylogeny_data, dict) and 'file_path' in phylogeny_data:
-                file_path = phylogeny_data['file_path']
-                try:
-                    with open(file_path, 'r') as f:
-                        tree_content = f.read().strip()
-                    if tree_content:
-                        icytree_wrapper.set_newick_string(tree_content)
-                except Exception as e:
-                    QMessageBox.warning(dialog, "Error", f"Failed to load tree file: {str(e)}")
-            
-            dialog.layout().addWidget(icytree_wrapper)
-            dialog.exec_()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open IcyTree: {str(e)}")
-            
-            # # 如果工作区中有系统树数据，则传递给IcyTree
-            # if hasattr(self, 'workspace') and len(self.workspace.items["phylogenies"]) > 0:
-            #     latest_phylogeny = self.workspace.items["phylogenies"][-1]
-            #     # 检查系统树数据格式
-            #     if isinstance(latest_phylogeny, dict) and 'data' in latest_phylogeny and len(latest_phylogeny['data']) > 0:
-            #         # 如果系统树数据是字典格式，提取Newick字符串
-            #         tree_data = latest_phylogeny['data'][0]
-            #         if 'content' in tree_data:
-            #             icytree_wrapper.set_newick_string(tree_data['content'])
-            #     elif isinstance(latest_phylogeny, str):
-            #         # 如果系统树数据直接是字符串
-            #         icytree_wrapper.set_newick_string(latest_phylogeny)
+            if phylogeny_data and isinstance(phylogeny_data, dict):
+                tree_content = None
+                
+                # 方式1: 从 file_path 读取
+                if 'file_path' in phylogeny_data:
+                    try:
+                        with open(phylogeny_data['file_path'], 'r') as f:
+                            tree_content = f.read().strip()
+                    except Exception as e:
+                        QMessageBox.warning(dialog, "Error", f"Failed to load tree file: {str(e)}")
+                
+                # 方式2: 从 data[0]['content'] 读取（旧版platform_multigene兼容）
+                elif 'data' in phylogeny_data and len(phylogeny_data['data']) > 0:
+                    tree_data = phylogeny_data['data'][0]
+                    if 'content' in tree_data:
+                        tree_content = tree_data['content'].strip()
+                
+                # 设置树的content
+                if tree_content:
+                    icytree_wrapper.set_newick_string(tree_content)
             
             dialog.layout().addWidget(icytree_wrapper)
             dialog.exec_()
@@ -1303,7 +1300,37 @@ class YR_MPEA_Widget(QWidget):
         
         dialog.layout().addWidget(plugin_wrapper)
         dialog.exec_()
-    
+
+    def _extract_partition_model_info(self, model_item):
+        """
+        提取分区模型信息
+
+        Args:
+            model_item: 分区模型 DatasetItem
+
+        Returns:
+            dict: {
+                'partition_mode': str,  # EL/TL/EUL/TUL
+                'partitions': list,    # 分区定义列表（包含模型信息）
+                'model_count': int     # 分区数量
+            }
+        """
+        # 获取分区模式
+        partition_mode = model_item.partition_mode or "EL"
+
+        # 获取分区定义
+        model_data = model_item.data
+        if isinstance(model_data, dict):
+            partitions = model_data.get('partitions', [])
+        else:
+            partitions = []
+
+        return {
+            'partition_mode': partition_mode,
+            'partitions': partitions,
+            'model_count': len(partitions)
+        }
+
     def open_iqtree_wrapper(self):
         from PyQt5.QtWidgets import QDialog
         from .methods.dataset_models import ITEM_TYPE_MODEL, SELECTION_STATE_GREEN
@@ -1315,24 +1342,36 @@ class YR_MPEA_Widget(QWidget):
 
         # Prepare import data (使用抽象层)
         import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
-        
-        # 获取最佳模型（只检查green状态的model）
-        best_model = ""
-        # 从dataset_selection_manager获取green状态的model
+
+        # 检查是否有选中的分区模型
+        partition_model_config = None
         if self.dataset_selection_manager:
-            green_models = [item for item in self.dataset_selection_manager.get_selected_items() 
+            green_models = [item for item in self.dataset_selection_manager.get_selected_items()
                           if item.item_type == ITEM_TYPE_MODEL]
             if green_models:
-                model_data = green_models[0].data
-                # 处理模型表或单个模型
-                if isinstance(model_data, dict):
-                    if "type" in model_data and model_data["type"] == "model_table" and model_data["data"]:
-                        # 取模型表中的第一个（最佳）模型
-                        best_model = model_data["data"][0]['Model']
-                    elif "Model" in model_data:
-                        # 直接使用单个模型数据
-                        best_model = model_data
-        
+                model_item = green_models[0]
+                # 检查是否为分区模型
+                if model_item.model_sub_type == "partitioned":
+                    partition_model_config = self._extract_partition_model_info(model_item)
+
+        # 获取最佳单一模型（如果没有分区模型）
+        best_model = ""
+        if not partition_model_config:
+            # 从dataset_selection_manager获取green状态的model
+            if self.dataset_selection_manager:
+                green_models = [item for item in self.dataset_selection_manager.get_selected_items()
+                              if item.item_type == ITEM_TYPE_MODEL]
+                if green_models:
+                    model_data = green_models[0].data
+                    # 处理模型表或单个模型
+                    if isinstance(model_data, dict):
+                        if "type" in model_data and model_data["type"] == "model_table" and model_data["data"]:
+                            # 取模型表中的第一个（最佳）模型
+                            best_model = model_data["data"][0]['Model']
+                        elif "Model" in model_data:
+                            # 直接使用单个模型数据
+                            best_model = model_data
+
         # Use PluginFactory to get the plugin entry
         iqtree_entry = self.plugin_factory.get_iqtree_plugin()
 
@@ -1348,50 +1387,57 @@ class YR_MPEA_Widget(QWidget):
         plugin_wrapper.export_model_result_signal.connect(self.add_model_to_workspace)
         plugin_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
 
-        # parse model
-        model_entries = best_model.split("+")
-
-        model_noalias = ['JC69 (JC)', 'F81', 'K2P (K80)', 'HKY85 (HKY)', 'TNe', 'TN93 (TN)', 'K3P (K81)', 
-                        'K81u', 'TPM2', 'TPM2u', 'TPM3', 'TPM3u', 'TIM', 'TIMe', 'TIM2', 'TIM2e', 'TIM3', 
-                        'TIM3e', 'TVM', 'TVMe', 'SYM', 'GTR', 'Blosum62', 'cpREV', 
-                        'Dayhoff', 'DCMut', 'EAL', 'ELM', 'FLAVI', 'FLU', 'GTR20', 'HIVb', 'HIVw', 'JTT', 
-                        'JTTDCMut', 'LG', 'mtART', 'mtMAM', 'mtREV', 'mtZOA', 'mtMet', 'mtVer', 'mtInv', 
-                        'NQ.bird', 'NQ.insect', 'NQ.mammal', 'NQ.pfam', 'NQ.plant', 'NQ.yeast', 'Poisson', 
-                        'PMB', 'Q.bird', 'Q.insect', 'Q.mammal', 'Q.pfam', 'Q.plant', 'Q.yeast', 'rtREV', 'VT', 'WAG']
-        model_alias = {'JC': 'JC69 (JC)', 'JC69': 'JC69 (JC)', 'K80': 'K2P (K80)', 'K2P': 'K2P (K80)', 
-                       'TN': 'TN93 (TN)', 'TN93': 'TN93 (TN)', 'K81': 'K3P (K81)', 'K3P': 'K3P (K81)',
-                       'K81u': 'K81u (K3Pu)', 'K3Pu': 'K81u (K3Pu)', 'HKY': 'HKY85 (HKY)', 'HKY85': 'HKY85 (HKY)'}
-        if model_entries[0] in model_noalias:
-            plugin_wrapper.model_combo.setCurrentText(model_entries[0])
-        elif model_entries[0] in model_alias.keys():
-            plugin_wrapper.model_combo.setCurrentText(model_alias[model_entries[0]])
+        # 如果有分区模型配置，应用它
+        if partition_model_config:
+            plugin_wrapper.apply_partition_model_config(partition_model_config)
         else:
-            plugin_wrapper.model_combo.setCurrentText("auto")
+            # 没有分区模型，解析单一模型
+            # parse model
+            model_entries = best_model.split("+")
 
-        # Invariable sites?
-        if "I" in model_entries:
-            plugin_wrapper.invar_checkbox.setChecked(True)
-        
-        # empirical?
-        if "F" in model_entries:
-            # plugin_wrapper.empirical_checkbox.setChecked(True)
-            plugin_wrapper.state_freq_combo.setCurrentText("Empirical (+F)")
-        
-        elif "FO" in model_entries:
-            plugin_wrapper.state_freq_combo.setCurrentText("ML-optimized (+FO)")
+            model_noalias = ['JC69 (JC)', 'F81', 'K2P (K80)', 'HKY85 (HKY)', 'TNe', 'TN93 (TN)', 'K3P (K81)',
+                            'K81u', 'TPM2', 'TPM2u', 'TPM3', 'TPM3u', 'TIM', 'TIMe', 'TIM2', 'TIM2e', 'TIM3',
+                            'TIM3e', 'TVM', 'TVMe', 'SYM', 'GTR', 'Blosum62', 'cpREV',
+                            'Dayhoff', 'DCMut', 'EAL', 'ELM', 'FLAVI', 'FLU', 'GTR20', 'HIVb', 'HIVw', 'JTT',
+                            'JTTDCMut', 'LG', 'mtART', 'mtMAM', 'mtREV', 'mtZOA', 'mtMet', 'mtVer', 'mtInv',
+                            'NQ.bird', 'NQ.insect', 'NQ.mammal', 'NQ.pfam', 'NQ.plant', 'NQ.yeast', 'Poisson',
+                            'PMB', 'Q.bird', 'Q.insect', 'Q.mammal', 'Q.pfam', 'Q.plant', 'Q.yeast', 'rtREV', 'VT', 'WAG']
+            model_alias = {'JC': 'JC69 (JC)', 'JC69': 'JC69 (JC)', 'K80': 'K2P (K80)', 'K2P': 'K2P (K80)',
+                           'TN': 'TN93 (TN)', 'TN93': 'TN93 (TN)', 'K81': 'K3P (K81)', 'K3P': 'K3P (K81)',
+                           'K81u': 'K81u (K3Pu)', 'K3Pu': 'K81u (K3Pu)', 'HKY': 'HKY85 (HKY)', 'HKY85': 'HKY85 (HKY)'}
+            if model_entries[0] in model_noalias:
+                plugin_wrapper.model_combo.setCurrentText(model_entries[0])
+            elif model_entries[0] in model_alias.keys():
+                plugin_wrapper.model_combo.setCurrentText(model_alias[model_entries[0]])
+            else:
+                plugin_wrapper.model_combo.setCurrentText("auto")
 
-        elif "FQ" in model_entries:
-            plugin_wrapper.state_freq_combo.setCurrentText("Equal (+FQ)")
-        
-        # FreeRate?
-        if "R" in model_entries:
-            plugin_wrapper.freerate_checkbox.setChecked(True)
-        
-        # Gamma Caterories [identify Gx]
-        for item in model_entries[1:]:
-            if item.startswith("G"):
-                plugin_wrapper.gamma_checkbox.setChecked(True)
-                plugin_wrapper.gamma_spinbox.setValue(int(item[1:]))
+            # Invariable sites?
+            if "I" in model_entries:
+                plugin_wrapper.invar_checkbox.setChecked(True)
+
+            # empirical?
+            if "F" in model_entries:
+                # plugin_wrapper.empirical_checkbox.setChecked(True)
+                plugin_wrapper.state_freq_combo.setCurrentText("Empirical (+F)")
+
+            elif "FO" in model_entries:
+                plugin_wrapper.state_freq_combo.setCurrentText("ML-optimized (+FO)")
+
+            elif "FQ" in model_entries:
+                plugin_wrapper.state_freq_combo.setCurrentText("Equal (+FQ)")
+
+            # Rate Heterogeneity?
+            if "R" in model_entries:
+                plugin_wrapper.rate_combo.setCurrentText("FreeRate Model (+R)")
+            else:
+                # 检查是否有 Gamma 参数
+                for item in model_entries[1:]:
+                    if item.startswith("G"):
+                        plugin_wrapper.rate_combo.setCurrentText("Gamma Distribution (+G)")
+                        plugin_wrapper.rate_categories_spinbox.setValue(int(item[1:]))
+                        break
+
         dialog.layout().addWidget(plugin_wrapper)
         dialog.exec_()
 
@@ -2438,6 +2484,20 @@ class SingleGeneWorkspace(QWidget):
     
     def add_phylogeny(self, phylogeny):
         """添加系统发育树到工作区"""
+        # 检测是否有多个树
+        tree_count = 1
+        if isinstance(phylogeny, dict) and 'data' in phylogeny:
+            tree_count = len(phylogeny['data'])
+        
+        # 如果有多个树，创建 treeset 对象
+        if tree_count > 1:
+            self.add_treeset(phylogeny)
+        else:
+            # 单个树，创建 phylogeny 对象
+            self._add_single_phylogeny(phylogeny)
+    
+    def _add_single_phylogeny(self, phylogeny):
+        """添加单个系统发育树到工作区"""
         # 确保grid_layout存在
         if not hasattr(self, 'grid_layout'):
             # disable hint label
@@ -2465,17 +2525,151 @@ class SingleGeneWorkspace(QWidget):
         """)
         
         # 创建tooltip
-        if isinstance(phylogeny, dict):
-            tool_name = phylogeny.get('tool', 'unknown')
-            tree_type = phylogeny.get('tree_type', 'unknown')
-            tooltip_text = f"Phylogenetic Tree ({tool_name}, {tree_type})"
+        if isinstance(phylogeny, dict) and 'data' in phylogeny and len(phylogeny['data']) > 0:
+            tree_data = phylogeny['data'][0]
+            filename = tree_data.get('filename', 'unknown')
+            tooltip_text = f"Phylogenetic Tree ({filename})"
             phylogeny_button.setToolTip(tooltip_text)
         else:
-            phylogeny_button.setToolTip(f"Phylogenetic Tree")
+            phylogeny_button.setToolTip("Phylogenetic Tree")
         
         # 点击打开IcyTree，传入phylogeny数据
         phylogeny_button.clicked.connect(lambda: self.parent_window.open_icytree_wrapper(phylogeny_data=phylogeny))
         self.grid_layout.addWidget(phylogeny_button, 3, len(self.items["phylogenies"])-1)
+    
+    def add_treeset(self, treeset_data):
+        """添加基因树集合（treeset）到工作区"""
+        from .methods.dataset_models import ITEM_TYPE_TREESET
+        
+        # 确保grid_layout存在
+        if not hasattr(self, 'grid_layout'):
+            # disable hint label
+            self.workspace_hint.setVisible(False)
+            # add a grid layout
+            self.grid_widget = QWidget()
+            self.grid_layout = QGridLayout()
+            self.grid_widget.setLayout(self.grid_layout)
+            self.main_layout.addWidget(self.grid_widget)
+            self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        
+        # add a treeset to items["treesets"]
+        if 'treesets' not in self.items:
+            self.items['treesets'] = []
+        
+        self.items["treesets"].append(treeset_data)
+        
+        # 添加 treeset 图标到 workspace
+        treeset_icon = self.resource_factory.get_icon("file/treeset.svg")
+        treeset_button = QToolButton()
+        treeset_button.setIcon(treeset_icon)
+        treeset_button.setIconSize(QSize(45, 45))
+        
+        # 设置样式，背景透明
+        treeset_button.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+            }
+        """)
+        
+        # 创建tooltip
+        if isinstance(treeset_data, dict) and 'data' in treeset_data:
+            tree_count = len(treeset_data['data'])
+            tooltip_text = f"Tree Set ({tree_count} trees)"
+            treeset_button.setToolTip(tooltip_text)
+        else:
+            treeset_button.setToolTip("Tree Set")
+        
+        # 点击打开树集合查看器
+        treeset_button.clicked.connect(lambda: self._on_treeset_click(treeset_data))
+        self.grid_layout.addWidget(treeset_button, 5, len(self.items["treesets"])-1)
+    
+    def _on_treeset_click(self, treeset_data):
+        """处理 treeset 按钮点击事件"""
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QListWidget, QListWidgetItem, QLabel, QHBoxLayout
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Tree Set Viewer")
+        dialog.setMinimumSize(600, 400)
+        layout = QVBoxLayout()
+        dialog.setLayout(layout)
+        
+        # 标题
+        title_label = QLabel(f"Tree Set - {len(treeset_data.get('data', []))} trees")
+        title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(title_label)
+        
+        # 树列表
+        tree_list = QListWidget()
+        
+        for i, tree_data in enumerate(treeset_data.get('data', [])):
+            tree_name = tree_data.get('filename', f'Tree {i+1}')
+            item = QListWidgetItem(f"{tree_name}")
+            item.setData(Qt.UserRole, tree_data)
+            tree_list.addItem(item)
+        
+        layout.addWidget(tree_list)
+        
+        # 按钮
+        button_layout = QHBoxLayout()
+        
+        # 用 IcyTree 查看选中的树
+        view_button = QPushButton("View Selected Tree")
+        view_button.clicked.connect(lambda: self._view_selected_tree(tree_list, treeset_data))
+        button_layout.addWidget(view_button)
+        
+        # 导入到 ASTRAL
+        import_astral_button = QPushButton("Import to ASTRAL")
+        import_astral_button.clicked.connect(lambda: self._import_to_astral(treeset_data))
+        button_layout.addWidget(import_astral_button)
+        
+        button_layout.addStretch()
+        
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.close)
+        button_layout.addWidget(close_button)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec_()
+    
+    def _view_selected_tree(self, tree_list, treeset_data):
+        """查看选中的树"""
+        selected_items = tree_list.selectedItems()
+        if selected_items:
+            tree_data = selected_items[0].data(Qt.UserRole)
+            self.parent_window.open_icytree_wrapper(phylogeny_data=tree_data)
+    
+    def _import_to_astral(self, treeset_data):
+        """导入树集合到 ASTRAL"""
+        # 将树集合格式化为 ASTRAL 可接受的格式
+        # ASTRAL 需要每个树在单独的文件中，或者在同一个文件中用分号分隔
+        trees = []
+        for tree_data in treeset_data.get('data', []):
+            if 'content' in tree_data:
+                trees.append(tree_data['content'])
+            elif 'file_path' in tree_data:
+                # 从文件读取
+                try:
+                    with open(tree_data['file_path'], 'r') as f:
+                        trees.append(f.read().strip())
+                except:
+                    pass
+        
+        if trees:
+            # 创建临时文件，所有树用换行符分隔
+            import tempfile
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.trees', delete=False).name
+            with open(temp_file, 'w') as f:
+                f.write('\n'.join(trees))
+            
+            # 调用 parent_window 的 astral 相关方法
+            # 先检查 parent_window 是否有 astral 相关方法
+            if hasattr(self.parent_window, 'open_astral_wrapper'):
+                self.parent_window.open_astral_wrapper(import_data=temp_file)
+            else:
+                QMessageBox.information(self, "Info", "ASTRAL plugin integration not available")
+        else:
+            QMessageBox.warning(self, "Warning", "No trees found in the tree set")
     
     def add_chain(self, chain_item):
         """添加MCMC链文件到工作区"""

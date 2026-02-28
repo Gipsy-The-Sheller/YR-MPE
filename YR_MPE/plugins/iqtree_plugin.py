@@ -130,6 +130,9 @@ class IQTreePlugin(BasePlugin):
         # 特别处理YR-MPEA导入的数据
         if import_from == "YR_MPEA" and import_data is not None:
             self.handle_import_data(import_data)
+        # 处理Dataset Manager导入的数据
+        elif import_from == "DATASET_MANAGER" and import_data is not None:
+            self.handle_import_data(import_data)
         
     def init_plugin_info(self):
         """初始化插件信息"""
@@ -295,27 +298,23 @@ class IQTreePlugin(BasePlugin):
         self.model_combo.currentTextChanged.connect(self.on_model_changed)
         model_layout.addRow("Substitution Model:", self.model_combo)
         
-        # Gamma分布参数
-        gamma_layout = QHBoxLayout()
-        self.gamma_checkbox = QCheckBox("+G")
-        self.gamma_spinbox = QSpinBox()
-        self.gamma_spinbox.setRange(1, 10)
-        self.gamma_spinbox.setValue(4)
-        self.gamma_spinbox.setEnabled(False)
-        self.gamma_checkbox.stateChanged.connect(
-            lambda state: self.gamma_spinbox.setEnabled(state == Qt.Checked)
-        )
-        gamma_layout.addWidget(self.gamma_checkbox)
-        gamma_layout.addWidget(self.gamma_spinbox)
-        model_layout.addRow("Gamma Distribution:", gamma_layout)
+        # Rate heterogeneity参数（合并Gamma和FreeRate）
+        rate_layout = QHBoxLayout()
+        self.rate_combo = QComboBox()
+        self.rate_combo.addItems(["Equal", "Gamma Distribution (+G)", "FreeRate Model (+R)"])
+        self.rate_combo.currentTextChanged.connect(self.on_rate_combo_changed)
+        rate_layout.addWidget(self.rate_combo)
+        
+        self.rate_categories_spinbox = QSpinBox()
+        self.rate_categories_spinbox.setRange(1, 10)
+        self.rate_categories_spinbox.setValue(4)
+        self.rate_categories_spinbox.setEnabled(False)
+        rate_layout.addWidget(self.rate_categories_spinbox)
+        model_layout.addRow("Rate Heterogeneity:", rate_layout)
         
         # Invariable Sites参数
         self.invar_checkbox = QCheckBox("+I")
         model_layout.addRow("Invariable Sites:", self.invar_checkbox)
-        
-        # FreeRate参数
-        self.freerate_checkbox = QCheckBox("+R")
-        model_layout.addRow("Free Rate Model:", self.freerate_checkbox)
 
         self.ascertain_bias_checkbox = QCheckBox("+ASC")
         model_layout.addRow("Aecertain Bias:", self.ascertain_bias_checkbox)
@@ -506,25 +505,37 @@ class IQTreePlugin(BasePlugin):
     def on_model_changed(self):
         if self.model_combo.currentText() == "auto":
             # disable +I +G +F parameters
-            self.gamma_checkbox.setEnabled(False)
+            self.rate_combo.setEnabled(False)
             self.invar_checkbox.setEnabled(False)
             self.state_freq_combo.setEnabled(False)
-            self.freerate_checkbox.setEnabled(False)
-            self.gamma_checkbox.setChecked(False)
+            self.rate_combo.setCurrentText("Equal")
             self.invar_checkbox.setChecked(False)
-            self.freerate_checkbox.setChecked(False)
             self.state_freq_combo.setCurrentText('Estimated')
         else:
             # enable +I +G +F parameters
-            self.gamma_checkbox.setEnabled(True)
+            self.rate_combo.setEnabled(True)
             self.invar_checkbox.setEnabled(True)
             self.state_freq_combo.setEnabled(True)
-            self.freerate_checkbox.setEnabled(True)
+    
+    def on_rate_combo_changed(self, rate_option):
+        """处理 Rate Heterogeneity 组合框变化"""
+        if rate_option == "Gamma Distribution (+G)":
+            # 启用分类数 spinbox
+            self.rate_categories_spinbox.setEnabled(True)
+        else:
+            # Equal 或 FreeRate Model，禁用分类数 spinbox
+            self.rate_categories_spinbox.setEnabled(False)
     
     def setup_output_tab(self):
         """设置输出标签页"""
         layout = QVBoxLayout()
         self.output_tab.setLayout(layout)
+        
+        # Add output info label
+        self.output_info = QLabel("No tree available yet.")
+        self.output_info.setAlignment(Qt.AlignCenter)
+        self.output_info.setStyleSheet("color: #6c757d; padding: 20px;")
+        layout.addWidget(self.output_info)
         
         # 输出预览
         self.output_preview = QTextEdit()
@@ -600,14 +611,15 @@ class IQTreePlugin(BasePlugin):
             model = self.model_map[model_text]
         
         # 添加模型扩展参数
-        if self.gamma_checkbox.isChecked():
-            model += f"+G{self.gamma_spinbox.value()}"
+        rate_option = self.rate_combo.currentText()
+        if rate_option == "Gamma Distribution (+G)":
+            model += f"+G{self.rate_categories_spinbox.value()}"
+        elif rate_option == "FreeRate Model (+R)":
+            model += "+R"
+        # Equal 选项不添加任何参数
         
         if self.invar_checkbox.isChecked():
             model += "+I"
-            
-        if self.freerate_checkbox.isChecked():
-            model += "+R"
 
         if self.ascertain_bias_checkbox.isChecked():
             model += "+ASC"
@@ -722,7 +734,7 @@ class IQTreePlugin(BasePlugin):
         self.add_console_message(f"Phylogenetic inference completed successfully! Found {len(output_files)} result file(s)", "info")
         
         # 显示导入按钮（仅在从平台导入数据时显示）
-        if self.import_from == "YR_MPEA":
+        if self.import_from in ["YR_MPEA", "DATASET_MANAGER"]:
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)
@@ -786,13 +798,16 @@ class IQTreePlugin(BasePlugin):
                 plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
                 icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
                 
+                # Connect to IcyTree status_changed signal to remove output_info when tree is loaded
+                icytree_plugin.status_changed.connect(lambda status: self._on_icytree_status_changed(status, icytree_plugin))
+                
                 # 设置Newick字符串并显示
                 icytree_plugin.set_newick_string(tree_content)
                 
                 # 在输出标签页中显示IcyTree
                 output_layout = self.output_tab.layout()
                 if output_layout:
-                    # 清除现有部件
+                    # 清除现有部件（保留output_info）
                     for i in reversed(range(output_layout.count())):
                         widget = output_layout.itemAt(i).widget()
                         if widget and widget != self.output_info:
@@ -801,19 +816,34 @@ class IQTreePlugin(BasePlugin):
                 # 添加IcyTree插件到输出标签页
                 output_layout.addWidget(icytree_plugin)
                 
-                QMessageBox.information(self, "error",f"Phylogenetic tree visualization ready: {os.path.basename(treefile)}")
+                if hasattr(self, 'output_info') and self.output_info:
+                    self.output_info.setText(f"Phylogenetic tree visualization ready: {os.path.basename(treefile)}")
                 
             except ImportError:
                 # 如果无法导入IcyTree插件，显示错误信息
+                if hasattr(self, 'output_info'):
+                    self.output_info.setText("Error: IcyTree plugin not available")
                 QMessageBox.information(self, "error","Error: IcyTree plugin not available")
                 
             except Exception as e:
                 error_msg = f"Error processing tree file: {str(e)}"
+                if hasattr(self, 'output_info'):
+                    self.output_info.setText(error_msg)
                 QMessageBox.information(self, "error",error_msg)
                 self.add_console_message(error_msg, "error")
         else:
             # 没有找到树文件，显示信息
+            if hasattr(self, 'output_info'):
+                self.output_info.setText(f"No treefile found. Generated {len(output_files)} file(s).")
             QMessageBox.information(self, "error",f"No treefile found. Generated {len(output_files)} file(s).")
+    
+    def _on_icytree_status_changed(self, status, icytree_plugin):
+        """Handle IcyTree status changes"""
+        if status == "Tree loaded to IcyTree":
+            # Remove the "No tree available yet." label when tree is loaded
+            if hasattr(self, 'output_info') and self.output_info:
+                self.output_info.setParent(None)
+                self.output_info = None
     
     def import_to_platform(self):
         """将结果导入到当前平台"""
@@ -827,11 +857,39 @@ class IQTreePlugin(BasePlugin):
             for output_file in self.current_output_files:
                 if output_file.endswith('.treefile'):
                     with open(output_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
+                        content = f.read().strip()
+                    
+                    # 检查是否包含多棵树（例如 Topo-unlinked 模式）
+                    # 多棵树通常用换行符分隔，或者用分号分隔
+                    trees = []
+                    # 尝试用换行符分割
+                    potential_trees = content.split('\n')
+                    potential_trees = [t.strip() for t in potential_trees if t.strip()]
+                    
+                    # 检查是否每行都是一个有效的 Newick 树
+                    valid_trees = []
+                    for tree_str in potential_trees:
+                        # 简单检查：Newick 树通常以分号结尾
+                        if tree_str.endswith(';'):
+                            valid_trees.append(tree_str)
+                        elif len(potential_trees) == 1:
+                            # 只有一行，可能是整个文件就是一个树
+                            valid_trees.append(tree_str)
+                    
+                    if len(valid_trees) > 1:
+                        # 多棵树，每棵树作为一个独立的 item
+                        for i, tree_content in enumerate(valid_trees):
+                            phylogenies.append({
+                                'filename': f"{os.path.basename(output_file)}_tree{i+1}",
+                                'content': tree_content,
+                                'file_path': output_file  # 所有树都指向同一个文件路径
+                            })
+                    else:
+                        # 单棵树，作为单个 item
                         phylogenies.append({
                             'filename': os.path.basename(output_file),
                             'content': content,
-                            'file_path': output_file  # 添加文件路径
+                            'file_path': output_file
                         })
 
             if not phylogenies:
@@ -842,7 +900,9 @@ class IQTreePlugin(BasePlugin):
             self.import_phylogenies_to_platform(phylogenies)
 
             # 显示成功消息
-            QMessageBox.information(self, "Success", f"Successfully imported {len(phylogenies)} phylogenetic tree(s) to the platform.")
+            tree_count = len(phylogenies)
+            item_type = "tree set" if tree_count > 1 else "phylogenetic tree"
+            QMessageBox.information(self, "Success", f"Successfully imported {tree_count} {item_type}(s) to the platform.")
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to import phylogenetic trees: {str(e)}")
@@ -853,7 +913,8 @@ class IQTreePlugin(BasePlugin):
         self.export_phylogeny_result_signal.emit({"type": "phylogeny", "data": phylogenies})
     
     def handle_import_data(self, import_data):
-        """处理从YR-MPEA导入的数据"""
+        """处理从YR-MPEA或Dataset Manager导入的数据"""
+        # 情况1: 从 YR_MPEA 导入的单一序列列表
         if isinstance(import_data, list):
             # 创建临时文件来存储导入的序列数据
             temp_file = self.create_temp_file(suffix='.fas')
@@ -863,14 +924,203 @@ class IQTreePlugin(BasePlugin):
             self.temp_files.append(temp_file)
             self.import_file = temp_file
             self.imported_files = [temp_file]
-            
+
             # 更新UI显示导入的文件
             if hasattr(self, 'file_path_edit') and self.file_path_edit:
                 self.file_path_edit.setText(temp_file)
+
+        # 情况2: 从 Dataset Manager 导入的数据
+        elif isinstance(import_data, dict):
+            dataset_items = import_data.get('dataset_items', [])
+            dataset_config = import_data.get('dataset_config', {})
+
+            # 筛选出 alignment 类型的 items
+            from ..platforms.methods.dataset_models import ITEM_TYPE_ALIGNMENT
+            selected_items = [item for item in dataset_items if item.item_type == ITEM_TYPE_ALIGNMENT]
+
+            if len(selected_items) == 0:
+                # 没有alignment，不导入
+                self.import_file = None
+                self.imported_files = []
+                return
+
+            if len(selected_items) == 1:
+                # 单一alignment，直接使用
+                self.import_file = selected_items[0].file_path
+                self.imported_files = [selected_items[0].file_path]
+            else:
+                # 多个alignment，合并成超级矩阵（参考ModelFinder的做法）
+                try:
+                    # 检查所有alignment是否都已对齐
+                    unaligned_items = [item for item in selected_items if not item.is_aligned]
+                    if unaligned_items:
+                        unaligned_names = [item.loci_name for item in unaligned_items]
+                        warning_msg = f"The following partitions are not aligned:\n"
+                        warning_msg += "\n".join(f"  - {name}" for name in unaligned_names)
+                        warning_msg += "\n\nPlease align these partitions first or select only aligned partitions."
+                        self.add_console_message(f"Warning: {warning_msg}", "warning")
+
+                    # Get dataset settings
+                    topo_linked = dataset_config.get('topo_linked', False)
+                    edge_linked = dataset_config.get('edge_linked', False)
+
+                    # Map to partition mode
+                    if not topo_linked:
+                        self.partition_mode = PartitionMode.TUL  # Topo-unlinked
+                    elif edge_linked:
+                        self.partition_mode = PartitionMode.TL  # Edge-linked Equal
+                    else:
+                        self.partition_mode = PartitionMode.EUL  # Edge-unlinked
+
+                    # 合并所有选中的 partition 为 supermatrix
+                    supermatrix_sequences = {}
+                    partition_definitions = []
+                    current_pos = 1
+
+                    # 获取所有序列名称
+                    if selected_items:
+                        all_seq_names = [seq.id for seq in selected_items[0].sequences]
+                    else:
+                        all_seq_names = []
+
+                    # 合并序列
+                    for seq_name in all_seq_names:
+                        supermatrix_seq = ""
+                        for item in selected_items:
+                            # 找到对应的序列
+                            seq = next((s for s in item.sequences if s.id == seq_name), None)
+                            if seq:
+                                supermatrix_seq += str(seq.seq)
+                            else:
+                                # 如果某个 partition 缺少该序列，用 ? 填充
+                                supermatrix_seq += "?" * item.length
+                        supermatrix_sequences[seq_name] = supermatrix_seq
+
+                    # 创建 supermatrix 临时文件
+                    temp_file = self.create_temp_file(suffix='.fas')
+
+                    with open(temp_file, 'w') as f:
+                        for seq_name, seq_content in supermatrix_sequences.items():
+                            f.write(f">{seq_name}\n{seq_content}\n")
+
+                    self.import_file = temp_file
+                    self.imported_files = [temp_file]
+
+                    # 计算 partition 坐标并创建 partition definitions
+                    for item in selected_items:
+                        end_pos = current_pos + item.length - 1
+                        partition_def = PartitionDefinition(
+                            name=item.loci_name,
+                            file_path="",  # 空字符串表示使用 supermatrix 的坐标
+                            seq_type="DNA",  # 默认 DNA，后续会检测
+                            model_range=f"{current_pos}-{end_pos}",
+                            selected_model=None
+                        )
+                        partition_definitions.append(partition_def)
+                        current_pos = end_pos + 1
+
+                    self.partition_definitions = partition_definitions
+
+                    # 检测序列类型冲突
+                    self._detect_sequence_type_conflicts(selected_items, partition_definitions)
+
+                    # 启用分区模式
+                    self.partition_mode_enabled = True
+
+                    # 更新 UI
+                    if hasattr(self, 'file_path_edit') and self.file_path_edit:
+                        self.file_path_edit.setText(temp_file)
+
+                    if hasattr(self, 'partition_mode_checkbox'):
+                        self.partition_mode_checkbox.setChecked(True)
+
+                    # 更新分区状态显示
+                    self.update_partition_status()
+
+                    # 添加控制台消息
+                    self.add_console_message(f"Dataset imported: {len(selected_items)} partitions", "info")
+                    self.add_console_message(f"Partition mode: {self.partition_mode.value}", "info")
+
+                except Exception as e:
+                    self.add_console_message(f"Failed to import dataset: {str(e)}", "error")
+                    self.import_file = None
+                    self.imported_files = []
+                    self.partition_definitions = []
+
+        # 其他情况
         else:
             self.import_file = None
             self.imported_files = []
-    
+
+    def _detect_sequence_type_conflicts(self, alignment_items, partition_definitions):
+        """检测序列类型冲突（参考ModelFinder）"""
+        from ..platforms.methods.partition_utils import detect_sequence_type_conflicts
+
+        has_conflict, conflict_msg = detect_sequence_type_conflicts(alignment_items)
+
+        if has_conflict:
+            self.add_console_message(f"Warning: {conflict_msg}", "warning")
+            # 更新分区定义中的序列类型
+            for i, item in enumerate(alignment_items):
+                from ..platforms.methods.partition_utils import detect_sequence_type
+                if item.sequences:
+                    seq_type = detect_sequence_type(item.sequences[0])
+                    partition_definitions[i].seq_type = seq_type
+        else:
+            # 没有冲突，统一设置序列类型
+            if alignment_items and alignment_items[0].sequences:
+                from ..platforms.methods.partition_utils import detect_sequence_type
+                seq_type = detect_sequence_type(alignment_items[0].sequences[0])
+                for partition_def in partition_definitions:
+                    partition_def.seq_type = seq_type
+
+    def apply_partition_model_config(self, partition_model_config):
+        """
+        应用分区模型配置（用模型信息覆盖分区定义）
+
+        Args:
+            partition_model_config: dict {
+                'partition_mode': str,
+                'partitions': list,
+                'model_count': int
+            }
+        """
+        # 更新分区模式
+        from .partition_mode import PartitionMode
+        mode_map = {
+            'EL': PartitionMode.EL,
+            'TL': PartitionMode.TL,
+            'EUL': PartitionMode.EUL,
+            'TUL': PartitionMode.TUL
+        }
+        self.partition_mode = mode_map.get(partition_model_config.get('partition_mode', 'EL'), PartitionMode.EL)
+
+        # 用模型信息覆盖分区定义
+        model_partitions = partition_model_config.get('partitions', [])
+        if model_partitions and self.partition_definitions:
+            # 确保分区数量匹配
+            if len(model_partitions) == len(self.partition_definitions):
+                for i, model_part in enumerate(model_partitions):
+                    # 用模型信息更新分区定义
+                    # 支持两种字段名：'model' 和 'best_model'
+                    model_code = model_part.get('model') or model_part.get('best_model')
+                    if model_code:
+                        self.partition_definitions[i].selected_model = model_code
+                        self.add_console_message(f"  Partition {i+1}: {model_part.get('name', '')} -> {model_code}", "info")
+                    if model_part.get('seq_type'):
+                        self.partition_definitions[i].seq_type = model_part['seq_type']
+            else:
+                # 分区数量不匹配，警告用户
+                self.add_console_message(f"Warning: Model has {len(model_partitions)} partitions but dataset has {len(self.partition_definitions)} partitions. Partition count mismatch!", "warning")
+
+        # 更新分区状态显示
+        self.update_partition_status()
+
+        # 添加控制台消息
+        self.add_console_message(f"Partition model config applied", "info")
+        self.add_console_message(f"  Mode: {self.partition_mode.value}", "info")
+        self.add_console_message(f"  Models: {len(model_partitions)} partitions with specified models", "info")
+
     def on_partition_mode_toggled(self, state):
         """处理分区模式复选框切换"""
         self.partition_mode_enabled = (state == Qt.Checked)
@@ -880,16 +1130,15 @@ class IQTreePlugin(BasePlugin):
             self.partition_config_btn.setVisible(True)
             self.partition_status_label.setVisible(True)
             self.add_console_message("Partition mode enabled. Please configure partitions.", "info")
-            
+
             # 禁用Substitution Model Options（分区模式下使用MFP+MERGE）
             self.model_combo.setEnabled(False)
-            self.gamma_checkbox.setEnabled(False)
-            self.gamma_spinbox.setEnabled(False)
+            self.rate_combo.setEnabled(False)
+            self.rate_categories_spinbox.setEnabled(False)
             self.invar_checkbox.setEnabled(False)
-            self.freerate_checkbox.setEnabled(False)
             self.ascertain_bias_checkbox.setEnabled(False)
             self.state_freq_combo.setEnabled(False)
-            
+
             # UFBOOT保持启用（分区模式下仍然需要Bootstrap）
             # 不禁用UFBOOT
         else:
@@ -898,16 +1147,15 @@ class IQTreePlugin(BasePlugin):
             self.partition_status_label.setVisible(False)
             self.partition_definitions = []
             self.add_console_message("Partition mode disabled.", "info")
-            
+
             # 启用Substitution Model Options
             self.model_combo.setEnabled(True)
-            self.gamma_checkbox.setEnabled(True)
-            self.gamma_spinbox.setEnabled(self.gamma_checkbox.isChecked())
+            self.rate_combo.setEnabled(True)
+            self.on_rate_combo_changed(self.rate_combo.currentText())  # 根据 rate_combo 的选择启用/禁用 spinbox
             self.invar_checkbox.setEnabled(True)
-            self.freerate_checkbox.setEnabled(True)
             self.ascertain_bias_checkbox.setEnabled(True)
             self.state_freq_combo.setEnabled(True)
-            
+
             # UFBOOT保持启用
             self.ufboot_checkbox.setEnabled(True)
             self.ufboot_spinbox.setEnabled(self.ufboot_checkbox.isChecked())
@@ -979,33 +1227,90 @@ class IQTreePlugin(BasePlugin):
         """构建模型字符串（用于分区模式）"""
         # 如果分区中已指定模型，使用MFP+MERGE进行模型选择和合并
         has_models = any(p.selected_model for p in self.partition_definitions)
-        
+
         if has_models:
             return "MFP+MERGE"
         else:
             # 使用用户指定的模型
             model_text = self.model_combo.currentText()
             model = model_text
-            
+
             if " (" in model_text and ")" in model_text:
                 model = model_text.split(" (")[0]
-            
-            if self.gamma_checkbox.isChecked():
-                model += f"+G{self.gamma_spinbox.value()}"
-            
+
+            # 添加速率异质性参数
+            rate_option = self.rate_combo.currentText()
+            if rate_option == "Gamma Distribution (+G)":
+                model += f"+G{self.rate_categories_spinbox.value()}"
+            elif rate_option == "FreeRate Model (+R)":
+                model += "+R"
+            # Equal 选项不添加任何参数
+
             if self.invar_checkbox.isChecked():
                 model += "+I"
-                
-            if self.freerate_checkbox.isChecked():
-                model += "+R"
 
             if self.ascertain_bias_checkbox.isChecked():
                 model += "+ASC"
 
             stfreq = self.state_freq_combo.currentText()
             model += {"Estimated": "", "Empirical (+F)": "+F", "ML-optimized (+FO)": "+FO", "Equal (+FQ)": "+FQ"}[stfreq]
-            
+
             return model
+
+    def set_partition_config(self, mode: str, partitions: list, alignment_file: str):
+        """
+        设置分区配置（从平台导入）
+
+        Args:
+            mode: 分区模式 (EL/TL/EUL/TUL)
+            partitions: 分区定义列表
+            alignment_file: 超级矩阵文件路径
+        """
+        from .partition_mode import PartitionMode, PartitionDefinition
+
+        # 映射模式字符串到枚举
+        mode_map = {
+            'EL': PartitionMode.EL,
+            'TL': PartitionMode.TL,
+            'EUL': PartitionMode.EUL,
+            'TUL': PartitionMode.TUL
+        }
+
+        self.partition_mode = mode_map.get(mode, PartitionMode.EL)
+
+        # 转换分区定义
+        self.partition_definitions = []
+        for part in partitions:
+            part_def = PartitionDefinition(
+                name=part.get('name', ''),
+                file_path='',  # 使用超级矩阵的坐标，不需要文件路径
+                seq_type=part.get('seq_type', 'DNA'),
+                model_range=part.get('range', ''),
+                selected_model=part.get('model', None)
+            )
+            self.partition_definitions.append(part_def)
+
+        # 设置超级矩阵文件（设置为导入文件，这样 prepare_input_files 才能找到）
+        self.partition_alignment_file = alignment_file
+        self.import_file = alignment_file  # 关键：设置为导入文件
+
+        # 启用分区模式
+        self.partition_mode_enabled = True
+        self.partition_mode_checkbox.setChecked(True)
+
+        # 更新 UI 显示
+        self.update_partition_status()
+
+        # 添加控制台消息
+        self.add_console_message(f"Partition config imported from platform", "info")
+        self.add_console_message(f"  Mode: {self.partition_mode.value}", "info")
+        self.add_console_message(f"  Partitions: {len(self.partition_definitions)}", "info")
+        self.add_console_message(f"  Alignment: {os.path.basename(alignment_file)}", "info")
+
+        # 显示分区模型信息
+        for i, part_def in enumerate(self.partition_definitions, 1):
+            model_info = part_def.selected_model if part_def.selected_model else "Auto (MFP+MERGE)"
+            self.add_console_message(f"    Partition {i}: {part_def.name} ({part_def.model_range}) - {model_info}", "info")
 
 
 # 插件入口点

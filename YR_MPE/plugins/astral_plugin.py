@@ -416,6 +416,11 @@ class AstralPlugin(BasePlugin):
 
     def __init__(self, import_from=None, import_data=None):
         super().__init__(import_from, import_data)
+        
+        # 如果提供了import_data且它是包含多棵基因树的newick文件路径，则设置输入文件
+        if import_data and isinstance(import_data, str) and os.path.exists(import_data):
+            # 延迟设置，因为file_path_edit在setup_input_tab中创建
+            self._preimport_gene_trees_file = import_data
 
     def init_plugin_info(self):
         """初始化插件信息"""
@@ -556,6 +561,13 @@ class AstralPlugin(BasePlugin):
 
         # 初始化高级参数对话框
         self.advanced_dialog = AdvancedOptionsDialog("astral4", self)
+        
+        # 如果有预导入的基因树文件，设置到输入文件框中
+        if hasattr(self, '_preimport_gene_trees_file') and os.path.exists(self._preimport_gene_trees_file):
+            self.file_path_edit.setText(self._preimport_gene_trees_file)
+            self.import_file = self._preimport_gene_trees_file
+            self.imported_files = [self._preimport_gene_trees_file]
+            self.add_console_message(f"Loaded gene trees from: {os.path.basename(self._preimport_gene_trees_file)}", "info")
 
     def setup_output_tab(self):
         """设置输出标签页"""
