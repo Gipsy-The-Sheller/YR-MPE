@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_1" data-name=" 图层 1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 45 45.7">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #4e6691;
+      }
+
+      .cls-1, .cls-2 {
+        stroke-width: 3px;
+      }
+
+      .cls-1, .cls-2, .cls-3 {
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .cls-1, .cls-3 {
+        stroke: #4e6691;
+      }
+
+      .cls-2 {
+        fill: #ba3e45;
+        stroke: #ba3e45;
+      }
+
+      .cls-3 {
+        fill: none;
+        stroke-width: 3.7px;
+      }
+    </style>
+  </defs>
+  <g>
+    <polyline class="cls-3" points="38.1 35.7 5.6 20.1 38.1 4.4"/>
+    <line class="cls-3" x1="26.1" y1="10.5" x2="38.1" y2="16.3"/>
+    <line class="cls-3" x1="15.7" y1="15.4" x2="38.1" y2="26.1"/>
+  </g>
+  <polygon class="cls-2" points="26.2 40.6 26.2 37.6 15.2 37.6 15.2 29.2 26.2 29.2 26.2 26.1 41.2 33.4 26.2 40.6"/>
+  <rect class="cls-1" x="9.3" y="29.2" width="1.6" height="8.4"/>
+  <rect class="cls-1" x="5.1" y="29.2" width="0" height="8.4" transform="translate(10.2 66.8) rotate(180)"/>
+</svg>
