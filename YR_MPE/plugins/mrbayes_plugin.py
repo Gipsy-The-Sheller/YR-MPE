@@ -585,12 +585,12 @@ class MrBayesPlugin(BasePlugin):
     export_chain_result_signal = pyqtSignal(object)  # 导出MCMC链文件信号
     
     def __init__(self, import_from=None, import_data=None, workdir=None, imported_model=None, model_conversion_result=None, seq_type="DNA"):
-        super().__init__(import_from, import_data, workdir=workdir)
-        
-        # 存储导入的模型信息
+        # 存储导入的模型信息 - 必须在 super().__init__() 之前，因为父类会调用 init_ui()
         self.imported_model = imported_model
         self.model_conversion_result = model_conversion_result
         self.imported_seq_type = seq_type
+        
+        super().__init__(import_from, import_data, workdir=workdir)
         
         # 初始化变量
         if not hasattr(self, 'imported_files'):
@@ -602,6 +602,10 @@ class MrBayesPlugin(BasePlugin):
         # 注意：use_partition_mode在UI中作为QCheckBox创建，这里不初始化
         self.partition_definitions = []
         self.partition_mode = PartitionMode.EL
+        
+        # 处理Dataset Manager导入的数据
+        if import_from == "DATASET_MANAGER" and import_data is not None:
+            self.handle_import_data(import_data)
     
     def init_plugin_info(self):
         """初始化插件信息"""
@@ -770,6 +774,12 @@ class MrBayesPlugin(BasePlugin):
         partition_layout.addWidget(self.partition_config_btn)
         partition_layout.addStretch()
         layout.addLayout(partition_layout)
+        
+        # 分区状态标签（初始隐藏）
+        self.partition_status_label = QLabel("No partitions defined")
+        self.partition_status_label.setStyleSheet("color: #6c757d; font-style: italic;")
+        self.partition_status_label.setVisible(False)
+        layout.addWidget(self.partition_status_label)
 
         mcmc_params_group = QGroupBox("MCMC settings")
         mcmc_params_layout = QFormLayout()
@@ -990,6 +1000,283 @@ class MrBayesPlugin(BasePlugin):
                     model_index = self.prot_model_combo.findText(self.model_conversion_result, Qt.MatchFixedString)
                     if model_index >= 0:
                         self.prot_model_combo.setCurrentIndex(model_index)
+    
+    def handle_import_data(self, import_data):
+        """处理从Dataset Manager导入的数据"""
+        if not isinstance(import_data, dict):
+            return
+        
+        dataset_items = import_data.get('dataset_items', [])
+        dataset_config = import_data.get('dataset_config', {})
+        
+        # 筛选出 alignment 类型的 items
+        from ..platforms.methods.dataset_models import ITEM_TYPE_ALIGNMENT
+        selected_items = [item for item in dataset_items if item.item_type == ITEM_TYPE_ALIGNMENT]
+        
+        if len(selected_items) == 0:
+            # 没有alignment，不导入
+            return
+        
+        if len(selected_items) == 1:
+            # 单一alignment，直接使用
+            self.import_file = selected_items[0].file_path
+            self.imported_files = [selected_items[0].file_path]
+        else:
+            # 多个alignment，合并成超级矩阵
+            try:
+                # 检查所有alignment是否都已对齐
+                unaligned_items = [item for item in selected_items if not item.is_aligned]
+                if unaligned_items:
+                    unaligned_names = [item.loci_name for item in unaligned_items]
+                    warning_msg = f"The following partitions are not aligned:\n"
+                    warning_msg += "\n".join(f"  - {name}" for name in unaligned_names)
+                    warning_msg += "\n\nPlease align these partitions first or select only aligned partitions."
+                    self.add_console_message(f"Warning: {warning_msg}", "warning")
+                
+                # 获取dataset settings
+                topo_linked = dataset_config.get('topo_linked', False)
+                edge_linked = dataset_config.get('edge_linked', False)
+                
+                # 映射到MrBayes分区模式
+                # MrBayes只支持EL和EUL，不支持TUL（拓扑解链）
+                if not topo_linked:
+                    # TUL转换为EUL，给出警告
+                    self.add_console_message("⚠️ 转换警告: MrBayes不支持拓扑解链（TUL）模式", "warning")
+                    self.add_console_message("⚠️ 转换说明: 已转换为边解链（EUL）模式", "warning")
+                    self.partition_mode = PartitionMode.EUL
+                elif edge_linked:
+                    # TL转换为EL，给出警告
+                    self.add_console_message("⚠️ 转换说明: TL模式转换为EL模式", "warning")
+                    self.partition_mode = PartitionMode.EL
+                else:
+                    self.partition_mode = PartitionMode.EUL
+                
+                # 合并所有选中的 partition 为 supermatrix
+                supermatrix_sequences = {}
+                partition_definitions = []
+                current_pos = 1
+                
+                # 获取所有序列名称
+                if selected_items:
+                    all_seq_names = [seq.id for seq in selected_items[0].sequences]
+                else:
+                    all_seq_names = []
+                
+                # 合并序列
+                for seq_name in all_seq_names:
+                    supermatrix_seq = ""
+                    for item in selected_items:
+                        # 找到对应的序列
+                        seq = next((s for s in item.sequences if s.id == seq_name), None)
+                        if seq:
+                            supermatrix_seq += str(seq.seq)
+                        else:
+                            # 如果某个 partition 缺少该序列，用 ? 填充
+                            supermatrix_seq += "?" * item.length
+                    supermatrix_sequences[seq_name] = supermatrix_seq
+                
+                # 创建 supermatrix 临时文件
+                temp_file = self.create_temp_file(suffix='.phy')
+                
+                # 写入PHYLIP格式（MrBayes推荐格式）
+                with open(temp_file, 'w') as f:
+                    # 第一行：序列数量和序列长度
+                    num_sequences = len(supermatrix_sequences)
+                    seq_length = len(list(supermatrix_sequences.values())[0]) if supermatrix_sequences else 0
+                    f.write(f"{num_sequences} {seq_length}\n")
+                    
+                    # 写入序列数据
+                    for seq_name, seq_content in supermatrix_sequences.items():
+                        # 序列名称限制为10个字符（PHYLIP格式）
+                        short_name = seq_name[:10].ljust(10)
+                        f.write(f"{short_name} {seq_content}\n")
+                
+                self.import_file = temp_file
+                self.imported_files = [temp_file]
+                
+                # 计算 partition 坐标并创建 MrBayes 分区定义
+                for item in selected_items:
+                    end_pos = current_pos + item.length - 1
+                    
+                    # 检测序列类型
+                    seq_type = self._detect_sequence_type(item)
+                    
+                    # 创建MrBayes分区定义
+                    partition_def = MrBayesPartitionDefinition(
+                        name=item.loci_name,
+                        range=f"{current_pos}-{end_pos}",
+                        seq_type=seq_type,
+                        nst=6,  # 默认GTR
+                        aamodel="mixed",  # 默认mixed
+                        rates="gamma",  # 默认gamma
+                        ngammacat=4  # 默认4个gamma类别
+                    )
+                    partition_definitions.append(partition_def)
+                    current_pos = end_pos + 1
+                
+                self.partition_definitions = partition_definitions
+                
+                # 启用分区模式
+                if hasattr(self, 'use_partition_mode'):
+                    self.use_partition_mode.setChecked(True)
+                    self.partition_config_btn.setEnabled(True)
+                
+                # 更新分区状态显示
+                self.update_partition_status()
+                
+                # 添加控制台消息
+                self.add_console_message(f"Dataset imported: {len(selected_items)} partitions", "info")
+                self.add_console_message(f"Partition mode: {self.partition_mode.value}", "info")
+                self.add_console_message(f"Supermatrix created: {len(supermatrix_sequences)} taxa", "info")
+                
+            except Exception as e:
+                self.add_console_message(f"Failed to import dataset: {str(e)}", "error")
+                import traceback
+                self.add_console_message(traceback.format_exc(), "error")
+                self.import_file = None
+                self.imported_files = []
+                self.partition_definitions = []
+        
+        # 更新UI显示导入的文件
+        if hasattr(self, 'file_path_edit') and self.file_path_edit and self.import_file:
+            self.file_path_edit.setText(self.import_file)
+    
+    def _detect_sequence_type(self, dataset_item) -> str:
+        """从DatasetItem检测序列类型"""
+        # 检查metadata
+        if hasattr(dataset_item, 'metadata') and 'seq_type' in dataset_item.metadata:
+            seq_type = dataset_item.metadata['seq_type'].upper()
+            if seq_type in ['DNA', 'AA', 'PROTEIN', 'CODON']:
+                if seq_type == 'AA' or seq_type == 'PROTEIN':
+                    return 'PROTEIN'
+                return 'DNA'
+        
+        # 检查data字段
+        if hasattr(dataset_item, 'data') and 'seq_type' in dataset_item.data:
+            seq_type = dataset_item.data['seq_type'].upper()
+            if seq_type in ['DNA', 'AA', 'PROTEIN', 'CODON']:
+                if seq_type == 'AA' or seq_type == 'PROTEIN':
+                    return 'PROTEIN'
+                return 'DNA'
+        
+        # 从序列内容推断
+        if hasattr(dataset_item, 'sequences') and dataset_item.sequences:
+            first_seq = str(dataset_item.sequences[0].seq).upper()
+            
+            # 检查是否是氨基酸序列
+            aa_chars = set('ACDEFGHIKLMNPQRSTVWY*')
+            dna_chars = set('ACGTN-')
+            
+            # 统计氨基酸字符出现次数
+            aa_count = sum(1 for c in first_seq if c in aa_chars)
+            # 统计 DNA 字符出现次数
+            dna_count = sum(1 for c in first_seq if c in dna_chars)
+            
+            # 如果氨基酸字符占主导，判定为蛋白质
+            total_valid = aa_count + dna_count
+            if total_valid > 0 and aa_count / total_valid > 0.5:
+                return 'PROTEIN'
+        
+        # 默认返回 DNA
+        return 'DNA'
+    
+    def update_partition_status(self):
+        """更新分区状态显示"""
+        if not hasattr(self, 'partition_status_label'):
+            return
+        
+        if not self.partition_definitions:
+            self.partition_status_label.setText("No partitions defined")
+            self.partition_status_label.setStyleSheet("color: #6c757d; font-style: italic;")
+        else:
+            status_text = f"{len(self.partition_definitions)} partition(s) configured"
+            status_text += f" [{self.partition_mode.value} mode]"
+            self.partition_status_label.setText(status_text)
+            self.partition_status_label.setStyleSheet("color: #28a745; font-weight: bold;")
+    
+    def apply_partition_model_config(self, partition_model_config):
+        """
+        应用分区模型配置（用模型信息覆盖分区定义）
+        
+        Args:
+            partition_model_config: dict {
+                'partition_mode': str,
+                'partitions': list,
+                'model_count': int
+            }
+        """
+        from .partition_mode import MrBayesModelConverter
+        
+        # 更新分区模式
+        mode_map = {
+            'EL': PartitionMode.EL,
+            'TL': PartitionMode.EL,  # MrBayes不支持TL，转换为EL
+            'EUL': PartitionMode.EUL,
+            'TUL': PartitionMode.EUL  # MrBayes不支持TUL，转换为EUL
+        }
+        input_mode = partition_model_config.get('partition_mode', 'EL')
+        converted_mode = mode_map.get(input_mode, PartitionMode.EL)
+        
+        if converted_mode != input_mode:
+            self.add_console_message(f"⚠️ 分区模式转换: {input_mode} -> {converted_mode.value} (MrBayes不支持{input_mode})", "warning")
+        
+        self.partition_mode = converted_mode
+        
+        # 用模型信息更新分区定义
+        model_partitions = partition_model_config.get('partitions', [])
+        if model_partitions and self.partition_definitions:
+            # 确保分区数量匹配
+            if len(model_partitions) == len(self.partition_definitions):
+                for i, model_part in enumerate(model_partitions):
+                    # 支持两种字段名：'model' 和 'best_model'
+                    model_code = model_part.get('model') or model_part.get('best_model')
+                    if model_code:
+                        partition = self.partition_definitions[i]
+                        
+                        # 使用MrBayesModelConverter转换模型
+                        if partition.seq_type == "DNA":
+                            mrbayes_params, warnings = MrBayesModelConverter.convert_model_to_mrbayes(
+                                model_code, "DNA"
+                            )
+                            if warnings:
+                                for warning in warnings:
+                                    self.add_console_message(f"⚠️ 分区{i+1}警告: {warning}", "warning")
+                            
+                            if mrbayes_params:
+                                partition.nst = mrbayes_params.get('nst', 6)
+                                partition.rates = mrbayes_params.get('rates', 'gamma')
+                                partition.ngammacat = mrbayes_params.get('ngammacat', 4)
+                            
+                            self.add_console_message(f"  Partition {i+1}: {partition.name} -> {model_code}", "info")
+                        else:  # Protein
+                            mrbayes_model, warnings = MrBayesModelConverter.convert_model_to_mrbayes(
+                                model_code, "PROTEIN"
+                            )
+                            if warnings:
+                                for warning in warnings:
+                                    self.add_console_message(f"⚠️ 分区{i+1}警告: {warning}", "warning")
+                            
+                            if mrbayes_model:
+                                partition.aamodel = mrbayes_model
+                            
+                            self.add_console_message(f"  Partition {i+1}: {partition.name} -> {model_code} ({mrbayes_model})", "info")
+                    
+                    if model_part.get('seq_type'):
+                        # 更新序列类型
+                        seq_type = model_part['seq_type'].upper()
+                        if seq_type in ['DNA', 'PROTEIN', 'AA']:
+                            if seq_type == 'AA':
+                                seq_type = 'PROTEIN'
+                            self.partition_definitions[i].seq_type = seq_type
+            else:
+                # 分区数量不匹配，警告用户
+                self.add_console_message(
+                    f"Warning: Model has {len(model_partitions)} partitions but dataset has {len(self.partition_definitions)} partitions. Partition count mismatch!",
+                    "warning"
+                )
+        
+        # 更新分区状态显示
+        self.update_partition_status()
 
     # ============ MrBayesPlugin 业务逻辑方法 ============
     
@@ -1699,8 +1986,9 @@ class MrBayesHighlighter(QSyntaxHighlighter):
         
         # 编译正则表达式
         self.begin_end_regex = QRegExp(r"^\s*(begin mrbayes|end)\s*;?\s*$")
-        self.command_regex = QRegExp(r"\b(lset|mcmcp|sump|sumt|prset|set|mcmc)\b")
+        self.command_regex = QRegExp(r"\b(lset|mcmcp|sump|sumt|prset|set|mcmc|charset|partition)\b")
         self.settings_regex = QRegExp(r"([a-zA-Z]+)=([^\s;]+)")
+        self.settings_regex_spacing = QRegExp(r"([a-zA-Z]+) = ([^\s;]+)")
     
     def highlightBlock(self, text):
         # 高亮 begin/end 行
@@ -1736,6 +2024,23 @@ class MrBayesHighlighter(QSyntaxHighlighter):
             
             pos = index + len(matched_str)
             index = self.settings_regex.indexIn(text, pos)
+
+        index = self.settings_regex_spacing.indexIn(text, pos)
+        while index >= 0:
+            matched_str = self.settings_regex_spacing.cap(0)
+            setting_part = self.settings_regex_spacing.cap(1)
+            value_part = self.settings_regex_spacing.cap(2)
+            
+            # 高亮设置项（等号前的部分）
+            setting_pos = text.find(setting_part, index)
+            self.setFormat(setting_pos, len(setting_part), self.setting_format)
+            
+            # 高亮值（等号后的部分）
+            value_pos = text.find(value_part, setting_pos + len(setting_part))
+            self.setFormat(value_pos, len(value_part), self.value_format)
+            
+            pos = index + len(matched_str)
+            index = self.settings_regex_spacing.indexIn(text, pos)
 
     def copy_mb_data_block(self):
         """复制MrBayes数据块到剪贴板"""

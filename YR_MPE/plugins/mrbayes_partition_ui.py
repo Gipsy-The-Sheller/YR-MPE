@@ -257,15 +257,6 @@ class MrBayesPartitionDialog(QDialog):
         mode_layout = QVBoxLayout()
         mode_group.setLayout(mode_layout)
         
-        mode_desc = QLabel(
-            "MrBayes支持两种分区模式:\n"
-            "• Edge-linked: 共享拓扑和分支长度，每个分区有独立的模型参数\n"
-            "• Edge-unlinked: 共享拓扑，但所有参数都独立"
-        )
-        mode_desc.setWordWrap(True)
-        mode_desc.setStyleSheet("color: #666;")
-        mode_layout.addWidget(mode_desc)
-        
         mode_radio_layout = QHBoxLayout()
         self.el_radio = QRadioButton("Edge-linked")
         self.eul_radio = QRadioButton("Edge-unlinked")
