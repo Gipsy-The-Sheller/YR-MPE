@@ -43,9 +43,9 @@ from .methods.dataset_item_button import DatasetItemButton, DatasetButton
 from .methods.dataset_models import (
     DatasetItem, DatasetInfo,
     ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT, ITEM_TYPE_MODEL,
-    ITEM_TYPE_DISTANCE, ITEM_TYPE_PHYLOGENY, ITEM_TYPE_CHAIN,
-    ITEM_TYPE_VARIANT, ITEM_TYPE_COALESCENT, ITEM_TYPE_CLOCK,
-    SELECTION_STATE_NONE, SELECTION_STATE_GREEN,
+    ITEM_TYPE_DISTANCE, ITEM_TYPE_PHYLOGENY, ITEM_TYPE_TREESET,
+    ITEM_TYPE_CHAIN, ITEM_TYPE_VARIANT, ITEM_TYPE_COALESCENT,
+    ITEM_TYPE_CLOCK, SELECTION_STATE_NONE, SELECTION_STATE_GREEN,
     SELECTION_STATE_BLUE, SELECTION_STATE_RED
 )
 
@@ -888,6 +888,10 @@ class YR_MPEA_Widget(QWidget):
             # 否则打开空的ASTRAL插件
             astral_wrapper = astral_entry.run()
         
+        # 传递 dataset_selection_manager 给 ASTRAL 插件
+        if hasattr(astral_wrapper, '_dataset_selection_manager') is False:
+            astral_wrapper._dataset_selection_manager = self.dataset_selection_manager
+        
         # 连接信号，如果插件发出新序列或结果，添加到工作区
         # 注意：根据插件实际情况决定是否需要连接信号
         dialog.layout().addWidget(astral_wrapper)
@@ -1091,6 +1095,10 @@ class YR_MPEA_Widget(QWidget):
                     tree_data = phylogeny_data['data'][0]
                     if 'content' in tree_data:
                         tree_content = tree_data['content'].strip()
+                
+                # 方式3: 从直接 content 读取（TreeSet 多棵树）
+                elif 'content' in phylogeny_data:
+                    tree_content = phylogeny_data['content'].strip()
                 
                 # 设置树的content
                 if tree_content:
@@ -2068,6 +2076,7 @@ class SingleGeneWorkspace(QWidget):
             "models": [],
             "distances": [],
             "phylogenies": [],
+            "treesets": [],
             "chains": [],
             "datasets": []
         }
@@ -2229,6 +2238,9 @@ class SingleGeneWorkspace(QWidget):
             self.view_distance_matrix(item.data)
         elif item.item_type == ITEM_TYPE_PHYLOGENY:
             self.view_phylogeny(item.data)
+        elif item.item_type == ITEM_TYPE_TREESET:
+            # TreeSet 双击打开树集合查看器
+            self._on_treeset_click(item.data)
         elif item.item_type == ITEM_TYPE_CHAIN:
             # Chain 数据的特殊处理
             if self.parent_window:
@@ -2498,162 +2510,160 @@ class SingleGeneWorkspace(QWidget):
     
     def _add_single_phylogeny(self, phylogeny):
         """添加单个系统发育树到工作区"""
-        # 确保grid_layout存在
-        if not hasattr(self, 'grid_layout'):
-            # disable hint label
-            self.workspace_hint.setVisible(False)
-            # add a grid layout
-            self.grid_widget = QWidget()
-            self.grid_layout = QGridLayout()
-            self.grid_layout.setLayout(self.grid_layout)
-            self.main_layout.addWidget(self.grid_widget)
-            self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        # 如果还没有数据集，创建一个默认数据集
+        if not self.current_dataset_id:
+            if self.dataset_selection_manager:
+                self.current_dataset_id = self.dataset_selection_manager.create_dataset(
+                    name="Default Dataset",
+                    description="Auto-created default dataset",
+                    is_multigene=False
+                )
         
-        # add a phylogeny to items["phylogenies"]
-        self.items["phylogenies"].append(phylogeny)
-        # add a phylogeny icon to workspace
-        phylogeny_icon = self.resource_factory.get_icon("file/phylogeny.svg")
-        phylogeny_button = QToolButton()
-        phylogeny_button.setIcon(phylogeny_icon)
-        phylogeny_button.setIconSize(QSize(45, 45))
+        # 创建 DatasetItem
+        from datetime import datetime
+        dataset_item = DatasetItem(item_type=ITEM_TYPE_PHYLOGENY)
+        dataset_item.dataset_id = self.current_dataset_id
+        dataset_item.loci_name = f"Phylogeny_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        dataset_item.name = dataset_item.loci_name
         
-        # 设置样式，背景透明（与其他未选中的按钮保持一致）
-        phylogeny_button.setStyleSheet("""
-            QToolButton {
-                background-color: transparent;
-            }
-        """)
-        
-        # 创建tooltip
-        if isinstance(phylogeny, dict) and 'data' in phylogeny and len(phylogeny['data']) > 0:
-            tree_data = phylogeny['data'][0]
-            filename = tree_data.get('filename', 'unknown')
-            tooltip_text = f"Phylogenetic Tree ({filename})"
-            phylogeny_button.setToolTip(tooltip_text)
+        # 继承所有权 UUID（如果存在）
+        ownership_uuid = self._get_active_ownership_uuid()
+        if ownership_uuid:
+            dataset_item.ownership_uuid = ownership_uuid
         else:
-            phylogeny_button.setToolTip("Phylogenetic Tree")
+            # 如果没有可继承的 UUID，生成新的
+            dataset_item.ownership_uuid = str(uuid.uuid4())
         
-        # 点击打开IcyTree，传入phylogeny数据
-        phylogeny_button.clicked.connect(lambda: self.parent_window.open_icytree_wrapper(phylogeny_data=phylogeny))
-        self.grid_layout.addWidget(phylogeny_button, 3, len(self.items["phylogenies"])-1)
+        # 存储树数据
+        if isinstance(phylogeny, dict):
+            dataset_item.data = phylogeny
+        else:
+            dataset_item.data = {"content": phylogeny}
+        
+        # 保留旧的数据结构（向后兼容）
+        self.items["phylogenies"].append(phylogeny)
+        
+        # 添加到管理器
+        if self.dataset_selection_manager:
+            success = self.dataset_selection_manager.add_item(dataset_item, self.current_dataset_id)
+            if not success:
+                QMessageBox.warning(self, "Warning", "Failed to add phylogeny to dataset")
+                return
+            dataset_item = self.dataset_selection_manager.get_item(dataset_item.id)
+            if not dataset_item:
+                QMessageBox.warning(self, "Warning", "Failed to retrieve added phylogeny")
+                return
+        
+        # 创建按钮
+        self._create_item_button(
+            dataset_item=dataset_item,
+            item_type_key="phylogenies",
+            row=3,
+            col=len(self.item_buttons.get("phylogenies", [])),
+            icon_name="file/phylogeny.svg"
+        )
     
     def add_treeset(self, treeset_data):
         """添加基因树集合（treeset）到工作区"""
-        from .methods.dataset_models import ITEM_TYPE_TREESET
+        # 如果还没有数据集，创建一个默认数据集
+        if not self.current_dataset_id:
+            if self.dataset_selection_manager:
+                self.current_dataset_id = self.dataset_selection_manager.create_dataset(
+                    name="Default Dataset",
+                    description="Auto-created default dataset",
+                    is_multigene=False
+                )
         
-        # 确保grid_layout存在
-        if not hasattr(self, 'grid_layout'):
-            # disable hint label
-            self.workspace_hint.setVisible(False)
-            # add a grid layout
-            self.grid_widget = QWidget()
-            self.grid_layout = QGridLayout()
-            self.grid_widget.setLayout(self.grid_layout)
-            self.main_layout.addWidget(self.grid_widget)
-            self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        # 创建 DatasetItem
+        from datetime import datetime
+        dataset_item = DatasetItem(item_type=ITEM_TYPE_TREESET)
+        dataset_item.dataset_id = self.current_dataset_id
+        dataset_item.loci_name = f"TreeSet_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        dataset_item.name = dataset_item.loci_name
         
-        # add a treeset to items["treesets"]
+        # 继承所有权 UUID（如果存在）
+        ownership_uuid = self._get_active_ownership_uuid()
+        if ownership_uuid:
+            dataset_item.ownership_uuid = ownership_uuid
+        else:
+            # 如果没有可继承的 UUID，生成新的
+            dataset_item.ownership_uuid = str(uuid.uuid4())
+        
+        # 存储树集合数据
+        if isinstance(treeset_data, dict):
+            dataset_item.data = treeset_data
+        else:
+            dataset_item.data = {"content": treeset_data}
+        
+        # 保留旧的数据结构（向后兼容）
         if 'treesets' not in self.items:
             self.items['treesets'] = []
-        
         self.items["treesets"].append(treeset_data)
         
-        # 添加 treeset 图标到 workspace
-        treeset_icon = self.resource_factory.get_icon("file/treeset.svg")
-        treeset_button = QToolButton()
-        treeset_button.setIcon(treeset_icon)
-        treeset_button.setIconSize(QSize(45, 45))
+        # 添加到管理器
+        if self.dataset_selection_manager:
+            success = self.dataset_selection_manager.add_item(dataset_item, self.current_dataset_id)
+            if not success:
+                QMessageBox.warning(self, "Warning", "Failed to add treeset to dataset")
+                return
+            dataset_item = self.dataset_selection_manager.get_item(dataset_item.id)
+            if not dataset_item:
+                QMessageBox.warning(self, "Warning", "Failed to retrieve added treeset")
+                return
         
-        # 设置样式，背景透明
-        treeset_button.setStyleSheet("""
-            QToolButton {
-                background-color: transparent;
-            }
-        """)
-        
-        # 创建tooltip
-        if isinstance(treeset_data, dict) and 'data' in treeset_data:
-            tree_count = len(treeset_data['data'])
-            tooltip_text = f"Tree Set ({tree_count} trees)"
-            treeset_button.setToolTip(tooltip_text)
-        else:
-            treeset_button.setToolTip("Tree Set")
-        
-        # 点击打开树集合查看器
-        treeset_button.clicked.connect(lambda: self._on_treeset_click(treeset_data))
-        self.grid_layout.addWidget(treeset_button, 5, len(self.items["treesets"])-1)
+        # 创建按钮
+        self._create_item_button(
+            dataset_item=dataset_item,
+            item_type_key="treesets",
+            row=5,
+            col=len(self.item_buttons.get("treesets", [])),
+            icon_name="file/treeset.svg"
+        )
     
     def _on_treeset_click(self, treeset_data):
-        """处理 treeset 按钮点击事件"""
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QListWidget, QListWidgetItem, QLabel, QHBoxLayout
+        """处理 treeset 按钮点击事件 - 直接用 IcyTree 呈现所有树"""
+        # 从 treeset_data 中提取所有树的 Newick 字符串
+        trees = []
+        if isinstance(treeset_data, dict) and 'data' in treeset_data:
+            for tree_data in treeset_data['data']:
+                if 'content' in tree_data:
+                    trees.append(tree_data['content'])
+                elif 'file_path' in tree_data:
+                    # 从文件读取
+                    try:
+                        with open(tree_data['file_path'], 'r') as f:
+                            trees.append(f.read().strip())
+                    except:
+                        pass
+        elif isinstance(treeset_data, str):
+            # 如果直接是字符串
+            trees.append(treeset_data)
         
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Tree Set Viewer")
-        dialog.setMinimumSize(600, 400)
-        layout = QVBoxLayout()
-        dialog.setLayout(layout)
+        if not trees:
+            QMessageBox.warning(self, "Warning", "No trees found in the tree set")
+            return
         
-        # 标题
-        title_label = QLabel(f"Tree Set - {len(treeset_data.get('data', []))} trees")
-        title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout.addWidget(title_label)
-        
-        # 树列表
-        tree_list = QListWidget()
-        
-        for i, tree_data in enumerate(treeset_data.get('data', [])):
-            tree_name = tree_data.get('filename', f'Tree {i+1}')
-            item = QListWidgetItem(f"{tree_name}")
-            item.setData(Qt.UserRole, tree_data)
-            tree_list.addItem(item)
-        
-        layout.addWidget(tree_list)
-        
-        # 按钮
-        button_layout = QHBoxLayout()
-        
-        # 用 IcyTree 查看选中的树
-        view_button = QPushButton("View Selected Tree")
-        view_button.clicked.connect(lambda: self._view_selected_tree(tree_list, treeset_data))
-        button_layout.addWidget(view_button)
-        
-        # 导入到 ASTRAL
-        import_astral_button = QPushButton("Import to ASTRAL")
-        import_astral_button.clicked.connect(lambda: self._import_to_astral(treeset_data))
-        button_layout.addWidget(import_astral_button)
-        
-        button_layout.addStretch()
-        
-        close_button = QPushButton("Close")
-        close_button.clicked.connect(dialog.close)
-        button_layout.addWidget(close_button)
-        
-        layout.addLayout(button_layout)
-        
-        dialog.exec_()
+        # 用 IcyTree 呈现所有树
+        if self.parent_window:
+            # 将所有树的 Newick 字符串用换行符连接
+            combined_newick = '\n'.join(trees)
+            self.parent_window.open_icytree_wrapper(phylogeny_data={'content': combined_newick, 'treeset': True})
     
-    def _view_selected_tree(self, tree_list, treeset_data):
-        """查看选中的树"""
-        selected_items = tree_list.selectedItems()
-        if selected_items:
-            tree_data = selected_items[0].data(Qt.UserRole)
-            self.parent_window.open_icytree_wrapper(phylogeny_data=tree_data)
-    
-    def _import_to_astral(self, treeset_data):
+    def _import_treeset_to_astral(self, treeset_data):
         """导入树集合到 ASTRAL"""
         # 将树集合格式化为 ASTRAL 可接受的格式
-        # ASTRAL 需要每个树在单独的文件中，或者在同一个文件中用分号分隔
         trees = []
-        for tree_data in treeset_data.get('data', []):
-            if 'content' in tree_data:
-                trees.append(tree_data['content'])
-            elif 'file_path' in tree_data:
-                # 从文件读取
-                try:
-                    with open(tree_data['file_path'], 'r') as f:
-                        trees.append(f.read().strip())
-                except:
-                    pass
+        if isinstance(treeset_data, dict) and 'data' in treeset_data:
+            for tree_data in treeset_data['data']:
+                if 'content' in tree_data:
+                    trees.append(tree_data['content'])
+                elif 'file_path' in tree_data:
+                    # 从文件读取
+                    try:
+                        with open(tree_data['file_path'], 'r') as f:
+                            trees.append(f.read().strip())
+                    except:
+                        pass
         
         if trees:
             # 创建临时文件，所有树用换行符分隔
@@ -3567,6 +3577,14 @@ class SingleGeneWorkspace(QWidget):
             QMessageBox.warning(None, "Warning", "pandas library is required for Excel export. Please install pandas to use this feature.")
         except Exception as e:
             QMessageBox.critical(None, "Error", f"Failed to export distance matrix:\n{str(e)}")
+    
+    def view_phylogeny(self, phylogeny_data):
+        """查看系统发育树 - 使用 IcyTree 查看器"""
+        try:
+            if self.parent_window:
+                self.parent_window.open_icytree_wrapper(phylogeny_data=phylogeny_data)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to view phylogeny: {str(e)}")
     
     def open_icytree_wrapper(self):
         """打开IcyTree查看系统发育树"""

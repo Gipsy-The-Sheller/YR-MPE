@@ -421,6 +421,31 @@ class AstralPlugin(BasePlugin):
         if import_data and isinstance(import_data, str) and os.path.exists(import_data):
             # 延迟设置，因为file_path_edit在setup_input_tab中创建
             self._preimport_gene_trees_file = import_data
+        # 如果提供了import_data且它是来自dataset_selection_manager的TreeSet数据
+        elif import_from == "DATASET_MANAGER" and import_data and isinstance(import_data, dict):
+            dataset_items = import_data.get('dataset_items', [])
+            # 查找 ITEM_TYPE_TREESET 类型的数据项
+            from ..platforms.methods.dataset_models import ITEM_TYPE_TREESET
+            treeset_items = [item for item in dataset_items if item.item_type == ITEM_TYPE_TREESET]
+            if treeset_items:
+                # 创建临时文件，包含所有树的 Newick 字符串
+                import tempfile
+                trees = []
+                for tree_data in treeset_items[0].data.get('data', []):
+                    if 'content' in tree_data:
+                        trees.append(tree_data['content'])
+                    elif 'file_path' in tree_data:
+                        try:
+                            with open(tree_data['file_path'], 'r') as f:
+                                trees.append(f.read().strip())
+                        except:
+                            pass
+                
+                if trees:
+                    temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.trees', delete=False)
+                    temp_file.write('\n'.join(trees))
+                    temp_file.close()
+                    self._preimport_gene_trees_file = temp_file.name
 
     def init_plugin_info(self):
         """初始化插件信息"""
@@ -473,9 +498,12 @@ class AstralPlugin(BasePlugin):
         self.file_path_edit.setPlaceholderText("Select input file...")
         browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self.browse_input_file)
+        import_dataset_btn = QPushButton("Import from Selected TreeSet")
+        import_dataset_btn.clicked.connect(self.import_from_selected_treeset)
         file_hbox = QHBoxLayout()
         file_hbox.addWidget(self.file_path_edit)
         file_hbox.addWidget(browse_btn)
+        file_hbox.addWidget(import_dataset_btn)
         file_layout.addRow("Input File:", file_hbox)
 
         layout.addWidget(file_group)
@@ -626,6 +654,53 @@ class AstralPlugin(BasePlugin):
         )
         if file_path:
             self.output_path_edit.setText(file_path)
+    
+    def import_from_selected_treeset(self):
+        """从选中的 TreeSet 导入基因树到 ASTRAL"""
+        # 获取 dataset_selection_manager
+        dataset_selection_manager = getattr(self, '_dataset_selection_manager', None)
+        if not dataset_selection_manager:
+            QMessageBox.warning(self, "Warning", "No dataset selection manager available")
+            return
+        
+        # 获取选中的 TreeSet
+        from ..platforms.methods.dataset_models import ITEM_TYPE_TREESET, SELECTION_STATE_GREEN
+        selected_items = dataset_selection_manager.get_selected_items()
+        treeset_items = [item for item in selected_items if item.item_type == ITEM_TYPE_TREESET]
+        
+        if not treeset_items:
+            QMessageBox.warning(self, "Warning", "Please select a TreeSet first (click on it to select)")
+            return
+        
+        # 提取所有树的 Newick 字符串
+        trees = []
+        for tree_data in treeset_items[0].data.get('data', []):
+            if 'content' in tree_data:
+                trees.append(tree_data['content'])
+            elif 'file_path' in tree_data:
+                try:
+                    with open(tree_data['file_path'], 'r') as f:
+                        trees.append(f.read().strip())
+                except:
+                    pass
+        
+        if not trees:
+            QMessageBox.warning(self, "Warning", "No trees found in the selected TreeSet")
+            return
+        
+        # 创建临时文件，所有树用换行符分隔
+        import tempfile
+        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.trees', delete=False)
+        temp_file.write('\n'.join(trees))
+        temp_file.close()
+        
+        # 设置输入文件
+        self.file_path_edit.setText(temp_file.name)
+        if not self.import_file:
+            self.import_file = temp_file.name
+            self.imported_files = [temp_file.name]
+        
+        self.add_console_message(f"Imported {len(trees)} trees from selected TreeSet", "info")
 
     def run_analysis(self):
         """运行ASTRAL分析"""

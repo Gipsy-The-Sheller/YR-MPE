@@ -18,6 +18,7 @@ ITEM_TYPE_VARIANT = "variant"
 ITEM_TYPE_COALESCENT = "coalescent"
 ITEM_TYPE_CLOCK = "clock"
 ITEM_TYPE_CHAIN = "chain"
+ITEM_TYPE_TREESET = "treeset"
 
 ALL_ITEM_TYPES = [
     ITEM_TYPE_SEQUENCE,
@@ -28,7 +29,8 @@ ALL_ITEM_TYPES = [
     ITEM_TYPE_VARIANT,
     ITEM_TYPE_COALESCENT,
     ITEM_TYPE_CLOCK,
-    ITEM_TYPE_CHAIN
+    ITEM_TYPE_CHAIN,
+    ITEM_TYPE_TREESET
 ]
 
 # 选择状态常量
@@ -54,7 +56,8 @@ DATA_DEPENDENCIES = {
     ITEM_TYPE_VARIANT: [ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT],
     ITEM_TYPE_COALESCENT: [ITEM_TYPE_PHYLOGENY],
     ITEM_TYPE_CLOCK: [ITEM_TYPE_PHYLOGENY],
-    ITEM_TYPE_CHAIN: [ITEM_TYPE_ALIGNMENT]
+    ITEM_TYPE_CHAIN: [ITEM_TYPE_ALIGNMENT],
+    ITEM_TYPE_TREESET: [ITEM_TYPE_PHYLOGENY]  # treeset 依赖于 phylogeny
 }
 
 # 所有权分组（同一组内只能同时激活一个项目）
@@ -62,13 +65,13 @@ DATA_DEPENDENCIES = {
 # - Dataset / Alignment / Sequence 算一种
 # - distance 算一种
 # - model 算一种
-# - tree (phylogeny) 算一种
+# - tree (phylogeny/treeset) 算一种
 # - trace plot (chain) 算一种
 OWNERSHIP_GROUPS = {
     "sequence_group": [ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT],
     "distance_group": [ITEM_TYPE_DISTANCE],
     "model_group": [ITEM_TYPE_MODEL],
-    "phylogeny_group": [ITEM_TYPE_PHYLOGENY],
+    "phylogeny_group": [ITEM_TYPE_PHYLOGENY, ITEM_TYPE_TREESET],
     "chain_group": [ITEM_TYPE_CHAIN],
     "variant_group": [ITEM_TYPE_VARIANT],
     "coalescent_group": [ITEM_TYPE_COALESCENT],

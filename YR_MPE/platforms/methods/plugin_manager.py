@@ -40,7 +40,7 @@ class PluginManager:
         # 溯祖插件
         self._register_coalescent_plugins()
         # Dataset插件
-        self._register_dataset_plugins()
+        # self._register_dataset_plugins()
         
     def _register_alignment_plugins(self):
         """注册序列比对插件"""
@@ -117,14 +117,6 @@ class PluginManager:
         try:
             from YR_MPE.plugins.caster_site_plugin import CASTERSitePluginEntry
             self.register_plugin("caster_site", CASTERSitePluginEntry)
-        except ImportError:
-            pass
-        
-    def _register_dataset_plugins(self):
-        """注册Dataset插件"""
-        try:
-            from YR_MPE.plugins.dataset_plugin import DatasetPluginEntry
-            self.register_plugin("dataset", DatasetPluginEntry)
         except ImportError:
             pass
             
