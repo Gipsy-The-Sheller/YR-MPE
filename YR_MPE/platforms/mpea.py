@@ -702,11 +702,11 @@ class YR_MPEA_Widget(QWidget):
 
         # TODO: Molecular Clock: LSD2 (IQ-TREE 3) / Bayesian Inference (MrBayes / PAML-mcmctree) / Penalized Likelihood (r8s)
 
-        # Add PD-Guide action
-        pdguide_action = QAction("PD-Guide", clock_button)
-        pdguide_action.setIcon(self.resource_factory.get_icon("software/pdguide.svg"))
-        pdguide_action.triggered.connect(self.open_pdguide_wrapper)
-        clock_button_menu.addAction(pdguide_action)
+        # Add LSD2 action
+        lsd2_action = QAction("LSD2", clock_button)
+        lsd2_action.setIcon(self.resource_factory.get_icon("software/lsd2.svg"))
+        lsd2_action.triggered.connect(self.open_lsd2_wrapper)
+        clock_button_menu.addAction(lsd2_action)
 
         # mainworkspace_group = QGroupBox("Workspace")
         # # mainworkspace_layout = QGridLayout(10,4)
@@ -1517,12 +1517,15 @@ class YR_MPEA_Widget(QWidget):
         dialog.layout().addWidget(mpboot_wrapper)
         dialog.exec_()
 
-    def open_pdguide_wrapper(self):
+    def open_lsd2_wrapper(self):
+        """Open LSD2 plugin wrapper - automatically imports green state phylogenies"""
         from PyQt5.QtWidgets import QDialog
-        from ..plugins.pdguide_plugin import PdGuidePluginEntry
+        from ..plugins.lsd2_plugin import LSD2PluginEntry
+        from .methods.dataset_models import ITEM_TYPE_PHYLOGENY
+        
         dialog = QDialog()
-        dialog.setWindowTitle(f"PD-Guide - YR-MPEA")
-        dialog.setWindowIcon(self.resource_factory.get_icon("software/pdguide.svg"))
+        dialog.setWindowTitle(f"LSD2 - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("software/lsd2.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
@@ -1530,11 +1533,28 @@ class YR_MPEA_Widget(QWidget):
         import_from = None
         import_data = None
         
-        if len(self.workspace.items["alignments"]) > 0:
-            import_from = "alignment"
-            import_data = self.workspace.items["alignments"][0]
+        # 使用_prepare_import_data获取green状态的items
+        import_from, import_data_result = self._prepare_import_data()
+        
+        if import_from == "DATASET_MANAGER" and import_data_result:
+            # 过滤出ITEM_TYPE_PHYLOGENY类型的items
+            phylogeny_items = [item for item in import_data_result.get('dataset_items', []) 
+                               if item.item_type == ITEM_TYPE_PHYLOGENY]
             
-        plugin_entry = PdGuidePluginEntry()
+            if phylogeny_items:
+                # 使用第一个phylogeny item
+                import_data = phylogeny_items[0]
+            else:
+                # 没有phylogeny，使用整个dataset数据
+                import_data = import_data_result
+        elif import_from == "YR_MPEA" and import_data_result:
+            # 如果是SingleGeneWorkspace，检查是否有phylogenies
+            if hasattr(import_data_result, 'item_type') and import_data_result.item_type == ITEM_TYPE_PHYLOGENY:
+                import_data = import_data_result
+            elif len(self.workspace.items.get("phylogenies", [])) > 0:
+                import_data = self.workspace.items["phylogenies"][0]
+            
+        plugin_entry = LSD2PluginEntry()
         plugin_wrapper = plugin_entry.run(import_from=import_from, import_data=import_data)
         dialog.layout().addWidget(plugin_wrapper)
         dialog.exec_()
@@ -1932,11 +1952,22 @@ class YR_MPEA_Widget(QWidget):
         # 准备导入数据 (使用抽象层)
         import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
         
+        # 检查是否有分区模型配置
+        partition_model_config = None
+        if self.dataset_selection_manager:
+            green_models = [item for item in self.dataset_selection_manager.get_selected_items() 
+                          if item.item_type == ITEM_TYPE_MODEL]
+            if green_models:
+                model_item = green_models[0]
+                # 检查是否为分区模型
+                if model_item.model_sub_type == "partitioned":
+                    partition_model_config = self._extract_partition_model_info(model_item)
+        
         # 获取最佳模型（只检查green状态的model）
         best_model = ""
         seq_type = "DNA"  # 默认DNA
         # 从dataset_selection_manager获取green状态的model
-        if self.dataset_selection_manager:
+        if self.dataset_selection_manager and not partition_model_config:
             green_models = [item for item in self.dataset_selection_manager.get_selected_items() 
                           if item.item_type == ITEM_TYPE_MODEL]
             if green_models:
@@ -2000,6 +2031,10 @@ class YR_MPEA_Widget(QWidget):
         mrbayes_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
         mrbayes_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
         mrbayes_wrapper.export_chain_result_signal.connect(self.add_chain_to_workspace)
+        
+        # 如果有分区模型配置，应用它
+        if partition_model_config:
+            mrbayes_wrapper.apply_partition_model_config(partition_model_config)
         
         dialog.layout().addWidget(mrbayes_wrapper)
         # 保存到实例变量，防止被垃圾回收

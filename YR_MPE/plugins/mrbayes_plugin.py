@@ -4,7 +4,9 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QSpinBox, QDoubleSpinBox, QScrollArea, 
                              QFrame, QTextEdit, QToolButton, QDialog,
                              QGroupBox, QSizePolicy, QFormLayout, QGridLayout,
-                             QFileDialog, QMessageBox, QApplication)
+                             QFileDialog, QMessageBox, QApplication,
+                             QListWidget, QTableWidget, QTableWidgetItem,
+                             QHeaderView, QAbstractItemView)
 from PyQt5.QtCore import Qt, pyqtSignal, QRegExp
 from PyQt5.QtGui import QFont, QTextCursor, QSyntaxHighlighter, QTextCharFormat, QColor, QPalette
 from ..templates.base_plugin_ui import BasePlugin
@@ -260,6 +262,9 @@ class MrBayesThread(BaseProcessThread):
                 # 设置模型参数
                 mrbayes_commands.extend(self._get_model_commands(params))
             
+            # 设置分子钟定年参数
+            mrbayes_commands.extend(self._get_clock_commands(params))
+            
             # 设置MCMC参数
             mrbayes_commands.extend(self._get_mcmc_commands(params))
             
@@ -441,6 +446,141 @@ class MrBayesThread(BaseProcessThread):
                 f.write(content)
         except Exception as e:
             print(f"Warning: Failed to convert to interleave format: {e}")
+    
+    def _get_clock_commands(self, params):
+        """获取分子钟设置命令"""
+        commands = []
+        
+        # 处理参数，可能是列表或字典
+        if isinstance(params, dict):
+            param_dict = params
+        elif isinstance(params, list) and len(params) > 0 and isinstance(params[0], dict):
+            param_dict = params[0]
+        else:
+            param_dict = {}
+        
+        enable_dating = param_dict.get('enable_dating', False)
+        if not enable_dating:
+            return commands
+        
+        # 启用分子钟
+        commands.append("prset brlenspr=clock:uniform;")
+        
+        # 设置松弛分子钟类型
+        clock_model = param_dict.get('clock_model', 'strict')
+        clock_params = param_dict.get('clock_params', {})
+        
+        if clock_model == 'tk02':
+            # TK02参数
+            tk02varpr = clock_params.get('tk02varpr', 'exponential')
+            tk02varpr_mean = clock_params.get('tk02varpr_mean', 1.00)
+            if tk02varpr == 'fixed':
+                commands.append(f"prset clockvarpr=tk02 tk02varpr=fixed({tk02varpr_mean});")
+            elif tk02varpr == 'exponential':
+                commands.append(f"prset clockvarpr=tk02 tk02varpr=exponential({tk02varpr_mean});")
+            else:  # uniform
+                commands.append(f"prset clockvarpr=tk02 tk02varpr=uniform({tk02varpr_mean});")
+        
+        elif clock_model == 'igr':
+            # IGR参数
+            igrvarpr = clock_params.get('igrvarpr', 'exponential')
+            igrvarpr_mean = clock_params.get('igrvarpr_mean', 10.00)
+            if igrvarpr == 'fixed':
+                commands.append(f"prset clockvarpr=igr igrvarpr=fixed({igrvarpr_mean});")
+            elif igrvarpr == 'exponential':
+                commands.append(f"prset clockvarpr=igr igrvarpr=exponential({igrvarpr_mean});")
+            else:  # uniform
+                commands.append(f"prset clockvarpr=igr igrvarpr=uniform({igrvarpr_mean});")
+        
+        elif clock_model == 'cpp':
+            # CPP参数
+            cppratepr = clock_params.get('cppratepr', 'exponential')
+            cppratepr_mean = clock_params.get('cppratepr_mean', 0.10)
+            cppmultdevpr_value = clock_params.get('cppmultdevpr_value', 0.40)
+            
+            if cppratepr == 'fixed':
+                commands.append(f"prset clockvarpr=cpp cppratepr=fixed({cppratepr_mean});")
+            else:  # exponential
+                commands.append(f"prset clockvarpr=cpp cppratepr=exponential({cppratepr_mean});")
+            
+            commands.append(f"prset cppmultdevpr=fixed({cppmultdevpr_value});")
+        
+        # strict 不需要额外参数
+        
+        # 设置校准节点
+        calibrations = param_dict.get('calibrations', [])
+        if calibrations:
+            for i, calib in enumerate(calibrations):
+                node_name = f"calibration_{i+1}"
+                
+                # 检查是否使用约束
+                use_constraint = calib.get('use_constraint', True)
+                
+                # 定义分类群集合（仅在use_constraint为True时）
+                if use_constraint:
+                    taxa = calib.get('taxa', [])
+                    if taxa:
+                        # MrBayes的constraint命令：taxa之间用逗号分隔，不能有空格
+                        taxa_str = ",".join(taxa)
+                        commands.append(f"constraint {node_name} = {taxa_str};")
+                    
+                    # 设置校准先验
+                    prior_type = calib.get('prior_type', 'fixed')
+                    calib_params = calib.get('params', {})
+                    
+                    if prior_type == 'fixed':
+                        value = calib_params.get('fixed_value', 0)
+                        commands.append(f"calibrate {node_name} = fixed({value});")
+                    elif prior_type == 'uniform':
+                        min_val = calib_params.get('uniform_min', 0)
+                        max_val = calib_params.get('uniform_max', 0)
+                        commands.append(f"calibrate {node_name} = unif({min_val},{max_val});")
+                    elif prior_type == 'offset_exp':
+                        offset = calib_params.get('offset_exp_offset', 0)
+                        rate = calib_params.get('offset_exp_rate', 1.0)
+                        commands.append(f"calibrate {node_name} = offsetexp({offset},{rate});")
+                    elif prior_type == 'offset_gamma':
+                        offset = calib_params.get('offset_gamma_offset', 0)
+                        alpha = calib_params.get('offset_gamma_alpha', 1.0)
+                        beta = calib_params.get('offset_gamma_beta', 1.0)
+                        commands.append(f"calibrate {node_name} = offsetgamma({offset},{alpha},{beta});")
+                    elif prior_type == 'offset_lognorm':
+                        offset = calib_params.get('offset_lognorm_offset', 0)
+                        mean = calib_params.get('offset_lognorm_mean', 0.0)
+                        std = calib_params.get('offset_lognorm_std', 1.0)
+                        commands.append(f"calibrate {node_name} = offsetlognormal({offset},{mean},{std});")
+                    elif prior_type == 'truncated_normal':
+                        offset = calib_params.get('trunc_norm_offset', 0)
+                        mean = calib_params.get('trunc_norm_mean', 0.0)
+                        std = calib_params.get('trunc_norm_std', 1.0)
+                        commands.append(f"calibrate {node_name} = truncatednormal({offset},{mean},{std});")
+                else:
+                    # 不使用约束，只定义节点名称（不生成constraint命令）
+                    # 但仍需要设置校准先验
+                    # 在MrBayes中，如果不定义constraint，需要使用其他方式来指定校准节点
+                    # 这种情况下，我们仍然可以设置校准，但需要使用不同的方法
+                    pass
+            
+            # 如果有任何校准节点，启用校准
+            # 检查是否有使用约束的校准节点
+            has_constraint_calibrations = any(calib.get('use_constraint', True) for calib in calibrations)
+            if has_constraint_calibrations:
+                commands.append("prset nodeagepr=calibrated;")
+        
+        # 设置外群
+        outgroup = param_dict.get('outgroup', '')
+        if outgroup:
+            # 外群可能是单个或多个分类群，用逗号分隔
+            # 先清理每个外群名称
+            outgroup_taxa = [self._clean_taxon_name(t.strip()) for t in outgroup.split(',') if t.strip()]
+            if outgroup_taxa:
+                # 定义ingroup constraint（单数）
+                outgroup_str = ",".join(outgroup_taxa)
+                commands.append(f"constraint ingroup = {outgroup_str};")
+                # 应用constraint（复数，引用constraint集合）
+                commands.append("prset topologypr=constraints(ingroups);")
+        
+        return commands
     
     def _get_model_commands(self, params):
         """获取模型设置命令"""
@@ -780,6 +920,34 @@ class MrBayesPlugin(BasePlugin):
         self.partition_status_label.setStyleSheet("color: #6c757d; font-style: italic;")
         self.partition_status_label.setVisible(False)
         layout.addWidget(self.partition_status_label)
+        
+        # 分子钟定年设置
+        dating_layout = QHBoxLayout()
+        self.enable_dating = QCheckBox("Enable Phylogenetic Dating")
+        self.enable_dating.setChecked(False)
+        self.enable_dating.stateChanged.connect(self.on_dating_toggled)
+        
+        self.dating_settings_btn = QPushButton("Dating Settings...")
+        self.dating_settings_btn.setEnabled(False)
+        self.dating_settings_btn.clicked.connect(self.open_dating_settings_dialog)
+        
+        dating_layout.addWidget(self.enable_dating)
+        dating_layout.addWidget(self.dating_settings_btn)
+        dating_layout.addStretch()
+        layout.addLayout(dating_layout)
+        
+        # 分子钟定年状态标签
+        self.dating_status_label = QLabel("Dating disabled")
+        self.dating_status_label.setStyleSheet("color: #6c757d; font-style: italic;")
+        self.dating_status_label.setVisible(False)
+        layout.addWidget(self.dating_status_label)
+        
+        # 初始化分子钟定年参数
+        self.dating_enabled = False
+        self.clock_model = "strict"
+        self.clock_params = {}
+        self.calibrations = []
+        self.outgroup = []  # 改为列表，支持多个外群
 
         mcmc_params_group = QGroupBox("MCMC settings")
         mcmc_params_layout = QFormLayout()
@@ -1329,6 +1497,171 @@ class MrBayesPlugin(BasePlugin):
                 f"mode: {self.partition_mode.value}", "info"
             )
     
+    def on_dating_toggled(self):
+        """分子钟定年复选框状态改变时处理"""
+        enabled = self.enable_dating.isChecked()
+        self.dating_settings_btn.setEnabled(enabled)
+        self.dating_enabled = enabled
+        
+        if not enabled:
+            self.dating_status_label.setVisible(False)
+        else:
+            self.dating_status_label.setVisible(True)
+            self.update_dating_status()
+    
+    def open_dating_settings_dialog(self):
+        """打开分子钟定年设置对话框"""
+        # 从输入文件中提取taxa列表
+        taxa_list = self._extract_taxa_from_input()
+        
+        # 创建对话框
+        dialog = MolecularDatingSettingsDialog(
+            self,
+            clock_model=self.clock_model,
+            clock_params=self.clock_params.copy(),
+            calibrations=self.calibrations.copy(),
+            outgroup=self.outgroup,
+            taxa_list=taxa_list
+        )
+        
+        if dialog.exec_() == QDialog.Accepted:
+            # 获取设置
+            self.clock_model = dialog.get_clock_model()
+            self.clock_params = dialog.get_clock_params()
+            self.calibrations = dialog.get_calibrations()
+            self.outgroup = dialog.get_outgroup()
+            
+            # 更新状态显示
+            self.update_dating_status()
+            
+            # 添加控制台消息
+            calib_count = len(self.calibrations)
+            self.add_console_message(
+                f"Phylogenetic dating settings updated: clock={self.clock_model}, "
+                f"calibrations={calib_count}", "info"
+            )
+    
+    def _extract_taxa_from_input(self):
+        """从输入文件中提取taxa列表"""
+        taxa_list = []
+        
+        try:
+            # 优先从导入的文件中提取
+            files_to_check = []
+            if self.imported_files:
+                files_to_check = self.imported_files
+            elif self.import_file:
+                files_to_check = [self.import_file]
+            
+            for file_path in files_to_check:
+                if not os.path.exists(file_path):
+                    continue
+                
+                # 根据文件类型解析
+                file_ext = os.path.splitext(file_path)[1].lower()
+                
+                if file_ext in ['.phy', '.phylip']:
+                    # PHYLIP格式
+                    taxa_list = self._extract_taxa_from_phylip(file_path)
+                elif file_ext in ['.fas', '.fasta', '.fa', '.fna']:
+                    # FASTA格式
+                    taxa_list = self._extract_taxa_from_fasta(file_path)
+                elif file_ext in ['.nex', '.nexus']:
+                    # NEXUS格式
+                    taxa_list = self._extract_taxa_from_nexus(file_path)
+                
+                # 如果成功提取，就使用第一个文件的taxa
+                if taxa_list:
+                    break
+                    
+        except Exception as e:
+            print(f"Error extracting taxa from input: {e}")
+        
+        return taxa_list
+    
+    def _extract_taxa_from_phylip(self, file_path):
+        """从PHYLIP文件中提取taxa列表"""
+        taxa_list = []
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                # 跳过第一行（序列数量和长度）
+                for line in lines[1:]:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # PHYLIP格式：名称和序列用空格分隔
+                    # 提取完整的名称（第一个空格之前的部分）
+                    parts = line.split()
+                    if parts:
+                        taxon = parts[0]
+                        # 清理名称，确保与MrBayes使用的名称一致
+                        taxon = self._clean_taxon_name(taxon)
+                        if taxon:
+                            taxa_list.append(taxon)
+        except Exception as e:
+            print(f"Error parsing PHYLIP file: {e}")
+        return taxa_list
+    
+    def _extract_taxa_from_fasta(self, file_path):
+        """从FASTA文件中提取taxa列表"""
+        taxa_list = []
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('>'):
+                        taxon = line[1:].split()[0]  # 去掉>并取第一个词
+                        # 清理名称，确保与MrBayes使用的名称一致
+                        taxon = self._clean_taxon_name(taxon)
+                        if taxon:
+                            taxa_list.append(taxon)
+        except Exception as e:
+            print(f"Error parsing FASTA file: {e}")
+        return taxa_list
+    
+    def _extract_taxa_from_nexus(self, file_path):
+        """从NEXUS文件中提取taxa列表"""
+        taxa_list = []
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # 查找matrix块
+                matrix_match = re.search(r'matrix\s*(.*?)end\s*;', content, re.IGNORECASE | re.DOTALL)
+                if matrix_match:
+                    matrix_content = matrix_match.group(1)
+                    for line in matrix_content.split('\n'):
+                        line = line.strip()
+                        if not line or line.startswith(';'):
+                            continue
+                        # 提取分类名称
+                        parts = line.split()
+                        if parts:
+                            taxon = parts[0]
+                            if taxon:
+                                taxa_list.append(taxon)
+        except Exception as e:
+            print(f"Error parsing NEXUS file: {e}")
+        return taxa_list
+    
+    def update_dating_status(self):
+        """更新分子钟定年状态显示"""
+        if not hasattr(self, 'dating_status_label'):
+            return
+        
+        if not self.dating_enabled:
+            self.dating_status_label.setText("Dating disabled")
+            self.dating_status_label.setStyleSheet("color: #6c757d; font-style: italic;")
+        else:
+            status_text = f"Clock: {self.clock_model.upper()}"
+            calib_count = len(self.calibrations)
+            status_text += f" | Calibrations: {calib_count}"
+            if self.outgroup:
+                status_text += f" | Outgroup: {self.outgroup}"
+            
+            self.dating_status_label.setText(status_text)
+            self.dating_status_label.setStyleSheet("color: #28a745; font-weight: bold;")
+    
     def browse_files(self):
         """浏览选择文件"""
         file_filter = "Alignment files (*.phy *.phylip *.nex *.nexus);;All files (*)"
@@ -1543,6 +1876,15 @@ class MrBayesPlugin(BasePlugin):
                 'contype': contype,
                 'conformat': conformat
             })
+        
+        # 分子钟定年参数
+        params[-1].update({
+            'enable_dating': self.dating_enabled,
+            'clock_model': self.clock_model,
+            'clock_params': self.clock_params,
+            'calibrations': self.calibrations,
+            'outgroup': self.outgroup
+        })
         
         return params
     
@@ -1962,6 +2304,734 @@ class MrBayesPlugin(BasePlugin):
         else:
             # 没有找到共识树文件，显示信息
             self.output_info.setText(f"No consensus tree (.con.tre) found. Generated {len(output_files)} file(s).")
+
+class MolecularDatingSettingsDialog(QDialog):
+    """分子钟定年设置对话框"""
+    
+    def __init__(self, parent=None, clock_model="strict", clock_params=None, calibrations=None, outgroup="", taxa_list=None):
+        super().__init__(parent)
+        self.setWindowTitle("Molecular Dating Settings")
+        self.setMinimumSize(700, 600)
+        
+        self.clock_model = clock_model
+        self.clock_params = clock_params or {}
+        self.calibrations = calibrations or []
+        self.outgroup = outgroup if isinstance(outgroup, list) else [outgroup] if outgroup else []
+        self.taxa_list = taxa_list or []
+        
+        self.init_ui()
+        self.load_data()
+    
+    def init_ui(self):
+        """初始化UI"""
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+        
+        # 分子钟模型选择
+        clock_group = QGroupBox("Clock Model")
+        clock_layout = QFormLayout()
+        clock_group.setLayout(clock_layout)
+        
+        self.clock_model_combo = QComboBox()
+        self.clock_model_combo.addItems([
+            "Strict Clock",
+            "Independent Gamma Rates (IGR)",
+            "Compound Poisson Process (CPP)",
+            "Thorne-Kishino 2002 (TK02)"
+        ])
+        self.clock_model_combo.currentIndexChanged.connect(self.on_clock_model_changed)
+        clock_layout.addRow("Clock Model:", self.clock_model_combo)
+        
+        # IGR参数 - 默认隐藏
+        self.igr_widget = QWidget()
+        self.igr_layout = QHBoxLayout()
+        self.igr_layout.setContentsMargins(0, 0, 0, 0)
+        self.igr_widget.setLayout(self.igr_layout)
+        
+        self.igrvarpr_combo = QComboBox()
+        self.igrvarpr_combo.addItems(["Fixed", "Exponential", "Uniform"])
+        self.igrvarpr_combo.setMinimumWidth(100)
+        self.igr_layout.addWidget(QLabel("Distribution:"))
+        self.igr_layout.addWidget(self.igrvarpr_combo)
+        
+        self.igrvarpr_mean_spinbox = QDoubleSpinBox()
+        self.igrvarpr_mean_spinbox.setRange(0.001, 1000.0)
+        self.igrvarpr_mean_spinbox.setValue(10.00)
+        self.igrvarpr_mean_spinbox.setSingleStep(0.1)
+        self.igrvarpr_mean_spinbox.setDecimals(2)
+        self.igr_layout.addWidget(QLabel("Mean:"))
+        self.igr_layout.addWidget(self.igrvarpr_mean_spinbox)
+        
+        self.igr_layout.addStretch()
+        clock_layout.addRow("", self.igr_widget)
+        
+        # TK02参数 - 默认隐藏
+        self.tk02_widget = QWidget()
+        self.tk02_layout = QHBoxLayout()
+        self.tk02_layout.setContentsMargins(0, 0, 0, 0)
+        self.tk02_widget.setLayout(self.tk02_layout)
+        
+        self.tk02varpr_combo = QComboBox()
+        self.tk02varpr_combo.addItems(["Fixed", "Exponential", "Uniform"])
+        self.tk02varpr_combo.setMinimumWidth(100)
+        self.tk02_layout.addWidget(QLabel("Distribution:"))
+        self.tk02_layout.addWidget(self.tk02varpr_combo)
+        
+        self.tk02varpr_mean_spinbox = QDoubleSpinBox()
+        self.tk02varpr_mean_spinbox.setRange(0.001, 1000.0)
+        self.tk02varpr_mean_spinbox.setValue(1.00)
+        self.tk02varpr_mean_spinbox.setSingleStep(0.1)
+        self.tk02varpr_mean_spinbox.setDecimals(2)
+        self.tk02_layout.addWidget(QLabel("Mean:"))
+        self.tk02_layout.addWidget(self.tk02varpr_mean_spinbox)
+        
+        self.tk02_layout.addStretch()
+        clock_layout.addRow("", self.tk02_widget)
+        
+        # CPP参数 - 默认隐藏
+        self.cpp_widget = QWidget()
+        self.cpp_layout = QVBoxLayout()
+        self.cpp_layout.setContentsMargins(0, 0, 0, 0)
+        self.cpp_widget.setLayout(self.cpp_layout)
+        
+        cpp_row1 = QHBoxLayout()
+        cpp_row1.addWidget(QLabel("Rate Distribution:"))
+        self.cppratepr_combo = QComboBox()
+        self.cppratepr_combo.addItems(["Fixed", "Exponential"])
+        self.cppratepr_combo.setMinimumWidth(100)
+        cpp_row1.addWidget(self.cppratepr_combo)
+        cpp_row1.addWidget(QLabel("Rate Mean:"))
+        self.cppratepr_mean_spinbox = QDoubleSpinBox()
+        self.cppratepr_mean_spinbox.setRange(0.001, 1000.0)
+        self.cppratepr_mean_spinbox.setValue(0.10)
+        self.cppratepr_mean_spinbox.setSingleStep(0.01)
+        self.cppratepr_mean_spinbox.setDecimals(2)
+        cpp_row1.addWidget(self.cppratepr_mean_spinbox)
+        cpp_row1.addStretch()
+        self.cpp_layout.addLayout(cpp_row1)
+        
+        cpp_row2 = QHBoxLayout()
+        cpp_row2.addWidget(QLabel("Multiplier Value:"))
+        self.cppmultdevpr_value_spinbox = QDoubleSpinBox()
+        self.cppmultdevpr_value_spinbox.setRange(0.001, 1000.0)
+        self.cppmultdevpr_value_spinbox.setValue(0.40)
+        self.cppmultdevpr_value_spinbox.setSingleStep(0.01)
+        self.cppmultdevpr_value_spinbox.setDecimals(2)
+        cpp_row2.addWidget(self.cppmultdevpr_value_spinbox)
+        cpp_row2.addStretch()
+        self.cpp_layout.addLayout(cpp_row2)
+        
+        clock_layout.addRow("", self.cpp_widget)
+        
+        layout.addWidget(clock_group)
+        
+        # 外群设置 - 多选列表
+        outgroup_group = QGroupBox("Outgroup Settings")
+        outgroup_layout = QVBoxLayout()
+        outgroup_group.setLayout(outgroup_layout)
+        
+        outgroup_info_layout = QHBoxLayout()
+        outgroup_info_layout.addWidget(QLabel("Outgroup(s):"))
+        self.outgroup_count_label = QLabel("(0 selected)")
+        self.outgroup_count_label.setStyleSheet("color: gray;")
+        outgroup_info_layout.addWidget(self.outgroup_count_label)
+        outgroup_info_layout.addStretch()
+        outgroup_layout.addLayout(outgroup_info_layout)
+        
+        # 创建带复选框的列表
+        self.outgroup_list_widget = QTableWidget()
+        self.outgroup_list_widget.setColumnCount(2)
+        self.outgroup_list_widget.setHorizontalHeaderLabels(["", "Taxon"])
+        self.outgroup_list_widget.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.outgroup_list_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.outgroup_list_widget.verticalHeader().setVisible(False)
+        self.outgroup_list_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.outgroup_list_widget.setMaximumHeight(200)
+        outgroup_layout.addWidget(self.outgroup_list_widget)
+        
+        # 初始化外群列表
+        self.init_outgroup_list()
+        
+        layout.addWidget(outgroup_group)
+        
+        # 校准节点设置 - 表格形式
+        calibration_group = QGroupBox("Calibration Nodes")
+        calibration_layout = QVBoxLayout()
+        calibration_group.setLayout(calibration_layout)
+        
+        # 按钮行
+        calib_btn_layout = QHBoxLayout()
+        self.add_calibration_btn = QPushButton("+ Add")
+        self.add_calibration_btn.clicked.connect(self.add_calibration)
+        self.edit_calibration_btn = QPushButton("Edit")
+        self.edit_calibration_btn.clicked.connect(self.edit_calibration)
+        self.remove_calibration_btn = QPushButton("- Remove")
+        self.remove_calibration_btn.clicked.connect(self.remove_calibration)
+        calib_btn_layout.addWidget(self.add_calibration_btn)
+        calib_btn_layout.addWidget(self.edit_calibration_btn)
+        calib_btn_layout.addWidget(self.remove_calibration_btn)
+        calib_btn_layout.addStretch()
+        calibration_layout.addLayout(calib_btn_layout)
+        
+        # Calibration表格
+        self.calibration_table = QTableWidget()
+        self.calibration_table.setColumnCount(5)
+        self.calibration_table.setHorizontalHeaderLabels([
+            "Constraint", "Node Name", "Taxa", "Prior Type", "Parameters"
+        ])
+        self.calibration_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.calibration_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        calibration_layout.addWidget(self.calibration_table)
+        
+        self.update_calibration_table()
+        
+        layout.addWidget(calibration_group)
+        
+        # 按钮
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        button_layout.addWidget(ok_button)
+        
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+        
+        layout.addLayout(button_layout)
+        
+        # 初始状态
+        self.on_clock_model_changed()
+    
+    def init_outgroup_list(self):
+        """初始化外群列表"""
+        self.outgroup_list_widget.setRowCount(len(self.taxa_list))
+        
+        for i, taxon in enumerate(self.taxa_list):
+            # 复选框
+            checkbox_item = QTableWidgetItem()
+            checkbox_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            if taxon in self.outgroup:
+                checkbox_item.setCheckState(Qt.Checked)
+            else:
+                checkbox_item.setCheckState(Qt.Unchecked)
+            self.outgroup_list_widget.setItem(i, 0, checkbox_item)
+            
+            # 分类名称
+            name_item = QTableWidgetItem(taxon)
+            self.outgroup_list_widget.setItem(i, 1, name_item)
+        
+        # 连接信号
+        self.outgroup_list_widget.itemChanged.connect(self.on_outgroup_changed)
+        
+        self.update_outgroup_count()
+    
+    def on_outgroup_changed(self, item):
+        """外群复选框改变时处理"""
+        if item.column() == 0:
+            self.update_outgroup_count()
+    
+    def update_outgroup_count(self):
+        """更新外群计数"""
+        count = 0
+        for i in range(self.outgroup_list_widget.rowCount()):
+            item = self.outgroup_list_widget.item(i, 0)
+            if item and item.checkState() == Qt.Checked:
+                count += 1
+        
+        self.outgroup_count_label.setText(f"({count} selected)")
+    
+    def on_clock_model_changed(self):
+        """分子钟模型改变时更新UI"""
+        model = self.clock_model_combo.currentText()
+        
+        # 隐藏所有参数
+        self.igr_widget.setVisible(False)
+        self.tk02_widget.setVisible(False)
+        self.cpp_widget.setVisible(False)
+        
+        # 根据选择的模型显示相应的参数
+        if "IGR" in model:
+            self.igr_widget.setVisible(True)
+        elif "TK02" in model:
+            self.tk02_widget.setVisible(True)
+        elif "CPP" in model:
+            self.cpp_widget.setVisible(True)
+        # Strict Clock不需要额外参数
+    
+    def load_data(self):
+        """加载数据"""
+        # 设置分子钟模型
+        model_map = {
+            "strict": "Strict Clock",
+            "igr": "Independent Gamma Rates (IGR)",
+            "cpp": "Compound Poisson Process (CPP)",
+            "tk02": "Thorne-Kishino 2002 (TK02)"
+        }
+        self.clock_model_combo.setCurrentText(model_map.get(self.clock_model, "Strict Clock"))
+        
+        # 加载参数
+        if self.clock_model == "igr":
+            self.igrvarpr_combo.setCurrentText(self.clock_params.get('igrvarpr', 'Exponential'))
+            self.igrvarpr_mean_spinbox.setValue(self.clock_params.get('igrvarpr_mean', 10.00))
+        elif self.clock_model == "tk02":
+            self.tk02varpr_combo.setCurrentText(self.clock_params.get('tk02varpr', 'Exponential'))
+            self.tk02varpr_mean_spinbox.setValue(self.clock_params.get('tk02varpr_mean', 1.00))
+        elif self.clock_model == "cpp":
+            self.cppratepr_combo.setCurrentText(self.clock_params.get('cppratepr', 'Exponential'))
+            self.cppratepr_mean_spinbox.setValue(self.clock_params.get('cppratepr_mean', 0.10))
+            self.cppmultdevpr_value_spinbox.setValue(self.clock_params.get('cppmultdevpr_value', 0.40))
+        
+        # 更新校准节点表格
+        self.update_calibration_table()
+    
+    def update_calibration_table(self):
+        """更新校准节点表格"""
+        self.calibration_table.setRowCount(len(self.calibrations))
+        
+        for row, calib in enumerate(self.calibrations):
+            # 复选框（constraint）
+            checkbox_item = QTableWidgetItem()
+            checkbox_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            checkbox_item.setCheckState(Qt.Checked if calib.get('use_constraint', False) else Qt.Unchecked)
+            self.calibration_table.setItem(row, 0, checkbox_item)
+            
+            # 节点名称
+            name_item = QTableWidgetItem(calib.get('name', ''))
+            self.calibration_table.setItem(row, 1, name_item)
+            
+            # 分类群
+            taxa_str = ", ".join(calib.get('taxa', []))
+            taxa_item = QTableWidgetItem(taxa_str)
+            self.calibration_table.setItem(row, 2, taxa_item)
+            
+            # 先验类型
+            prior_type_item = QTableWidgetItem(calib.get('prior_type', ''))
+            self.calibration_table.setItem(row, 3, prior_type_item)
+            
+            # 参数
+            params = calib.get('params', {})
+            param_str = self._format_params(calib.get('prior_type', ''), params)
+            param_item = QTableWidgetItem(param_str)
+            self.calibration_table.setItem(row, 4, param_item)
+    
+    def _format_params(self, prior_type, params):
+        """格式化参数显示"""
+        if prior_type == 'fixed':
+            return f"fixed({params.get('fixed_value', 0)})"
+        elif prior_type == 'uniform':
+            return f"unif({params.get('uniform_min', 0)}, {params.get('uniform_max', 0)})"
+        elif prior_type == 'offset_exp':
+            return f"offsetexp({params.get('offset_exp_offset', 0)}, {params.get('offset_exp_rate', 1.0)})"
+        elif prior_type == 'offset_gamma':
+            return f"offsetgamma({params.get('offset_gamma_offset', 0)}, {params.get('offset_gamma_alpha', 1.0)}, {params.get('offset_gamma_beta', 1.0)})"
+        elif prior_type == 'offset_lognorm':
+            return f"offsetlognormal({params.get('offset_lognorm_offset', 0)}, {params.get('offset_lognorm_mean', 0.0)}, {params.get('offset_lognorm_std', 1.0)})"
+        elif prior_type == 'truncated_normal':
+            return f"truncatednormal({params.get('trunc_norm_offset', 0)}, {params.get('trunc_norm_mean', 0.0)}, {params.get('trunc_norm_std', 1.0)})"
+        return ""
+    
+    def add_calibration(self):
+        """添加校准节点"""
+        dialog = CalibrationEditDialog(self, self.taxa_list)
+        if dialog.exec_() == QDialog.Accepted:
+            calib = dialog.get_calibration()
+            if calib:
+                self.calibrations.append(calib)
+                self.update_calibration_table()
+    
+    def edit_calibration(self):
+        """编辑校准节点"""
+        current_row = self.calibration_table.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "Warning", "Please select a calibration node to edit!")
+            return
+        
+        calib = self.calibrations[current_row]
+        dialog = CalibrationEditDialog(self, self.taxa_list, calib)
+        if dialog.exec_() == QDialog.Accepted:
+            new_calib = dialog.get_calibration()
+            if new_calib:
+                self.calibrations[current_row] = new_calib
+                self.update_calibration_table()
+    
+    def remove_calibration(self):
+        """移除校准节点"""
+        current_row = self.calibration_table.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "Warning", "Please select a calibration node to remove!")
+            return
+        
+        calib = self.calibrations[current_row]
+        reply = QMessageBox.question(
+            self, "Confirm Removal",
+            f"Are you sure you want to remove calibration node '{calib.get('name', '')}'?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            del self.calibrations[current_row]
+            self.update_calibration_table()
+    
+    def get_clock_model(self) -> str:
+        """获取分子钟模型"""
+        model_text = self.clock_model_combo.currentText()
+        model_map = {
+            "Strict Clock": "strict",
+            "Independent Gamma Rates (IGR)": "igr",
+            "Compound Poisson Process (CPP)": "cpp",
+            "Thorne-Kishino 2002 (TK02)": "tk02"
+        }
+        return model_map.get(model_text, "strict")
+    
+    def get_clock_params(self) -> dict:
+        """获取分子钟参数"""
+        model = self.get_clock_model()
+        params = {}
+        
+        if model == "igr":
+            params = {
+                'igrvarpr': self.igrvarpr_combo.currentText().lower(),
+                'igrvarpr_mean': self.igrvarpr_mean_spinbox.value()
+            }
+        elif model == "tk02":
+            params = {
+                'tk02varpr': self.tk02varpr_combo.currentText().lower(),
+                'tk02varpr_mean': self.tk02varpr_mean_spinbox.value()
+            }
+        elif model == "cpp":
+            params = {
+                'cppratepr': self.cppratepr_combo.currentText().lower(),
+                'cppratepr_mean': self.cppratepr_mean_spinbox.value(),
+                'cppmultdevpr_value': self.cppmultdevpr_value_spinbox.value()
+            }
+        
+        return params
+    
+    def get_calibrations(self) -> list:
+        """获取校准节点列表"""
+        result = []
+        for i in range(self.calibration_table.rowCount()):
+            checkbox_item = self.calibration_table.item(i, 0)
+            use_constraint = checkbox_item.checkState() == Qt.Checked
+            
+            calib = self.calibrations[i].copy()
+            calib['use_constraint'] = use_constraint
+            result.append(calib)
+        
+        return result
+    
+    def get_outgroup(self) -> str:
+        """获取外群"""
+        selected_taxa = []
+        for i in range(self.outgroup_list_widget.rowCount()):
+            item = self.outgroup_list_widget.item(i, 0)
+            if item and item.checkState() == Qt.Checked:
+                taxon_item = self.outgroup_list_widget.item(i, 1)
+                if taxon_item:
+                    selected_taxa.append(taxon_item.text())
+        
+        return ", ".join(selected_taxa)
+
+
+class CalibrationEditDialog(QDialog):
+    """校准节点编辑对话框"""
+    
+    def __init__(self, parent=None, taxa_list=None, calibration=None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Calibration Node")
+        self.setMinimumSize(500, 450)
+        
+        self.taxa_list = taxa_list or []
+        self.calibration = calibration or {}
+        
+        self.init_ui()
+        self.load_data()
+    
+    def init_ui(self):
+        """初始化UI"""
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+        
+        form_layout = QFormLayout()
+        
+        # 节点名称
+        self.name_edit = QLineEdit()
+        form_layout.addRow("Node Name:", self.name_edit)
+        
+        # 分类群选择
+        self.taxa_list_widget = QListWidget()
+        self.taxa_list_widget.setSelectionMode(QListWidget.MultiSelection)
+        self.taxa_list_widget.setMaximumHeight(150)
+        if self.taxa_list:
+            self.taxa_list_widget.addItems(self.taxa_list)
+        form_layout.addRow("Taxa:", self.taxa_list_widget)
+        
+        # 校准先验类型
+        self.prior_type_combo = QComboBox()
+        self.prior_type_combo.addItems([
+            "Fixed Value",
+            "Uniform Distribution",
+            "Offset Exponential",
+            "Offset Gamma",
+            "Offset Lognormal",
+            "Truncated Normal"
+        ])
+        self.prior_type_combo.currentIndexChanged.connect(self.on_prior_type_changed)
+        form_layout.addRow("Prior Type:", self.prior_type_combo)
+        
+        # 参数设置区域
+        self.params_widget = QWidget()
+        self.params_layout = QFormLayout()
+        self.params_widget.setLayout(self.params_layout)
+        
+        # Fixed Value参数
+        self.fixed_value_spinbox = QDoubleSpinBox()
+        self.fixed_value_spinbox.setRange(0, 1000000)
+        self.fixed_value_spinbox.setDecimals(6)
+        fixed_form_layout = QFormLayout()
+        fixed_form_layout.addRow("Value:", self.fixed_value_spinbox)
+        self.fixed_widget = QWidget()
+        self.fixed_widget.setLayout(fixed_form_layout)
+        
+        # Uniform参数
+        self.uniform_min_spinbox = QDoubleSpinBox()
+        self.uniform_min_spinbox.setRange(0, 1000000)
+        self.uniform_max_spinbox = QDoubleSpinBox()
+        self.uniform_max_spinbox.setRange(0, 1000000)
+        uniform_form_layout = QFormLayout()
+        uniform_form_layout.addRow("Min:", self.uniform_min_spinbox)
+        uniform_form_layout.addRow("Max:", self.uniform_max_spinbox)
+        self.uniform_widget = QWidget()
+        self.uniform_widget.setLayout(uniform_form_layout)
+        
+        # Offset Exponential参数
+        self.offset_exp_offset_spinbox = QDoubleSpinBox()
+        self.offset_exp_offset_spinbox.setRange(0, 1000000)
+        self.offset_exp_rate_spinbox = QDoubleSpinBox()
+        self.offset_exp_rate_spinbox.setRange(0.0001, 1000)
+        self.offset_exp_rate_spinbox.setValue(1.0)
+        offset_exp_form_layout = QFormLayout()
+        offset_exp_form_layout.addRow("Offset:", self.offset_exp_offset_spinbox)
+        offset_exp_form_layout.addRow("Rate (λ):", self.offset_exp_rate_spinbox)
+        self.offset_exp_widget = QWidget()
+        self.offset_exp_widget.setLayout(offset_exp_form_layout)
+        
+        # Offset Gamma参数
+        self.offset_gamma_offset_spinbox = QDoubleSpinBox()
+        self.offset_gamma_offset_spinbox.setRange(0, 1000000)
+        self.offset_gamma_alpha_spinbox = QDoubleSpinBox()
+        self.offset_gamma_alpha_spinbox.setRange(0.01, 1000)
+        self.offset_gamma_alpha_spinbox.setValue(1.0)
+        self.offset_gamma_beta_spinbox = QDoubleSpinBox()
+        self.offset_gamma_beta_spinbox.setRange(0.0001, 1000)
+        self.offset_gamma_beta_spinbox.setValue(1.0)
+        offset_gamma_form_layout = QFormLayout()
+        offset_gamma_form_layout.addRow("Offset:", self.offset_gamma_offset_spinbox)
+        offset_gamma_form_layout.addRow("Alpha (α):", self.offset_gamma_alpha_spinbox)
+        offset_gamma_form_layout.addRow("Beta (β):", self.offset_gamma_beta_spinbox)
+        self.offset_gamma_widget = QWidget()
+        self.offset_gamma_widget.setLayout(offset_gamma_form_layout)
+        
+        # Offset Lognormal参数
+        self.offset_lognorm_offset_spinbox = QDoubleSpinBox()
+        self.offset_lognorm_offset_spinbox.setRange(0, 1000000)
+        self.offset_lognorm_mean_spinbox = QDoubleSpinBox()
+        self.offset_lognorm_mean_spinbox.setRange(-100, 100)
+        self.offset_lognorm_mean_spinbox.setValue(0.0)
+        self.offset_lognorm_std_spinbox = QDoubleSpinBox()
+        self.offset_lognorm_std_spinbox.setRange(0.01, 100)
+        self.offset_lognorm_std_spinbox.setValue(1.0)
+        offset_lognorm_form_layout = QFormLayout()
+        offset_lognorm_form_layout.addRow("Offset:", self.offset_lognorm_offset_spinbox)
+        offset_lognorm_form_layout.addRow("Mean (μ):", self.offset_lognorm_mean_spinbox)
+        offset_lognorm_form_layout.addRow("Std (σ):", self.offset_lognorm_std_spinbox)
+        self.offset_lognorm_widget = QWidget()
+        self.offset_lognorm_widget.setLayout(offset_lognorm_form_layout)
+        
+        # Truncated Normal参数
+        self.trunc_norm_offset_spinbox = QDoubleSpinBox()
+        self.trunc_norm_offset_spinbox.setRange(0, 1000000)
+        self.trunc_norm_mean_spinbox = QDoubleSpinBox()
+        self.trunc_norm_mean_spinbox.setRange(-100, 100)
+        self.trunc_norm_mean_spinbox.setValue(0.0)
+        self.trunc_norm_std_spinbox = QDoubleSpinBox()
+        self.trunc_norm_std_spinbox.setRange(0.01, 100)
+        self.trunc_norm_std_spinbox.setValue(1.0)
+        trunc_norm_form_layout = QFormLayout()
+        trunc_norm_form_layout.addRow("Offset:", self.trunc_norm_offset_spinbox)
+        trunc_norm_form_layout.addRow("Mean (μ):", self.trunc_norm_mean_spinbox)
+        trunc_norm_form_layout.addRow("Std (σ):", self.trunc_norm_std_spinbox)
+        self.trunc_norm_widget = QWidget()
+        self.trunc_norm_widget.setLayout(trunc_norm_form_layout)
+        
+        # 将所有参数widget添加到params_layout（而不是params_form_layout）
+        self.params_layout.addRow("", self.fixed_widget)
+        self.params_layout.addRow("", self.uniform_widget)
+        self.params_layout.addRow("", self.offset_exp_widget)
+        self.params_layout.addRow("", self.offset_gamma_widget)
+        self.params_layout.addRow("", self.offset_lognorm_widget)
+        self.params_layout.addRow("", self.trunc_norm_widget)
+        
+        form_layout.addRow("Parameters:", self.params_widget)
+        
+        layout.addLayout(form_layout)
+        
+        # 按钮
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+        
+        # 初始状态
+        self.on_prior_type_changed()
+    
+    def on_prior_type_changed(self):
+        """先验类型改变时更新UI"""
+        prior_type = self.prior_type_combo.currentText()
+        
+        # 隐藏所有参数widget
+        self.fixed_widget.setVisible(False)
+        self.uniform_widget.setVisible(False)
+        self.offset_exp_widget.setVisible(False)
+        self.offset_gamma_widget.setVisible(False)
+        self.offset_lognorm_widget.setVisible(False)
+        self.trunc_norm_widget.setVisible(False)
+        
+        # 根据选择的先验类型显示相应的参数
+        if prior_type == "Fixed Value":
+            self.fixed_widget.setVisible(True)
+        elif prior_type == "Uniform Distribution":
+            self.uniform_widget.setVisible(True)
+        elif prior_type == "Offset Exponential":
+            self.offset_exp_widget.setVisible(True)
+        elif prior_type == "Offset Gamma":
+            self.offset_gamma_widget.setVisible(True)
+        elif prior_type == "Offset Lognormal":
+            self.offset_lognorm_widget.setVisible(True)
+        elif prior_type == "Truncated Normal":
+            self.trunc_norm_widget.setVisible(True)
+    
+    def load_data(self):
+        """加载数据"""
+        self.name_edit.setText(self.calibration.get('name', ''))
+        
+        # 加载分类群选择
+        selected_taxa = self.calibration.get('taxa', [])
+        for i in range(self.taxa_list_widget.count()):
+            item = self.taxa_list_widget.item(i)
+            if item.text() in selected_taxa:
+                item.setSelected(True)
+        
+        # 加载先验类型
+        prior_type = self.calibration.get('prior_type', '')
+        if prior_type == 'fixed':
+            self.prior_type_combo.setCurrentText("Fixed Value")
+        elif prior_type == 'uniform':
+            self.prior_type_combo.setCurrentText("Uniform Distribution")
+        elif prior_type == 'offset_exp':
+            self.prior_type_combo.setCurrentText("Offset Exponential")
+        elif prior_type == 'offset_gamma':
+            self.prior_type_combo.setCurrentText("Offset Gamma")
+        elif prior_type == 'offset_lognorm':
+            self.prior_type_combo.setCurrentText("Offset Lognormal")
+        elif prior_type == 'truncated_normal':
+            self.prior_type_combo.setCurrentText("Truncated Normal")
+        
+        # 加载参数
+        params = self.calibration.get('params', {})
+        if 'fixed_value' in params:
+            self.fixed_value_spinbox.setValue(params['fixed_value'])
+        if 'uniform_min' in params:
+            self.uniform_min_spinbox.setValue(params['uniform_min'])
+        if 'uniform_max' in params:
+            self.uniform_max_spinbox.setValue(params['uniform_max'])
+        if 'offset_exp_offset' in params:
+            self.offset_exp_offset_spinbox.setValue(params['offset_exp_offset'])
+        if 'offset_exp_rate' in params:
+            self.offset_exp_rate_spinbox.setValue(params['offset_exp_rate'])
+        if 'offset_gamma_offset' in params:
+            self.offset_gamma_offset_spinbox.setValue(params['offset_gamma_offset'])
+        if 'offset_gamma_alpha' in params:
+            self.offset_gamma_alpha_spinbox.setValue(params['offset_gamma_alpha'])
+        if 'offset_gamma_beta' in params:
+            self.offset_gamma_beta_spinbox.setValue(params['offset_gamma_beta'])
+        if 'offset_lognorm_offset' in params:
+            self.offset_lognorm_offset_spinbox.setValue(params['offset_lognorm_offset'])
+        if 'offset_lognorm_mean' in params:
+            self.offset_lognorm_mean_spinbox.setValue(params['offset_lognorm_mean'])
+        if 'offset_lognorm_std' in params:
+            self.offset_lognorm_std_spinbox.setValue(params['offset_lognorm_std'])
+        if 'trunc_norm_offset' in params:
+            self.trunc_norm_offset_spinbox.setValue(params['trunc_norm_offset'])
+        if 'trunc_norm_mean' in params:
+            self.trunc_norm_mean_spinbox.setValue(params['trunc_norm_mean'])
+        if 'trunc_norm_std' in params:
+            self.trunc_norm_std_spinbox.setValue(params['trunc_norm_std'])
+    
+    def get_calibration(self):
+        """获取校准节点数据"""
+        name = self.name_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Warning", "Node name cannot be empty!")
+            return None
+        
+        # 获取选中的分类群
+        selected_items = self.taxa_list_widget.selectedItems()
+        taxa = [item.text() for item in selected_items]
+        
+        if not taxa:
+            QMessageBox.warning(self, "Warning", "Please select at least one taxon!")
+            return None
+        
+        # 获取先验类型
+        prior_type_map = {
+            "Fixed Value": "fixed",
+            "Uniform Distribution": "uniform",
+            "Offset Exponential": "offset_exp",
+            "Offset Gamma": "offset_gamma",
+            "Offset Lognormal": "offset_lognorm",
+            "Truncated Normal": "truncated_normal"
+        }
+        prior_type = prior_type_map.get(self.prior_type_combo.currentText(), "fixed")
+        
+        # 获取参数
+        params = {}
+        if prior_type == "fixed":
+            params['fixed_value'] = self.fixed_value_spinbox.value()
+        elif prior_type == "uniform":
+            params['uniform_min'] = self.uniform_min_spinbox.value()
+            params['uniform_max'] = self.uniform_max_spinbox.value()
+        elif prior_type == "offset_exp":
+            params['offset_exp_offset'] = self.offset_exp_offset_spinbox.value()
+            params['offset_exp_rate'] = self.offset_exp_rate_spinbox.value()
+        elif prior_type == "offset_gamma":
+            params['offset_gamma_offset'] = self.offset_gamma_offset_spinbox.value()
+            params['offset_gamma_alpha'] = self.offset_gamma_alpha_spinbox.value()
+            params['offset_gamma_beta'] = self.offset_gamma_beta_spinbox.value()
+        elif prior_type == "offset_lognorm":
+            params['offset_lognorm_offset'] = self.offset_lognorm_offset_spinbox.value()
+            params['offset_lognorm_mean'] = self.offset_lognorm_mean_spinbox.value()
+            params['offset_lognorm_std'] = self.offset_lognorm_std_spinbox.value()
+        elif prior_type == "truncated_normal":
+            params['trunc_norm_offset'] = self.trunc_norm_offset_spinbox.value()
+            params['trunc_norm_mean'] = self.trunc_norm_mean_spinbox.value()
+            params['trunc_norm_std'] = self.trunc_norm_std_spinbox.value()
+        
+        return {
+            'name': name,
+            'taxa': taxa,
+            'prior_type': prior_type,
+            'params': params,
+            'use_constraint': False  # 默认不设置拓扑约束
+        }
+
 
 class MrBayesHighlighter(QSyntaxHighlighter):
     """MrBayes语法高亮器，使用Monokai主题"""
