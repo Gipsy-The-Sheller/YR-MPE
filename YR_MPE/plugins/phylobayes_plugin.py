@@ -644,7 +644,7 @@ class PhyloBayesPlugin(BasePlugin):
         subst_model = self.subst_model_combo.currentText()
         if subst_model == "GTR":
             params.append("-gtr")
-        elif subst_model == "Poisson":
+        elif subst_model == "Poisson (Protein only)":
             params.append("-poisson")
         elif subst_model == "JTT (Protein only)":
             params.append("-jtt")
