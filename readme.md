@@ -24,7 +24,7 @@
 | Trim |<img src="/YR_MPE/icons/align.svg" width="auto" height="25"/><img src="/YR_MPE/icons/trim.svg" width="auto" height="25"/></span>| TrimAl <br> GBlocks | <img src="/YR_MPE/icons/software/trimal.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/gblocks.svg" width="auto" height="25"/> |
 | Model |<img src="/YR_MPE/icons/model.svg" width="auto" height="25"/>| ModelFinder | <img src="/YR_MPE/icons/find_model.svg" width="auto" height="25"/> |
 | Distance |<img src="/YR_MPE/icons/distance.svg" width="auto" height="25"/>| ML-distance (IQ-Tree 3) <br> Uncorrected distance | <img src="/YR_MPE/icons/dist.svg" width="auto" height="25"/><img src="/YR_MPE/icons/dist.svg" width="auto" height="25"/> |
-| Phylogeny |<img src="/YR_MPE/icons/phylogeny.svg" width="auto" height="25"/><img src="/YR_MPE/icons/coalescent.svg" width="auto" height="25"/>| IQ-Tree 3 <br> MrBayes3-MPI-BEAGLE3 <br> PhyloBayes-MPI <br> DecentTree (NJ methods) <br> CASTER-site|<img src="/YR_MPE/icons/software/iqtree.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mrbayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/phylobayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/bionj.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/caster.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/astral.svg" width="auto" height="25"/>|
+| Phylogeny |<img src="/YR_MPE/icons/phylogeny.svg" width="auto" height="25"/><img src="/YR_MPE/icons/coalescent.svg" width="auto" height="25"/>| IQ-Tree 3 <br> MrBayes3-MPI-BEAGLE3 <br> PhyloBayes-MPI <br> DecentTree (NJ methods) <br> MPBoot (Maximum Parsimony) <br> CASTER-site <br> ASTRAL|<img src="/YR_MPE/icons/software/iqtree.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mrbayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/phylobayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/bionj.svg" width="auto" height="25"/><img src="/YR_MPE/icons/mp.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/caster.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/astral.svg" width="auto" height="25"/>|
 | Visualizations ||Sequence Viewer <br> Distance Visualization <br> Calculate & Plot Substitution Satucation <br> MiniTracer <br> IcyTree|<img src="/YR_MPE/icons/file/sequence.svg" width="auto" height="25"/><img src="/YR_MPE/icons/dist.svg" width="auto" height="25"/><img src="/YR_MPE/icons/saturation.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/minitracer.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/icytree.svg" width="auto" height="25"/>|
 | Platform & Workflow | | YR-MPEA | <img src="/YR_MPE/icons/yr-mpea.svg" width="auto" height="25"/> |
 
@@ -36,6 +36,19 @@ While other software also provides good experience, an inherent conflict is the 
 
 Owing to a good architecture, the source codes of `YR-MPE` do not need any compilation or packaging, even without a global python environment. Thus, every new commit can be a new release, supporting speedy updates directly from Github repository. Also, it is open-sourced, which means you can modify it as you wish, and community can develop new functions in collaboration. As a result, I think `YR-MPE` is capable to keep up with the development of the discipline.
 
+> [!IMPORTANT]
+>
+> Most users requiring a good graphic interface experience are not bioinformatic-backgrounded and linux CLI novices, as observed by the developers. However, most software are only with mature buuild support on UNIX-like systems and are hard to successfully compile on Windows, which is disturbing to the focus on biological questions. YR-MPE is with the concept that developers form a stable x86_64 Windows building support once and for all, and everyone share the benefits. Till now there are several tools with YR-MPE the only known support on x86_64 Windows system:
+> |Software|Feature|
+> |:---|:---|
+> | MrBayes-MPI-BEAGLE | The first stable MPI and BEAGLE3 support of MrBayes on Windows, speeding up 3x-7x for a 20 taxa, 1000 bp dataset (based on our benchmarks).|
+> | PhyloBayes-MPI | The first stable MPI support of PhyloBayes on Windows. |
+> | MPBoot | The first public release on Windows. |
+> | DecentTree | The first public release on Windows. |
+> | RaxML-NG (implementation planned) | The first public release on Windows |
+>
+> All binaries compiled by the authors, plus source codes, configuration and building files, are deposited in [this repository](https://github.com/Gipsy-The-Sheller/YR-MPE-Windows-x86_64-softwares) and distributed with their original licenses.
+
 ## How to use it?
 
 You can invoke all or part of `YR-MPE` from any UI software (or even a python script) in `PyQt5` ecology.
@@ -44,6 +57,27 @@ The most convenient way is to use it in `YRTools` [Github](https://github.com/Gi
 
 The wiki of `YR-MPE` provides detailed introduction and usage. You can access its [Github](https://github.com/Gipsy-The-Sheller/YR-MPE/wiki) or [Gitee](https://gitee.com/ZJXMolls/YR-MPE/wikis) source online.
 
+## The development plan for next versions
+
+- Integrate RAxML-NG
+- Integrate Terraphast for phylogenetic terrace analysis
+- Enable Robinson-Fould (RF) distance calculation
+- Enable general majority-rule consensus for raw tree sets
+- Integrate TreeRecs for gene tree confliction viz.
+- Implement a molecular clock diagnosis (based on 2-cluster test or beanch length test) plugin interface
+- Integrate MCMCTree and r8s
+- Implement a fast distance calculation (JC69; poisson; K2P) and distance tree construction plugin with Biopython
+- New dataset creator based on Orthofinder (for orthologs) and SibeliaZ (for collinear blocks)
+
+- Do you think it is a need to integrate TreeMix?
+- Or it is a need to implement a sequence simulator interface (based on AliSim implemented in IQ-Tree)?
+
+Inform developers of your opinion via issue or email: zjxmolls@outlook.com.
+
 ## Changelogs
 
-2026.1.9 - v0.2.0 - Bayesian inference plugins (MrBayes-MPI-BEAGLE3, PhyloBayes-MPI), fixed IcyTree bugs, added console plugin.
+> *First transplant release on x86_64 windows
+
+**Latest version: 2026.3.8 - v0.3.0 - Support for multigene phylogeny; distance methods (DecentTree\*); maximum parsimony (MPBoot\*); molecular dating (LSD2, MrBayes); nucleotide substitution saturation analysis (BaCoCa C-value reimplement); model parameter estimation (ModelFinder); dataset management (SeqDBG); uncalibrated distance (p-distance) calculation.**
+
+2026.1.9 - v0.2.0 - Bayesian inference plugins (MrBayes-MPI-BEAGLE3\*, PhyloBayes-MPI\*), fixed IcyTree bugs, added console plugin.
