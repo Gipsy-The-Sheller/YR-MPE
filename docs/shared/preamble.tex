@@ -1,0 +1,41 @@
+% Shared preamble for YR-MPE documentation (manual + case studies).
+% Build from the docs/ directory:
+%   latexmk -lualatex manual/manual.tex
+%   latexmk -lualatex cases/cases.tex
+
+\usepackage{fontspec}
+\usepackage{unicode-math}
+\usepackage[margin=1in]{geometry}
+\usepackage{setspace}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{pifont}
+\usepackage{xcolor}
+\usepackage[backend=biber,style=numeric-comp,sorting=none,maxbibnames=99]{biblatex}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage[most]{tcolorbox}
+\usepackage{listings}
+
+\addbibresource{shared/software.bib}
+\graphicspath{{shared/figures/}}
+
+\newcommand{\cmark}{\ding{51}}
+\newcommand{\xmark}{\ding{55}}
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+
+\newtcolorbox{tip}{
+  colback=blue!5!white,
+  colframe=blue!50!black,
+  title=Tip
+}
+\newtcolorbox{warning}{
+  colback=red!5!white,
+  colframe=red!60!black,
+  title=Warning
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}

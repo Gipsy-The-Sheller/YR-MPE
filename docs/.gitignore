@@ -1,0 +1,16 @@
+# LaTeX build artifacts
+/manual.pdf
+/cases.pdf
+*.aux
+*.bcf
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.log
+*.out
+*.toc
+
+# Extra build logs
+*.run.xml
+*_build*.log

@@ -1,0 +1,133 @@
+\documentclass[11pt]{report}
+\input{shared/preamble}
+
+\title{YR-MPE Case Studies}
+\author{Zhi-Jie Xu}
+\date{Draft --- \today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\chapter{Single-gene maximum-likelihood phylogeny}
+\section{Question}
+\section{Data}
+\section{Before you start}
+\section{Steps}
+\section{Parameter rationale}
+\section{Expected output}
+\section{Interpretation}
+\section{Pitfalls}
+\section{Citation}
+\todo{Base on \texttt{YR-MPE.wiki/workflow/single\_gene\_phylogeny.md}
+(389 lines, 10 screenshots). Replace wiki UI strings with the current code.}
+
+\chapter{Concatenated multi-gene phylogeny}
+\section{Question}
+\section{Data}
+\section{Before you start}
+\section{Steps}
+\section{Parameter rationale}
+\section{Expected output}
+\section{Interpretation}
+\section{Pitfalls}
+\section{Citation}
+\todo{Base on \texttt{multi\_gene\_phylogeny.md}. Use the 20 simulated loci in
+\texttt{exp/loci*.phy} or a smaller public dataset.}
+
+\chapter{Distance-based phylogeny}
+\section{Question}
+\section{Data}
+\section{Before you start}
+\section{Steps}
+\section{Parameter rationale}
+\section{Expected output}
+\section{Interpretation}
+\section{Pitfalls}
+\section{Citation}
+\todo{New case: p-distance / ML distance -> saturation -> DecentTree.
+Explain negative branch lengths; show the diagnostic panel.}
+
+\chapter{RAxML-NG maximum likelihood}
+\section{Question}
+\section{Data}
+\section{Before you start}
+\section{Steps}
+\section{Parameter rationale}
+\section{Expected output}
+\section{Interpretation}
+\section{Pitfalls}
+\section{Citation}
+\todo{New case after the RAxML-NG plugin lands: model, partition,
+bootstrap, outgroup.}
+
+\chapter{Bayesian inference and convergence}
+\section{Question}
+\section{Data}
+\section{Before you start}
+\section{Steps}
+\section{Parameter rationale}
+\section{Expected output}
+\section{Interpretation}
+\section{Pitfalls}
+\section{Citation}
+\todo{Base on \texttt{bayesian\_inference\_tutorial.md} and
+\texttt{mixed\_model\_phylobayes.md}; include MiniTracer ESS/PSRF.}
+
+\chapter{Species tree, concordance factors, and reconciliation}
+\section{Question}
+\section{Data}
+\section{Before you start}
+\section{Steps}
+\section{Parameter rationale}
+\section{Expected output}
+\section{Interpretation}
+\section{Pitfalls}
+\section{Citation}
+\todo{Base on \texttt{aster\_tutorial.md}; add sCF/gCF and TreeRecs once
+available.}
+
+\chapter{Molecular dating}
+\section{Question}
+\section{Data}
+\section{Before you start}
+\section{Steps}
+\section{Parameter rationale}
+\section{Expected output}
+\section{Interpretation}
+\section{Pitfalls}
+\section{Citation}
+\todo{New case: LSD2 / MrBayes dating; MCMCTree approximate + IQ2MC once
+implemented.}
+
+\chapter{Selection analysis}
+\section{Question}
+\section{Data}
+\section{Before you start}
+\section{Steps}
+\section{Parameter rationale}
+\section{Expected output}
+\section{Interpretation}
+\section{Pitfalls}
+\section{Citation}
+\todo{New case after the selection module lands: NG86/YN00, z-test, and
+the CodeML/HyPhy entry points.}
+
+\chapter{Genome-scale dataset formation with OrthoFinder}
+\section{Question}
+\section{Data}
+\section{Before you start}
+\section{Steps}
+\section{Parameter rationale}
+\section{Expected output}
+\section{Interpretation}
+\section{Pitfalls}
+\section{Citation}
+\todo{New case after the OrthoFinder plugin lands: GFF3+genome and mt/cp
+GenBank inputs; single-copy orthogroups; protein-to-CDS back-mapping.}
+
+% Smoke test for software.bib; remove when real citations are added.
+\nocite{*}
+\printbibliography
+
+\end{document}

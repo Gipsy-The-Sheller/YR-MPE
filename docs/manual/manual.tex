@@ -1,0 +1,103 @@
+\documentclass[11pt]{report}
+\input{shared/preamble}
+
+\title{YR-MPE User Manual}
+\author{Zhi-Jie Xu}
+\date{Draft for version 0.2.0 --- \today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\chapter{Introduction}
+\todo{Import the English introduction from the wiki/Word manual. Define
+YR-MPE (the plugin package) and YR-MPEA (the integrated GUI workbench) once.}
+
+\chapter{Installation and first launch}
+\todo{Import from \texttt{User Manual-final.docx} and the wiki. Cover the
+Initializer, bundled binaries, manual installation, and the
+\texttt{launcher.vbs} entry point. Apply the accepted corrections in
+\texttt{revision-judgments.md}.}
+
+\chapter{Interface overview}
+\todo{Describe the workspace, dataset, and toolbar. Use the final menu names:
+WORKSPACE, ALIGN, MODEL, DISTANCE, PHYLOGENY, SPECIES TREE, CLOCK,
+SELECTION.}
+
+\chapter{Datasets and workspace}
+\section{Workspace modes}
+\section{SeqMatrix}
+\section{SeqDBG}
+\section{Sequence Concatenator}
+\section{TreeMerger}
+\section{Genomic dataset formation (OrthoFinder)}
+\todo{P1: Proteome / GFF3+Genome / GenBank mt-cp modes; single-copy
+orthogroups; protein-to-CDS back-mapping.}
+
+\chapter{Alignment}
+\section{MAFFT}
+\section{MUSCLE 5}
+\section{Clustal Omega}
+\section{MACSE 2}
+\section{TrimAl}
+\section{GBlocks}
+
+\chapter{Model selection}
+\section{ModelFinder}
+\section{Model parameters}
+
+\chapter{Distance and saturation}
+\section{ML distance}
+\section{Uncorrected p-distance}
+\section{Substitution saturation}
+\section{DecentTree}
+\todo{Explain negative branch lengths as a property of NJ on non-additive
+distance matrices; describe the diagnostic and the optional zero-clamp.}
+
+\chapter{Phylogenetic inference}
+\section{Maximum likelihood with IQ-TREE 3}
+\section{Maximum likelihood with RAxML-NG}
+\todo{P0: import/partition/bootstrap/outgroup options.}
+\section{Bayesian inference with MrBayes}
+\section{Bayesian inference with PhyloBayes}
+\section{Maximum parsimony with MPBoot}
+\section{MCMC diagnostics with MiniTracer}
+
+\chapter{Species tree and concordance}
+\section{ASTRAL / wASTRAL / ASTRAL-Pro}
+\section{CASTER-site}
+\section{Concordance factors (sCF / gCF)}
+\todo{P0: explain the gCF + parsimony sCF mode and the separate likelihood
+sCF mode; note that \texttt{-t} is a starting tree and \texttt{-te} fixes it.}
+\section{Gene tree reconciliation with TreeRecs}
+\todo{P1: blocked until a runnable TreeRecs build is available.}
+
+\chapter{Molecular dating}
+\section{LSD2}
+\section{MrBayes dating}
+\section{MCMCTree (approximate)}
+\section{IQ2MC}
+\todo{P0: document the IQ-TREE -> MCMCTree input conversion and the
+\texttt{usedata=3} workflow.}
+
+\chapter{Selection analysis}
+\section{NG86 and YN00}
+\section{Codon-based z-test}
+\section{CodeML and HyPhy (planned)}
+
+\chapter{Tree visualization}
+\todo{One shared viewer; rooting, support labels, TreeSet selector, export.}
+
+\chapter{Troubleshooting}
+\todo{Binary not found, version mismatch, workspace permissions, long jobs,
+MPI/BEAGLE limits.}
+
+\chapter{Plugin development}
+\todo{BasePlugin contract, four tabs, manifest entry, result contract.
+Keep the example short and testable.}
+
+% Smoke test for software.bib; remove when real citations are added.
+\nocite{*}
+\printbibliography
+
+\end{document}
