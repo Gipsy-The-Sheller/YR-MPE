@@ -69,6 +69,8 @@ class DatasetItemSpec:
     metadata: Dict[str, Any] = field(default_factory=dict)
     parent_index: Optional[int] = None
     selected: bool = False
+    import_id: Optional[str] = None
+    run_id: Optional[str] = None
 
     def __post_init__(self):
         if self.sequences and not self.sequence_count:
@@ -107,6 +109,8 @@ class DatasetItemSpec:
             "data": _jsonable(self.data),
             "metadata": _jsonable(self.metadata),
             "selected": self.selected,
+            "import_id": self.import_id,
+            "run_id": self.run_id,
         }
 
 

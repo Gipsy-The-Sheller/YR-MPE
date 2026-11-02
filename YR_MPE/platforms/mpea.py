@@ -23,8 +23,9 @@ from typing import Optional, Dict, List, Any
 from Bio import SeqIO
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
 QMenuBar, QToolBar, QToolButton, QGroupBox, QLabel,
-QAction, QMenu, QSizePolicy, QGridLayout, QFileDialog, QMessageBox, QDialog, QPushButton)
-from PyQt5.QtCore import Qt, QSize
+QAction, QMenu, QSizePolicy, QGridLayout, QFileDialog, QMessageBox, QDialog, QPushButton,
+QSplitter)
+from PyQt5.QtCore import Qt, QSize, pyqtSignal
 from PyQt5.QtGui import QIcon
 
 # 导入selection状态常量
@@ -40,6 +41,7 @@ from .methods.import_partitioned_nexus import import_partitioned_nexus
 # 导入数据集选择管理器和按钮组件
 from .methods.dataset_selection_manager import DatasetSelectionManager
 from .methods.dataset_item_button import DatasetItemButton, DatasetButton
+from .methods.inspector_panel import InspectorPanel
 from .methods.dataset_models import (
     DatasetItem, DatasetInfo,
     ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT, ITEM_TYPE_MODEL,
@@ -135,7 +137,13 @@ class YR_MPEA_Widget(QWidget):
             
             # 刷新UI
             self._update_workspace_display()
-            
+            if hasattr(self, "inspector"):
+                self.inspector.set_sources(
+                    self.dataset_selection_manager,
+                    self.dataset_selection_manager.store,
+                )
+                self.inspector.show_empty()
+
             # 显示成功消息
             display_name = self.workspace_manager.truncate_path(new_workspace_path)
             QMessageBox.information(
@@ -718,6 +726,16 @@ class YR_MPEA_Widget(QWidget):
         # MrBayes
         clock_button_menu.addAction(mrbayes_action)
 
+        # Inspector visibility toggle
+        self.inspector_button = QToolButton()
+        self.inspector_button.setText("Inspector")
+        self.inspector_button.setCheckable(True)
+        self.inspector_button.setChecked(True)
+        self.inspector_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.inspector_button.setToolTip("Show or hide the provenance inspector")
+        self.inspector_button.toggled.connect(self._set_inspector_visible)
+        main_toolbar.addWidget(self.inspector_button)
+
         # mainworkspace_group = QGroupBox("Workspace")
         # # mainworkspace_layout = QGridLayout(10,4)
         # # # forbid stretch of rows and columns
@@ -736,7 +754,28 @@ class YR_MPEA_Widget(QWidget):
             parent=self
         )
         self.workspace.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        main_layout.addWidget(self.workspace)
+
+        # Right-side inspector: independent widget, host only wires signals.
+        self.inspector = InspectorPanel(
+            manager=self.dataset_selection_manager,
+            store=self.dataset_selection_manager.store,
+            parent=self,
+        )
+        self.workspace.item_selected.connect(self.inspector.show_item)
+        self.workspace.dataset_selected.connect(self.inspector.show_dataset)
+        self.inspector.item_activated.connect(self._select_workspace_item_from_inspector)
+        self.inspector.dataset_activated.connect(self._show_dataset_from_inspector)
+        self.inspector.preview_requested.connect(self._preview_inspector_item)
+        self.inspector.run_renamed.connect(lambda *_: self.inspector.refresh())
+
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.addWidget(self.workspace)
+        self.main_splitter.addWidget(self.inspector)
+        self.main_splitter.setStretchFactor(0, 1)
+        self.main_splitter.setStretchFactor(1, 0)
+        self.main_splitter.setSizes([900, 380])
+        main_layout.addWidget(self.main_splitter)
 
     def handle_dataset_click(self, button):
         """处理Dataset按钮点击事件"""
@@ -1933,7 +1972,56 @@ class YR_MPEA_Widget(QWidget):
             return
 
         self.workspace.current_dataset_id = dataset_ids[-1]
-    
+        if hasattr(self, "inspector"):
+            self.inspector.set_sources(
+                self.dataset_selection_manager,
+                self.dataset_selection_manager.store,
+            )
+            self.inspector.show_dataset(dataset_ids[-1])
+
+    def _set_inspector_visible(self, visible):
+        if not hasattr(self, "inspector"):
+            return
+        self.inspector.setVisible(bool(visible))
+        if visible and hasattr(self, "main_splitter"):
+            sizes = self.main_splitter.sizes()
+            if len(sizes) == 2 and sizes[1] < 220:
+                total = sum(sizes) or self.width()
+                self.main_splitter.setSizes([max(400, total - 380), 380])
+
+    def _select_workspace_item_from_inspector(self, item_id):
+        item = self.dataset_selection_manager.get_item(item_id)
+        if not item:
+            return
+        self.workspace.current_dataset_id = item.dataset_id
+        self.workspace._clear_dataset_highlights()
+        self.dataset_selection_manager.selection_engine.select_item(item_id)
+        self.workspace._update_all_button_styles()
+        self.inspector.show_item(item_id)
+
+    def _show_dataset_from_inspector(self, dataset_id):
+        self.workspace.current_dataset_id = dataset_id
+        self.inspector.show_dataset(dataset_id)
+
+    def _preview_inspector_item(self, item_id, kind):
+        item = self.dataset_selection_manager.get_item(item_id)
+        if not item:
+            return
+        if kind == "tree":
+            self.workspace.view_phylogeny(item.data)
+        elif kind == "alignment":
+            self.workspace.view_alignment(item.sequences)
+        elif kind == "model":
+            self.workspace.view_model_result(item.data)
+        elif kind == "distance":
+            self.workspace.view_distance_matrix(item.data)
+        elif kind == "chain":
+            QMessageBox.information(
+                self,
+                "Chain preview",
+                "Open this chain from the workspace to use miniTracer.",
+            )
+
     def _check_workspace_required(self, plugin_name: str) -> bool:
         """
         检查是否需要工作区，如果没有则提示用户选择
@@ -2134,6 +2222,9 @@ class YR_MPEA_Widget(QWidget):
         dialog.show()  # 使用show()而非exec_()，显示非模态窗口
 
 class SingleGeneWorkspace(QWidget):
+    item_selected = pyqtSignal(str)
+    dataset_selected = pyqtSignal(str)
+
     def __init__(self, resource_factory=None, dataset_selection_manager=None, parent=None):
         super().__init__()
         self.resource_factory = resource_factory  # 添加resource_factory引用
@@ -2291,7 +2382,8 @@ class SingleGeneWorkspace(QWidget):
         
         # 更新所有按钮的样式
         self._update_all_button_styles()
-    
+        self.item_selected.emit(item_id)
+
     def _clear_dataset_highlights(self):
         """清除所有数据集的高亮"""
         if not self.dataset_selection_manager:
@@ -2862,6 +2954,24 @@ class SingleGeneWorkspace(QWidget):
                 if spec.description:
                     dataset_info.description = spec.description
 
+            # Precise import provenance: one import record per dataset import.
+            import_record = None
+            if manager.store is not None:
+                source_paths = []
+                input_path = (spec.metadata or {}).get("input")
+                if input_path:
+                    source_paths.append(str(input_path))
+                try:
+                    import_record = manager.store.new_import(
+                        source_paths,
+                        importer=spec.source or "plugin",
+                        parameters=dict(spec.metadata or {}),
+                        copy=False,
+                        dataset_id=dataset_id,
+                    )
+                except Exception:
+                    import_record = None
+
             created = []
             for index, item_spec in enumerate(spec.items):
                 item = DatasetItem(item_type=item_spec.item_type)
@@ -2876,6 +2986,10 @@ class SingleGeneWorkspace(QWidget):
                 item.sequences = list(item_spec.sequences)
                 item.data = dict(item_spec.data)
                 item.metadata = dict(item_spec.metadata)
+                item.import_id = item_spec.import_id or (
+                    import_record.id if import_record is not None else None
+                )
+                item.run_id = item_spec.run_id
                 item.ownership_uuid = str(uuid.uuid4())
                 item.selection_state = (
                     SELECTION_STATE_GREEN if item_spec.selected else SELECTION_STATE_NONE
@@ -2916,6 +3030,8 @@ class SingleGeneWorkspace(QWidget):
                 entry = item_spec.to_settings_dict()
                 entry["id"] = item.id
                 entry["parent_id"] = item.parent_id or ""
+                entry["import_id"] = item.import_id
+                entry["run_id"] = item.run_id
                 settings_items.append(entry)
 
             dataset_info.settings["dataset_items"] = settings_items
@@ -3070,6 +3186,7 @@ class SingleGeneWorkspace(QWidget):
         self.grid_layout.addWidget(dataset_button, 0, dataset_col)
         dataset_button.dataset_ref = dataset_info
         self._update_dataset_summary(dataset_info)
+        self.dataset_selected.emit(dataset_info.id)
         return dataset_button
 
     def _dataset_source_label(self, dataset_info):
@@ -3155,10 +3272,11 @@ class SingleGeneWorkspace(QWidget):
         
         # 保存状态
         self.dataset_selection_manager._save_state()
-        
+
         # 更新所有按钮的样式
         self._update_all_button_styles()
-    
+        self.dataset_selected.emit(dataset_id)
+
     def _on_dataset_double_click_by_id(self, dataset_id: str):
         """处理数据集双击事件（通过 dataset_id）"""
         if not self.dataset_selection_manager:

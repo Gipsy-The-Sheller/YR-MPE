@@ -581,6 +581,20 @@ class DatasetSelectionManager:
             if item_id not in self.items:
                 del index.items[item_id]
 
+        # Rebuild provenance edges from item back-references.
+        for import_record in index.imports.values():
+            import_record.item_ids = [
+                item.id for item in self.items.values()
+                if getattr(item, "import_id", None) == import_record.id
+            ]
+        for run_record in index.runs.values():
+            run_record.output_ids = [
+                item.id for item in self.items.values()
+                if getattr(item, "run_id", None) == run_record.id
+            ]
+
+        self.store.refresh_manifests()
+
     def _store_item_file(self, item):
         if not self.store:
             return ""
@@ -653,8 +667,10 @@ class DatasetSelectionManager:
                 pass
 
     def _load_state(self):
-        """从文件加载状态"""
+        """从旧 JSON 加载状态（store 已加载时跳过）。"""
         if not self.workspace_path:
+            return
+        if self.store is not None and (self.store.index.datasets or self.store.index.items):
             return
 
         state_file = os.path.join(self.workspace_path, "dataset_selection_state.json")

@@ -38,6 +38,8 @@ class DatasetItem:
         self.format = ""              # 文件格式
         self.data = {}                # 类型特定数据
         self.metadata = {}            # 额外元数据
+        self.import_id = None         # 来源 import
+        self.run_id = None            # 产出 run
         
     def __str__(self):
         return f"DatasetItem(loci_name={self.loci_name}, length={self.length}, count={self.sequence_count})"
@@ -261,6 +263,8 @@ class DatasetManager(QDialog):
                 item.format = item_data.get('format', '')
                 item.data = item_data.get('data', {}) or {}
                 item.metadata = item_data.get('metadata', {}) or {}
+                item.import_id = item_data.get('import_id')
+                item.run_id = item_data.get('run_id')
                 
                 # 处理序列数据
                 sequences_data = item_data.get('sequences')
@@ -316,6 +320,8 @@ class DatasetManager(QDialog):
                     new_item.format = item.format
                     new_item.data = dict(item.data)
                     new_item.metadata = dict(item.metadata)
+                    new_item.import_id = item.import_id
+                    new_item.run_id = item.run_id
                     
                     # 转换序列数据
                     if hasattr(item, 'sequences') and item.sequences:
