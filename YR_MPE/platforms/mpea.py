@@ -766,6 +766,7 @@ class YR_MPEA_Widget(QWidget):
         self.inspector.item_activated.connect(self._select_workspace_item_from_inspector)
         self.inspector.dataset_activated.connect(self._show_dataset_from_inspector)
         self.inspector.preview_requested.connect(self._preview_inspector_item)
+        self.inspector.action_requested.connect(self._on_inspector_action)
         self.inspector.run_renamed.connect(lambda *_: self.inspector.refresh())
 
         self.main_splitter = QSplitter(Qt.Horizontal)
@@ -2020,6 +2021,24 @@ class YR_MPEA_Widget(QWidget):
                 self,
                 "Chain preview",
                 "Open this chain from the workspace to use miniTracer.",
+            )
+
+    def _on_inspector_action(self, action_id, target_id, params):
+        if action_id == "import_lsd2":
+            self._select_workspace_item_from_inspector(target_id)
+            self.open_lsd2_wrapper()
+        elif action_id == "import_mcmctree":
+            QMessageBox.information(
+                self,
+                "MCMCTree import",
+                "MCMCTree import will be wired through PD-Guide in the next step.",
+            )
+        elif action_id == "rerun_run":
+            QMessageBox.information(
+                self,
+                "Rerun",
+                "Rerun wiring is next; the run parameters are available in the "
+                "edge metadata for an agent or the tool dialog.",
             )
 
     def _check_workspace_required(self, plugin_name: str) -> bool:

@@ -4,12 +4,12 @@ The panel is deliberately host-agnostic:
 
 - it reads items and provenance from a ``DatasetSelectionManager`` and/or
   ``WorkspaceStore``;
-- it emits intent signals (``item_activated``, ``preview_requested``,
-  ``run_renamed``) instead of opening dialogs itself;
-- it does not set a QStyle or a font, so YRTools owns the appearance.
+- it emits intent signals instead of opening host dialogs;
+- it does not set a QStyle or font, so YRTools owns the appearance.
 
-V1 is read-only: preview/open and jump-to-item are wired; inline parameter
-editing and import actions are intentionally left to a later version.
+V1 is read-only for data items: preview/open and jump-to-item are wired.
+Edges expose their command and a rerun intent; the host decides whether the
+rerun tool is available yet.
 """
 
 from __future__ import annotations
@@ -18,21 +18,22 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
-    QGroupBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
-    QSizePolicy,
-    QTableWidget,
-    QTableWidgetItem,
+    QStyle,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -66,11 +67,11 @@ TYPE_SHORT = {
 }
 
 PREVIEW_LABELS = {
-    "tree": "Open in IcyTree",
-    "alignment": "Open sequences",
-    "model": "Open model",
-    "distance": "Open distance matrix",
-    "chain": "Open chain",
+    "tree": "Preview (IcyTree)",
+    "alignment": "Preview sequences",
+    "model": "Preview model",
+    "distance": "Preview distance matrix",
+    "chain": "Preview chain",
 }
 
 
@@ -100,6 +101,11 @@ def _text(value: Any, limit: int = 240) -> str:
 def _display_time(value: Any) -> str:
     if isinstance(value, datetime):
         return value.strftime("%Y-%m-%d %H:%M")
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            pass
     return _text(value)
 
 
@@ -108,16 +114,22 @@ class InspectorPanel(QWidget):
 
     item_activated = pyqtSignal(str)
     dataset_activated = pyqtSignal(str)
-    preview_requested = pyqtSignal(str, str)  # item_id, kind
-    run_renamed = pyqtSignal(str, str)        # run_id, new_name
+    preview_requested = pyqtSignal(str, str)          # item_id, kind
+    run_renamed = pyqtSignal(str, str)                # run_id, new_name
+    action_requested = pyqtSignal(str, str, object)   # action_id, target_id, params
 
     def __init__(self, manager=None, store=None, parent=None):
         super().__init__(parent)
         self.manager = manager
         self.store = store
         self.current_item_id: Optional[str] = None
+        self.current_run_id: Optional[str] = None
         self.current_dataset_id: Optional[str] = None
+        self._item_nodes: Dict[str, QTreeWidgetItem] = {}
+        self._run_nodes: Dict[str, QTreeWidgetItem] = {}
 
+        self.setObjectName("inspector")
+        self._icons = {}
         self._build_ui()
         self.show_empty()
 
@@ -129,6 +141,8 @@ class InspectorPanel(QWidget):
         self.store = store if store is not None else self.store
         if self.current_item_id:
             self.show_item(self.current_item_id)
+        elif self.current_run_id:
+            self.show_run(self.current_run_id)
         elif self.current_dataset_id:
             self.show_dataset(self.current_dataset_id)
         else:
@@ -136,16 +150,15 @@ class InspectorPanel(QWidget):
 
     def show_empty(self):
         self.current_item_id = None
+        self.current_run_id = None
         self.current_dataset_id = None
         self.title_label.setText("Inspector")
         self.subtitle_label.setText("Select a data node or dataset")
-        self.preview_group.setEnabled(False)
-        self.preview_hint.setText("No selection.")
-        self.preview_button.setText("Open preview")
-        self.show_button.setEnabled(False)
-        self.meta_table.setRowCount(0)
+        self._clear_operations()
+        self._set_operations_visible(False)
+        self._set_form_rows([])
         self.workflow_tree.clear()
-        self.run_group.setVisible(False)
+        self.run_section.setVisible(False)
 
     def show_item(self, item_id: str):
         item = self._get_item(item_id)
@@ -154,26 +167,43 @@ class InspectorPanel(QWidget):
             return
 
         self.current_item_id = item_id
+        self.current_run_id = None
         self.current_dataset_id = _attr(item, "dataset_id")
         item_type = _attr(item, "item_type", "type", default="sequence")
         name = _attr(item, "loci_name", "name", default=item_id)
         dataset_name = self._dataset_name(self.current_dataset_id)
+        run = self._run_for_item(item)
 
         self.title_label.setText(name)
         self.subtitle_label.setText(
             "%s · %s" % (TYPE_LABELS.get(item_type, item_type), dataset_name or "no dataset")
         )
 
-        kind = self._preview_kind(item_type)
-        self.preview_group.setEnabled(True)
-        self.preview_button.setText(PREVIEW_LABELS.get(kind, "Open preview"))
-        self.preview_button.setEnabled(kind is not None)
-        self.show_button.setEnabled(True)
-        self.preview_hint.setText(self._preview_hint(item, item_type))
-
-        self._fill_item_metadata(item, item_type, dataset_name)
-        self._fill_workflow(self.current_dataset_id, item_id)
+        self._fill_item_operations(item, item_type, run)
+        self._fill_item_metadata(item, item_type, dataset_name, run)
+        self._fill_workflow(self.current_dataset_id, item_id=item_id, run_id=None)
         self._fill_runs(item)
+
+    def show_run(self, run_id: str):
+        store = self._get_store()
+        run = store.get_run(run_id) if store is not None else None
+        if run is None:
+            self.show_empty()
+            return
+
+        self.current_item_id = None
+        self.current_run_id = run_id
+        self.current_dataset_id = self._dataset_for_run(run)
+        dataset_name = self._dataset_name(self.current_dataset_id)
+
+        self.title_label.setText(run.name)
+        self.subtitle_label.setText(
+            "Run · %s · %s" % (run.method, dataset_name or "no dataset")
+        )
+        self._fill_run_operations(run)
+        self._fill_run_metadata(run, dataset_name)
+        self._fill_workflow(self.current_dataset_id, item_id=None, run_id=run_id)
+        self.run_section.setVisible(False)
 
     def show_dataset(self, dataset_id: str):
         dataset = self._get_dataset(dataset_id)
@@ -182,27 +212,139 @@ class InspectorPanel(QWidget):
             return
 
         self.current_item_id = None
+        self.current_run_id = None
         self.current_dataset_id = dataset_id
         name = _attr(dataset, "name", default=dataset_id)
         self.title_label.setText(name)
         self.subtitle_label.setText("Dataset")
-
-        self.preview_group.setEnabled(False)
-        self.preview_hint.setText("Select an item to preview it.")
-        self.preview_button.setEnabled(False)
-        self.show_button.setEnabled(False)
-
+        self._clear_operations()
+        self._set_operations_visible(False)
         self._fill_dataset_metadata(dataset)
-        self._fill_workflow(dataset_id, None)
-        self.run_group.setVisible(False)
+        self._fill_workflow(dataset_id, item_id=None, run_id=None)
+        self.run_section.setVisible(False)
 
     def refresh(self):
         if self.current_item_id:
             self.show_item(self.current_item_id)
+        elif self.current_run_id:
+            self.show_run(self.current_run_id)
         elif self.current_dataset_id:
             self.show_dataset(self.current_dataset_id)
         else:
             self.show_empty()
+
+    # ------------------------------------------------------------------
+    # semantic contract for a future YRTools agent
+    # ------------------------------------------------------------------
+    def agent_contract(self) -> Dict[str, Any]:
+        """Describe state and callable operations without touching Qt events."""
+        return {
+            "schema": "yrmpe.ui.inspector.v1",
+            "id": self.objectName(),
+            "state": {
+                "item_id": self.current_item_id,
+                "run_id": self.current_run_id,
+                "dataset_id": self.current_dataset_id,
+            },
+            "actions": [
+                {
+                    "id": "inspector.show_item",
+                    "description": "Select and display a data item",
+                    "parameters": {"item_id": {"type": "string", "required": True}},
+                },
+                {
+                    "id": "inspector.show_run",
+                    "description": "Select and display an analysis edge",
+                    "parameters": {"run_id": {"type": "string", "required": True}},
+                },
+                {
+                    "id": "inspector.show_dataset",
+                    "description": "Display a dataset",
+                    "parameters": {"dataset_id": {"type": "string", "required": True}},
+                },
+                {
+                    "id": "inspector.preview",
+                    "description": "Open the registered preview for an item",
+                    "parameters": {
+                        "item_id": {"type": "string", "required": True},
+                        "kind": {"type": "string", "required": False},
+                    },
+                },
+                {
+                    "id": "inspector.rename_run",
+                    "description": "Rename an analysis run",
+                    "parameters": {
+                        "run_id": {"type": "string", "required": True},
+                        "name": {"type": "string", "required": True},
+                    },
+                },
+                {
+                    "id": "inspector.rerun_run",
+                    "description": "Rerun an analysis edge with edited parameters",
+                    "parameters": {
+                        "run_id": {"type": "string", "required": True},
+                        "parameters": {"type": "object", "required": False},
+                    },
+                },
+                {
+                    "id": "inspector.invoke_operation",
+                    "description": "Invoke a visible operation by id",
+                    "parameters": {
+                        "operation": {"type": "string", "required": True},
+                        "target_id": {"type": "string", "required": True},
+                    },
+                },
+            ],
+        }
+
+    def agent_invoke(self, action_id: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Dispatch a semantic action. GUI buttons use the same handlers."""
+        params = params or {}
+        try:
+            if action_id == "inspector.show_item":
+                self.show_item(params["item_id"])
+            elif action_id == "inspector.show_run":
+                self.show_run(params["run_id"])
+            elif action_id == "inspector.show_dataset":
+                self.show_dataset(params["dataset_id"])
+            elif action_id == "inspector.preview":
+                item_id = params["item_id"]
+                kind = params.get("kind") or self._kind_for_item(item_id)
+                self.preview_requested.emit(item_id, kind)
+            elif action_id == "inspector.rename_run":
+                store = self._get_store()
+                if store is None:
+                    raise RuntimeError("Workspace store is not available")
+                store.rename_run(params["run_id"], params["name"])
+                self.run_renamed.emit(params["run_id"], params["name"])
+                self.refresh()
+            elif action_id == "inspector.rerun_run":
+                self.action_requested.emit(
+                    "rerun_run",
+                    params["run_id"],
+                    {"parameters": params.get("parameters", {})},
+                )
+            elif action_id == "inspector.invoke_operation":
+                self._invoke_operation(params["operation"], params["target_id"])
+            else:
+                raise KeyError("unknown action %r" % action_id)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def _invoke_operation(self, operation: str, target_id: str):
+        if operation == "show":
+            self.item_activated.emit(target_id)
+        elif operation == "preview":
+            self.preview_requested.emit(target_id, self._kind_for_item(target_id))
+        elif operation in ("import_lsd2", "import_mcmctree"):
+            self.action_requested.emit(operation, target_id, {})
+        elif operation == "view_command":
+            self._view_command(target_id)
+        elif operation == "rerun_run":
+            self.action_requested.emit("rerun_run", target_id, {})
+        else:
+            raise KeyError("unknown operation %r" % operation)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -210,10 +352,15 @@ class InspectorPanel(QWidget):
     def _build_ui(self):
         self.setMinimumWidth(300)
         self.setMaximumWidth(560)
+        self.setStyleSheet(
+            'QPushButton[class="inspectorLink"] { text-align: left; border: none; '
+            "color: palette(link); padding: 1px 0; }"
+            'QPushButton[class="inspectorLink"]:hover { text-decoration: underline; }'
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
 
         self.title_label = QLabel("Inspector")
         font = QFont(QApplication.font())
@@ -228,72 +375,84 @@ class InspectorPanel(QWidget):
         self.subtitle_label.setStyleSheet("color: palette(mid);")
         layout.addWidget(self.subtitle_label)
 
-        # Preview -----------------------------------------------------
-        self.preview_group = QGroupBox("Preview")
-        preview_layout = QVBoxLayout(self.preview_group)
-        self.preview_hint = QLabel("No selection.")
-        self.preview_hint.setWordWrap(True)
-        self.preview_hint.setStyleSheet("color: palette(mid);")
-        preview_layout.addWidget(self.preview_hint)
-
-        preview_buttons = QHBoxLayout()
-        self.preview_button = QPushButton("Open preview")
-        self.preview_button.clicked.connect(self._on_preview)
-        self.show_button = QPushButton("Show in workspace")
-        self.show_button.clicked.connect(self._on_show)
-        preview_buttons.addWidget(self.preview_button)
-        preview_buttons.addWidget(self.show_button)
-        preview_layout.addLayout(preview_buttons)
-        layout.addWidget(self.preview_group)
+        # Operations --------------------------------------------------
+        self.operations_label = self._section_label("Operations")
+        layout.addWidget(self.operations_label)
+        self.operations_widget = QWidget()
+        self.operations_layout = QVBoxLayout(self.operations_widget)
+        self.operations_layout.setContentsMargins(0, 0, 0, 0)
+        self.operations_layout.setSpacing(1)
+        layout.addWidget(self.operations_widget)
 
         # Metadata ----------------------------------------------------
-        metadata_group = QGroupBox("Metadata")
-        metadata_layout = QVBoxLayout(metadata_group)
-        self.meta_table = QTableWidget(0, 2)
-        self.meta_table.setHorizontalHeaderLabels(["Field", "Value"])
-        self.meta_table.verticalHeader().setVisible(False)
-        self.meta_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.meta_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.meta_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.meta_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.meta_table.setMinimumHeight(180)
-        self.meta_table.setMaximumHeight(260)
-        metadata_layout.addWidget(self.meta_table)
-        layout.addWidget(metadata_group)
+        layout.addWidget(self._section_label("Metadata"))
+        self.metadata_widget = QWidget()
+        self.metadata_form = QFormLayout(self.metadata_widget)
+        self.metadata_form.setContentsMargins(0, 0, 0, 0)
+        self.metadata_form.setHorizontalSpacing(6)
+        self.metadata_form.setVerticalSpacing(3)
+        self.metadata_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.metadata_form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.metadata_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        layout.addWidget(self.metadata_widget)
 
         # Workflow ----------------------------------------------------
-        workflow_group = QGroupBox("Workflow")
-        workflow_layout = QVBoxLayout(workflow_group)
+        layout.addWidget(self._section_label("Workflow"))
         self.workflow_tree = QTreeWidget()
+        self.workflow_tree.setObjectName("inspector.workflow")
         self.workflow_tree.setColumnCount(2)
         self.workflow_tree.setHeaderLabels(["Data / method", "Type"])
         self.workflow_tree.setAlternatingRowColors(True)
         self.workflow_tree.setUniformRowHeights(True)
+        self.workflow_tree.setIndentation(10)
+        self.workflow_tree.setIconSize(QSize(16, 16))
         self.workflow_tree.header().setStretchLastSection(False)
         self.workflow_tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
         self.workflow_tree.header().setSectionResizeMode(1, QHeaderView.Fixed)
         self.workflow_tree.setColumnWidth(1, 64)
         self.workflow_tree.itemClicked.connect(self._on_tree_clicked)
         self.workflow_tree.itemDoubleClicked.connect(self._on_tree_double_clicked)
-        workflow_layout.addWidget(self.workflow_tree)
-        layout.addWidget(workflow_group, 1)
+        layout.addWidget(self.workflow_tree, 1)
 
         # Runs --------------------------------------------------------
-        self.run_group = QGroupBox("Runs")
-        run_layout = QVBoxLayout(self.run_group)
+        self.run_section = QWidget()
+        self.run_section.setObjectName("inspector.runs")
+        run_layout = QVBoxLayout(self.run_section)
+        run_layout.setContentsMargins(0, 0, 0, 0)
+        run_layout.setSpacing(3)
+        run_layout.addWidget(self._section_label("Runs"))
         self.run_combo = QComboBox()
+        self.run_combo.setObjectName("inspector.runs.combo")
         self.run_combo.currentIndexChanged.connect(self._on_run_combo)
         run_layout.addWidget(self.run_combo)
 
         rename_row = QHBoxLayout()
         self.run_name_edit = QLineEdit()
+        self.run_name_edit.setObjectName("inspector.runs.name")
         self.run_name_edit.setPlaceholderText("Run name")
         self.rename_button = QPushButton("Rename")
+        self.rename_button.setObjectName("inspector.runs.rename")
         self.rename_button.clicked.connect(self._on_rename_run)
         rename_row.addWidget(self.run_name_edit, 1)
         rename_row.addWidget(self.rename_button)
         run_layout.addLayout(rename_row)
-        layout.addWidget(self.run_group)
+        layout.addWidget(self.run_section)
+
+    def _section_label(self, text):
+        label = QLabel(text)
+        font = QFont(QApplication.font())
+        font.setBold(True)
+        label.setFont(font)
+        return label
+
+    def _link_button(self, text, object_name=None):
+        button = QPushButton(text)
+        button.setProperty("class", "inspectorLink")
+        button.setFlat(True)
+        button.setCursor(Qt.PointingHandCursor)
+        if object_name:
+            button.setObjectName(object_name)
+        return button
 
     # ------------------------------------------------------------------
     # data access
@@ -352,8 +511,18 @@ class InspectorPanel(QWidget):
                 return run
         return None
 
-    def _stream_for_item(self, item):
-        run = self._run_for_item(item)
+    def _dataset_for_run(self, run):
+        store = self._get_store()
+        if store is None:
+            return None
+        for dataset in store.index.datasets.values():
+            if set(run.input_ids) & set(dataset.item_ids):
+                return dataset.id
+            if set(run.output_ids) & set(dataset.item_ids):
+                return dataset.id
+        return None
+
+    def _stream_for_run(self, run):
         store = self._get_store()
         if run is None or store is None:
             return None
@@ -378,22 +547,63 @@ class InspectorPanel(QWidget):
             return "chain"
         return None
 
-    def _preview_hint(self, item, item_type: str) -> str:
-        if item_type in ("sequence", "alignment"):
-            count = _attr(item, "sequence_count", default=0)
-            length = _attr(item, "length", default=0)
-            return "%s sequences · %s sites" % (count, length)
-        if item_type in ("phylogeny", "treeset"):
-            return "Newick tree"
-        if item_type == "model":
-            return "Model selection result"
-        if item_type == "distance":
-            return "Pairwise distance matrix"
-        if item_type == "chain":
-            return "MCMC chain output"
-        return TYPE_LABELS.get(item_type, item_type)
+    def _fill_item_operations(self, item, item_type, run):
+        self._clear_operations()
+        self._add_operation("Show in dataset", self._on_show, "inspector.operation.show")
+        kind = self._preview_kind(item_type)
+        if kind is not None:
+            self._add_operation(
+                PREVIEW_LABELS.get(kind, "Preview"),
+                self._on_preview,
+                "inspector.operation.preview",
+            )
+        if kind == "tree":
+            self._add_operation(
+                "Import to LSD2", lambda: self._emit_operation("import_lsd2"),
+                "inspector.operation.import_lsd2",
+            )
+            self._add_operation(
+                "Import to MCMCTree", lambda: self._emit_operation("import_mcmctree"),
+                "inspector.operation.import_mcmctree",
+            )
+        self._set_operations_visible(True)
 
-    def _fill_item_metadata(self, item, item_type: str, dataset_name: str):
+    def _fill_run_operations(self, run):
+        self._clear_operations()
+        self._add_operation(
+            "View command", lambda: self._view_command(run.id),
+            "inspector.operation.view_command",
+        )
+        self._add_operation(
+            "Modify && rerun", lambda: self._emit_operation("rerun_run", run.id),
+            "inspector.operation.rerun",
+        )
+        self._set_operations_visible(True)
+
+    def _set_operations_visible(self, visible):
+        self.operations_label.setVisible(bool(visible))
+        self.operations_widget.setVisible(bool(visible))
+
+    def _clear_operations(self):
+        while self.operations_layout.count():
+            item = self.operations_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
+
+    def _add_operation(self, text, slot, object_name=None):
+        button = self._link_button(text, object_name)
+        button.clicked.connect(slot)
+        self.operations_layout.addWidget(button)
+
+    def _emit_operation(self, operation, target_id=None):
+        target_id = target_id or self.current_item_id or self.current_run_id
+        if target_id:
+            self.action_requested.emit(operation, target_id, {})
+
+    def _fill_item_metadata(self, item, item_type: str, dataset_name: str, run):
         rows = [
             ("Type", TYPE_LABELS.get(item_type, item_type)),
             ("Dataset", dataset_name),
@@ -403,26 +613,32 @@ class InspectorPanel(QWidget):
             ("Sequences", _attr(item, "sequence_count", default="")),
             ("Aligned", "yes" if _attr(item, "is_aligned", default=False) else "no"),
             ("Import", _attr(item, "import_id", default="")),
-            ("Run", _attr(item, "run_id", default="")),
             ("Parent", _attr(item, "parent_id", default="")),
             ("Created", _display_time(_attr(item, "created_at", default=""))),
         ]
-        run = self._run_for_item(item)
         if run is not None:
-            rows.extend([
-                ("Run name", run.name),
-                ("Method", run.method),
-                ("Tool", run.tool + (" " + run.tool_version if run.tool_version else "")),
-                ("Status", run.status),
-            ])
-            stream = self._stream_for_item(item)
-            if stream is not None:
-                rows.append(("Stream", stream.name))
-        metadata = _attr(item, "metadata", default={}) or {}
-        for key, value in metadata.items():
-            if key in ("source_path", "sha256"):
-                rows.append((key, _text(value)))
-        self._set_table_rows(rows)
+            link = self._link_button("Open edge: %s" % run.name, "inspector.metadata.edge")
+            link.clicked.connect(lambda: self.show_run(run.id))
+            rows.append(("Edge", link))
+        self._set_form_rows(rows)
+
+    def _fill_run_metadata(self, run, dataset_name: str):
+        stream = self._stream_for_run(run)
+        rows = [
+            ("Method", run.method),
+            ("Tool", run.tool + (" " + run.tool_version if run.tool_version else "")),
+            ("Status", run.status),
+            ("Dataset", dataset_name),
+            ("Created", _display_time(run.created_at)),
+            ("Completed", _display_time(run.completed_at)),
+            ("Inputs", ", ".join(run.input_ids)),
+            ("Outputs", ", ".join(run.output_ids)),
+            ("Parameters", run.parameters),
+            ("Command", " ".join(run.command) if run.command else ""),
+        ]
+        if stream is not None:
+            rows.append(("Stream", stream.name))
+        self._set_form_rows(rows)
 
     def _fill_dataset_metadata(self, dataset):
         rows = [
@@ -435,26 +651,51 @@ class InspectorPanel(QWidget):
         settings = _attr(dataset, "settings", default={}) or {}
         for key, value in settings.get("summary", {}).items():
             rows.append((key, _text(value)))
-        self._set_table_rows(rows)
+        self._set_form_rows(rows)
 
-    def _set_table_rows(self, rows):
-        self.meta_table.setRowCount(0)
+    def _set_form_rows(self, rows):
+        while self.metadata_form.rowCount():
+            self.metadata_form.removeRow(0)
         for field, value in rows:
             if value in (None, ""):
                 continue
-            row = self.meta_table.rowCount()
-            self.meta_table.insertRow(row)
-            field_item = QTableWidgetItem(str(field))
-            value_item = QTableWidgetItem(_text(value))
-            value_item.setToolTip(_text(value, limit=2000))
-            self.meta_table.setItem(row, 0, field_item)
-            self.meta_table.setItem(row, 1, value_item)
+            label = QLabel(str(field))
+            label.setStyleSheet("color: palette(mid);")
+            if isinstance(value, QWidget):
+                self.metadata_form.addRow(label, value)
+            else:
+                full = _text(value)
+                display = full
+                if field in ("Parent", "Inputs", "Outputs") and len(display) > 30:
+                    display = display[:14] + "…" + display[-12:]
+                elif len(display) > 42 and not any(ch.isspace() for ch in display):
+                    display = display[:20] + "…" + display[-18:]
+                field_label = QLabel(display)
+                field_label.setWordWrap(True)
+                field_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                field_label.setToolTip(full)
+                self.metadata_form.addRow(label, field_label)
 
     # ------------------------------------------------------------------
     # workflow tree
     # ------------------------------------------------------------------
-    def _fill_workflow(self, dataset_id: str, current_item_id: Optional[str]):
+    def _icon(self, name):
+        if name not in self._icons:
+            style = self.style()
+            mapping = {
+                "dataset": QStyle.SP_DirIcon,
+                "item": QStyle.SP_FileIcon,
+                "import": QStyle.SP_ArrowDown,
+                "run": QStyle.SP_MediaPlay,
+            }
+            self._icons[name] = style.standardIcon(mapping[name])
+        return self._icons[name]
+
+    def _fill_workflow(self, dataset_id: str, item_id: Optional[str] = None,
+                       run_id: Optional[str] = None):
         self.workflow_tree.clear()
+        self._item_nodes = {}
+        self._run_nodes = {}
         if not dataset_id:
             return
         dataset = self._get_dataset(dataset_id)
@@ -468,23 +709,23 @@ class InspectorPanel(QWidget):
             "DS",
         ])
         root.setData(0, Qt.UserRole, ("dataset", dataset_id))
+        root.setIcon(0, self._icon("dataset"))
         root.setExpanded(True)
         self.workflow_tree.addTopLevelItem(root)
 
-        item_nodes = {}
         for item in items:
-            item_id = _attr(item, "id", default="")
+            record_id = _attr(item, "id", default="")
             node = QTreeWidgetItem([
-                _attr(item, "loci_name", "name", default=item_id),
+                _attr(item, "loci_name", "name", default=record_id),
                 TYPE_SHORT.get(_attr(item, "item_type", "type", default=""), ""),
             ])
-            node.setData(0, Qt.UserRole, ("item", item_id))
+            node.setData(0, Qt.UserRole, ("item", record_id))
+            node.setIcon(0, self._icon("item"))
             node.setToolTip(0, _text(_attr(item, "file_path", "file", default=""), 500))
-            item_nodes[item_id] = node
+            self._item_nodes[record_id] = node
 
         store = self._get_store()
         import_nodes = {}
-        run_nodes = {}
         if store is not None:
             for record in store.index.imports.values():
                 if record.dataset_id != dataset_id:
@@ -494,6 +735,7 @@ class InspectorPanel(QWidget):
                     "IMP",
                 ])
                 node.setData(0, Qt.UserRole, ("import", record.id))
+                node.setIcon(0, self._icon("import"))
                 node.setToolTip(0, "\n".join(record.source_paths))
                 import_nodes[record.id] = node
                 root.addChild(node)
@@ -506,51 +748,53 @@ class InspectorPanel(QWidget):
                     "RUN",
                 ])
                 node.setData(0, Qt.UserRole, ("run", record.id))
+                node.setIcon(0, self._icon("run"))
                 node.setToolTip(0, "Status: %s" % record.status)
-                run_nodes[record.id] = node
+                self._run_nodes[record.id] = node
 
-        # Attach items under their producing run/import, then parent.
         for item in items:
-            item_id = _attr(item, "id", default="")
-            node = item_nodes[item_id]
-            run_id = _attr(item, "run_id", default=None)
+            record_id = _attr(item, "id", default="")
+            node = self._item_nodes[record_id]
+            producing_run = _attr(item, "run_id", default=None)
             import_id = _attr(item, "import_id", default=None)
             parent_id = _attr(item, "parent_id", default=None)
-            if run_id and run_id in run_nodes:
-                run_nodes[run_id].addChild(node)
+            if producing_run and producing_run in self._run_nodes:
+                self._run_nodes[producing_run].addChild(node)
             elif import_id and import_id in import_nodes:
                 import_nodes[import_id].addChild(node)
-            elif parent_id and parent_id in item_nodes:
-                item_nodes[parent_id].addChild(node)
+            elif parent_id and parent_id in self._item_nodes:
+                self._item_nodes[parent_id].addChild(node)
             else:
                 root.addChild(node)
 
-        # Attach each run under its first input, otherwise under the dataset.
         for record in (store.index.runs.values() if store is not None else []):
-            if record.id not in run_nodes:
+            if record.id not in self._run_nodes:
                 continue
-            node = run_nodes[record.id]
+            node = self._run_nodes[record.id]
             anchor = None
             for input_id in record.input_ids:
-                if input_id in item_nodes:
-                    anchor = item_nodes[input_id]
+                if input_id in self._item_nodes:
+                    anchor = self._item_nodes[input_id]
                     break
             if anchor is not None:
                 anchor.addChild(node)
             else:
                 root.addChild(node)
 
-        # Expand the useful top levels, but not hundreds of leaves.
-        for record in import_nodes.values():
-            record.setExpanded(record.childCount() <= 30)
-        for record in run_nodes.values():
-            record.setExpanded(record.childCount() <= 30)
+        for node in import_nodes.values():
+            node.setExpanded(node.childCount() <= 30)
+        for node in self._run_nodes.values():
+            node.setExpanded(node.childCount() <= 30)
 
-        if current_item_id and current_item_id in item_nodes:
-            current = item_nodes[current_item_id]
-            self.workflow_tree.setCurrentItem(current)
-            self.workflow_tree.scrollToItem(current)
-            self._bold_ancestors(current)
+        selected = None
+        if run_id and run_id in self._run_nodes:
+            selected = self._run_nodes[run_id]
+        elif item_id and item_id in self._item_nodes:
+            selected = self._item_nodes[item_id]
+        if selected is not None:
+            self.workflow_tree.setCurrentItem(selected)
+            self.workflow_tree.scrollToItem(selected)
+            self._bold_ancestors(selected)
         else:
             self.workflow_tree.setCurrentItem(root)
         self.workflow_tree.expandItem(root)
@@ -570,9 +814,13 @@ class InspectorPanel(QWidget):
             return
         kind, record_id = payload
         if kind == "item":
+            self.show_item(record_id)
             self.item_activated.emit(record_id)
         elif kind == "dataset":
+            self.show_dataset(record_id)
             self.dataset_activated.emit(record_id)
+        elif kind == "run":
+            self.show_run(record_id)
 
     def _on_tree_double_clicked(self, node, column):
         payload = node.data(0, Qt.UserRole)
@@ -586,16 +834,45 @@ class InspectorPanel(QWidget):
         return self._preview_kind(_attr(item, "item_type", "type", default="")) or ""
 
     # ------------------------------------------------------------------
-    # preview / jump
+    # operations
     # ------------------------------------------------------------------
-    def _on_preview(self):
-        if not self.current_item_id:
-            return
-        self.preview_requested.emit(self.current_item_id, self._kind_for_item(self.current_item_id))
-
     def _on_show(self):
         if self.current_item_id:
             self.item_activated.emit(self.current_item_id)
+
+    def _on_preview(self):
+        if not self.current_item_id:
+            return
+        self.preview_requested.emit(
+            self.current_item_id, self._kind_for_item(self.current_item_id)
+        )
+
+    def _view_command(self, run_id):
+        store = self._get_store()
+        run = store.get_run(run_id) if store is not None else None
+        if run is None:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Run command")
+        dialog.resize(720, 420)
+        layout = QVBoxLayout(dialog)
+        text = QPlainTextEdit()
+        text.setReadOnly(True)
+        lines = []
+        if run.command:
+            lines.append("$ " + " ".join(run.command))
+        else:
+            lines.append("(no command recorded)")
+        if run.parameters:
+            lines.append("")
+            lines.append("parameters:")
+            lines.append(json.dumps(run.parameters, indent=2, ensure_ascii=False))
+        text.setPlainText("\n".join(lines))
+        layout.addWidget(text)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec_()
 
     # ------------------------------------------------------------------
     # runs
@@ -624,14 +901,12 @@ class InspectorPanel(QWidget):
         run = self._run_for_item(item)
         siblings = self._siblings(item)
         if run is None:
-            # Root/imported data has no analysis run; do not treat every
-            # same-type root item as an alternative run.
             siblings = []
         else:
             siblings = [other for other in siblings if self._run_for_item(other) is not None]
             if not any(_attr(other, "id", default="") == _attr(item, "id", default="") for other in siblings):
                 siblings.insert(0, item)
-        self.run_group.setVisible(run is not None)
+        self.run_section.setVisible(run is not None)
 
         self.run_combo.blockSignals(True)
         self.run_combo.clear()
@@ -660,10 +935,12 @@ class InspectorPanel(QWidget):
             self.item_activated.emit(item_id)
 
     def _on_rename_run(self):
-        if not self.current_item_id:
-            return
-        item = self._get_item(self.current_item_id)
-        run = self._run_for_item(item) if item is not None else None
+        if self.current_item_id:
+            item = self._get_item(self.current_item_id)
+            run = self._run_for_item(item) if item is not None else None
+        else:
+            store = self._get_store()
+            run = store.get_run(self.current_run_id) if store is not None else None
         store = self._get_store()
         if run is None or store is None:
             return

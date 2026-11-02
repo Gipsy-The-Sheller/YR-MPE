@@ -141,6 +141,11 @@ def main() -> int:
         app.processEvents()
     panel.grab().save(str(out_dir / "01_inspector_item.png"))
 
+    panel.show_run(tree_item.run_id)
+    for _ in range(4):
+        app.processEvents()
+    panel.grab().save(str(out_dir / "03_inspector_edge.png"))
+
     panel.show_dataset(tree_item.dataset_id)
     for _ in range(4):
         app.processEvents()
@@ -149,6 +154,7 @@ def main() -> int:
     panel.close()
     print("wrote", out_dir / "01_inspector_item.png")
     print("wrote", out_dir / "02_inspector_dataset.png")
+    print("wrote", out_dir / "03_inspector_edge.png")
     return 0
 
 

@@ -143,6 +143,7 @@ class RunRecord:
     tool_version: str = ""
     command: List[str] = field(default_factory=list)
     parameters: Dict[str, Any] = field(default_factory=dict)
+    parameter_schema: Dict[str, Any] = field(default_factory=dict)
     input_ids: List[str] = field(default_factory=list)
     output_ids: List[str] = field(default_factory=list)
     status: str = "running"
@@ -502,6 +503,7 @@ class WorkspaceStore:
         name: Optional[str] = None,
         tool_version: str = "",
         parameters: Optional[Dict[str, Any]] = None,
+        parameter_schema: Optional[Dict[str, Any]] = None,
         command: Optional[Iterable[str]] = None,
         output_ids: Optional[Iterable[str]] = None,
         stream_id: Optional[str] = None,
@@ -521,6 +523,7 @@ class WorkspaceStore:
             tool_version=tool_version,
             command=list(command or []),
             parameters=parameters or {},
+            parameter_schema=parameter_schema or {},
             input_ids=list(input_ids),
             output_ids=list(output_ids or []),
             status="running",
