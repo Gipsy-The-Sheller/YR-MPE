@@ -48,6 +48,7 @@ from .methods.dataset_models import (
     ITEM_TYPE_CLOCK, SELECTION_STATE_NONE, SELECTION_STATE_GREEN,
     SELECTION_STATE_BLUE, SELECTION_STATE_RED
 )
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 
 # 导入工厂模式
 from ..factories import ResourceFactory, PluginFactory
@@ -1900,12 +1901,38 @@ class YR_MPEA_Widget(QWidget):
         try:
             entry = self.plugin_factory.get_orthofinder_plugin()
             window = entry.run(import_from="YR_MPEA", workdir=self.get_workdir())
+            self._connect_plugin_result(window)
             if not hasattr(self, "orthofinder_windows"):
                 self.orthofinder_windows = []
             self.orthofinder_windows.append(window)
             window.show()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open OrthoFinder: {str(e)}")
+
+    def _connect_plugin_result(self, window):
+        """Wire the standard result channel, when the plugin provides it."""
+        if hasattr(window, "result_ready"):
+            window.result_ready.connect(self.receive_plugin_result)
+
+    def receive_plugin_result(self, result):
+        """Import any plugin ResultSpec/DatasetSpec into the workspace."""
+        try:
+            dataset_ids = self.workspace.add_result_spec(result)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Dataset import failed",
+                "The plugin result could not be imported:\n\n%s" % e,
+            )
+            return
+
+        if not dataset_ids:
+            QMessageBox.warning(
+                self, "Dataset import",
+                "The plugin result contained no usable dataset items.",
+            )
+            return
+
+        self.workspace.current_dataset_id = dataset_ids[-1]
     
     def _check_workspace_required(self, plugin_name: str) -> bool:
         """
@@ -2774,97 +2801,322 @@ class SingleGeneWorkspace(QWidget):
         chain_button.clicked.connect(lambda: self.parent_window.open_minitracer_wrapper(chain_item=chain_item))
         self.grid_layout.addWidget(chain_button, 4, len(self.items["chains"])-1)
     
+    # ------------------------------------------------------------------
+    # standardized dataset import
+    # ------------------------------------------------------------------
+    def add_result_spec(self, result):
+        """Import a plugin result into this workspace.
+
+        Accepts ``ResultSpec``, ``DatasetSpec``, a legacy ``DatasetObject`` or
+        a list of legacy items. Returns the created dataset IDs.
+        """
+        if isinstance(result, ResultSpec):
+            specs = list(result.datasets)
+        elif isinstance(result, DatasetSpec):
+            specs = [result]
+        elif isinstance(result, (list, tuple)):
+            items = [self._legacy_item_to_spec(item) for item in result]
+            specs = [DatasetSpec(
+                name="Plugin Export",
+                items=[item for item in items if item],
+                source="plugin",
+            )]
+        else:
+            specs = [self._legacy_dataset_to_spec(result)]
+
+        dataset_ids = []
+        for spec in specs:
+            dataset_id = self.add_dataset_spec(spec)
+            if dataset_id:
+                dataset_ids.append(dataset_id)
+        return dataset_ids
+
+    def add_dataset_spec(self, spec):
+        """Convert a DatasetSpec into DatasetInfo/DatasetItem and show it."""
+        if not isinstance(spec, DatasetSpec):
+            raise TypeError("add_dataset_spec() expects a DatasetSpec")
+        problems = spec.validate()
+        if problems:
+            raise ValueError("; ".join(problems))
+
+        manager = self.dataset_selection_manager
+        if manager is None:
+            raise RuntimeError("Dataset selection manager is not available")
+
+        original_disable_auto_save = manager.disable_auto_save
+        manager.disable_auto_save = True
+        try:
+            dataset_info = None
+            if spec.dataset_id:
+                dataset_info = manager.get_dataset(spec.dataset_id)
+
+            if dataset_info is None:
+                dataset_id = manager.create_dataset(
+                    name=self._unique_dataset_name(spec.name),
+                    description=spec.description or "Imported from %s" % (spec.source or "plugin"),
+                    is_multigene=len(spec.items) > 1,
+                )
+                dataset_info = manager.get_dataset(dataset_id)
+            else:
+                dataset_id = dataset_info.id
+                if spec.description:
+                    dataset_info.description = spec.description
+
+            created = []
+            for index, item_spec in enumerate(spec.items):
+                item = DatasetItem(item_type=item_spec.item_type)
+                item.dataset_id = dataset_id
+                item.loci_name = item_spec.loci_name
+                item.name = item_spec.loci_name
+                item.file_path = item_spec.file_path
+                item.format = item_spec.format
+                item.is_aligned = item_spec.is_aligned
+                item.length = item_spec.length
+                item.sequence_count = item_spec.sequence_count
+                item.sequences = list(item_spec.sequences)
+                item.data = dict(item_spec.data)
+                item.metadata = dict(item_spec.metadata)
+                item.ownership_uuid = str(uuid.uuid4())
+                item.selection_state = (
+                    SELECTION_STATE_GREEN if item_spec.selected else SELECTION_STATE_NONE
+                )
+                created.append((index, item_spec, item))
+
+            # Parent links refer to positions in spec.items.
+            for index, item_spec, item in created:
+                parent_index = item_spec.parent_index
+                if parent_index is not None and 0 <= parent_index < len(created):
+                    item.parent_id = created[parent_index][2].id
+
+            added = []
+            for index, item_spec, item in created:
+                if not item.sequences and item.file_path and os.path.exists(item.file_path):
+                    try:
+                        item.sequences = list(SeqIO.parse(item.file_path, item.format or "fasta"))
+                    except Exception:
+                        item.sequences = []
+                if item.sequences and not item.sequence_count:
+                    item.sequence_count = len(item.sequences)
+                if item.sequences and not item.length:
+                    try:
+                        item.length = max(len(str(record.seq)) for record in item.sequences)
+                    except Exception:
+                        item.length = 0
+
+                if not manager.add_item(item, dataset_id):
+                    continue
+                added.append((index, item_spec, item))
+
+            if not added:
+                manager.delete_dataset(dataset_id)
+                raise ValueError("No dataset item passed validation")
+
+            settings_items = []
+            for index, item_spec, item in added:
+                entry = item_spec.to_settings_dict()
+                entry["id"] = item.id
+                entry["parent_id"] = item.parent_id or ""
+                settings_items.append(entry)
+
+            dataset_info.settings["dataset_items"] = settings_items
+            dataset_info.settings["summary"] = dict(spec.summary)
+            dataset_info.settings["source"] = spec.source
+            dataset_info.settings["metadata"] = dict(spec.metadata)
+            if spec.partition_scheme:
+                dataset_info.settings["partition_scheme"] = spec.partition_scheme
+            dataset_info.is_multigene = len(added) > 1
+            dataset_info.loci_count = len(added)
+            dataset_info.taxa_count = max(
+                (item.sequence_count for _, _, item in added), default=0
+            )
+        finally:
+            manager.disable_auto_save = original_disable_auto_save
+
+        manager._save_state()
+        self._add_dataset_button(dataset_info)
+        return dataset_id
+
     def add_dataset(self, dataset):
-        """添加数据集到工作区"""
-        # add a dataset to items["datasets"]
-        self.items["datasets"].append(dataset)
-        
-        # 确保grid_layout存在
-        if not hasattr(self, 'grid_layout'):
-            # disable hint label
+        """Backward-compatible entry point used by SeqDBG/SeqMatrix."""
+        if isinstance(dataset, DatasetSpec):
+            return self.add_dataset_spec(dataset)
+        if isinstance(dataset, ResultSpec):
+            ids = self.add_result_spec(dataset)
+            return ids[-1] if ids else None
+        if isinstance(dataset, DatasetInfo):
+            self._add_dataset_button(dataset)
+            return dataset.id
+
+        spec = self._legacy_dataset_to_spec(dataset)
+        if not spec.items:
+            # Keep the old metadata-only behavior for callers that add an
+            # empty dataset first and populate it later.
+            manager = self.dataset_selection_manager
+            if manager is None:
+                return None
+            dataset_id = manager.create_dataset(
+                name=self._unique_dataset_name(spec.name),
+                description=spec.description,
+                is_multigene=False,
+            )
+            dataset_info = manager.get_dataset(dataset_id)
+            dataset_info.settings["source"] = spec.source
+            dataset_info.settings["summary"] = dict(spec.summary)
+            self._add_dataset_button(dataset_info)
+            return dataset_id
+
+        return self.add_dataset_spec(spec)
+
+    def _legacy_item_to_spec(self, item):
+        """Normalize an old DatasetItem/TempDatasetItem into DatasetItemSpec."""
+        if isinstance(item, DatasetItemSpec):
+            return item
+        if item is None:
+            return None
+
+        sequences = list(getattr(item, "sequences", []) or [])
+        is_aligned = bool(getattr(item, "is_aligned", False))
+        item_type = getattr(item, "item_type", "") or (
+            ITEM_TYPE_ALIGNMENT if is_aligned else ITEM_TYPE_SEQUENCE
+        )
+        return DatasetItemSpec(
+            loci_name=getattr(item, "loci_name", "") or getattr(item, "name", ""),
+            item_type=item_type,
+            sequences=sequences,
+            file_path=getattr(item, "file_path", "") or "",
+            format=getattr(item, "format", "") or "fasta",
+            is_aligned=is_aligned,
+            length=int(getattr(item, "length", 0) or 0),
+            sequence_count=int(getattr(item, "sequence_count", 0) or 0),
+            data=dict(getattr(item, "data", {}) or {}),
+            metadata=dict(getattr(item, "metadata", {}) or {}),
+            selected=bool(getattr(item, "selected", False)),
+        )
+
+    def _legacy_dataset_to_spec(self, dataset):
+        """Normalize an old DatasetObject into DatasetSpec."""
+        old_items = list(getattr(dataset, "items", []) or [])
+        items = [self._legacy_item_to_spec(item) for item in old_items]
+        return DatasetSpec(
+            name=getattr(dataset, "dataset_name", None) or getattr(dataset, "name", "Imported Dataset"),
+            items=[item for item in items if item],
+            description=getattr(dataset, "description", "") or "",
+            source="legacy",
+            partition_scheme=getattr(dataset, "partition_scheme", None),
+            summary=dict(getattr(dataset, "summary", {}) or {}),
+        )
+
+    def _unique_dataset_name(self, name):
+        manager = self.dataset_selection_manager
+        existing = {dataset.name for dataset in manager.get_all_datasets()} if manager else set()
+        if name not in existing:
+            return name
+        index = 2
+        while "%s (%d)" % (name, index) in existing:
+            index += 1
+        return "%s (%d)" % (name, index)
+
+    def _add_dataset_button(self, dataset_info):
+        """Create the workspace control for one DatasetInfo."""
+        if not hasattr(self, "grid_layout"):
             self.workspace_hint.setVisible(False)
-            # add a grid layout
             self.grid_widget = QWidget()
             self.grid_layout = QGridLayout()
             self.grid_widget.setLayout(self.grid_layout)
             self.main_layout.addWidget(self.grid_widget)
             self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        
-        # 创建或获取 DatasetInfo
-        dataset_name = getattr(dataset, 'dataset_name', 'Unnamed Dataset')
-        
-        # 检查是否已经有这个数据集在管理器中
-        dataset_info = None
-        dataset_id = None
-        if self.dataset_selection_manager:
-            # 查找是否已存在同名数据集
-            for ds in self.dataset_selection_manager.get_all_datasets():
-                if ds.name == dataset_name:
-                    dataset_info = ds
-                    dataset_id = ds.id
-                    break
-        
-        # 如果不存在，创建新的数据集
-        if not dataset_info and self.dataset_selection_manager:
-            is_multigene = hasattr(dataset, 'items') and len(dataset.items) > 1
-            dataset_id = self.dataset_selection_manager.create_dataset(
-                name=dataset_name,
-                description=f"Dataset created from {dataset_name}",
-                is_multigene=is_multigene
-            )
-            dataset_info = self.dataset_selection_manager.get_dataset(dataset_id)
-            
-            # 如果有 items，添加到数据集
-            if hasattr(dataset, 'items') and dataset.items:
-                for item in dataset.items:
-                    # 这里需要将旧格式的 item 转换为 DatasetItem
-                    # 暂时跳过，因为需要更复杂的转换逻辑
-                    pass
-        
-        # 保存 dataset_id 到 dataset 对象中，以便后续使用
-        if dataset_id:
-            if isinstance(dataset, dict):
-                dataset['dataset_id'] = dataset_id
-            else:
-                setattr(dataset, 'dataset_id', dataset_id)
-        
-        # 创建 DatasetButton
-        if dataset_info:
-            dataset_button = DatasetButton(dataset_info, parent=self)
-            dataset_button.clicked_single.connect(self._on_dataset_click)
-            # 双击事件需要适配参数：DatasetButton 传递 dataset_id，但 _on_dataset_double_click 期望 button, event
-            dataset_button.clicked_double.connect(lambda dataset_id: self._on_dataset_double_click_by_id(dataset_id))
-        else:
-            # 如果没有数据集信息，使用普通按钮（向后兼容）
-            dataset_button = QToolButton()
-        
-        # 设置图标
+
+        if not hasattr(self, "dataset_summary"):
+            self.dataset_summary = QLabel("")
+            self.dataset_summary.setWordWrap(True)
+            self.dataset_summary.setStyleSheet("color: palette(mid);")
+            self.main_layout.addWidget(self.dataset_summary)
+
+        for button in self.item_buttons.get("datasets", []):
+            if getattr(button, "dataset", None) is dataset_info:
+                return button
+
+        dataset_button = DatasetButton(dataset_info, parent=self)
+        dataset_button.clicked_single.connect(self._on_dataset_click)
+        dataset_button.clicked_double.connect(
+            lambda dataset_id: self._on_dataset_double_click_by_id(dataset_id)
+        )
+
         if self.resource_factory:
             icon = self.resource_factory.get_icon("file/dataset.svg")
             if icon:
                 dataset_button.setIcon(icon)
                 dataset_button.setIconSize(QSize(45, 45))
-        
-        # 设置 tooltip
-        if hasattr(dataset, 'dataset_name'):
-            dataset_button.setToolTip(f"Dataset: {dataset.dataset_name}")
-        
-        # Dataset数据项与 alignments 放在同一行（第0行），因为它们在所有权机制上是并列的
-        dataset_row = 0
-        
-        # 存储按钮引用
-        if "datasets" not in self.item_buttons:
-            self.item_buttons["datasets"] = []
-        self.item_buttons["datasets"].append(dataset_button)
-        
-        # 添加到网格布局
-        # Dataset 的列号从 alignments 数量开始，避免与 alignments 重叠
+
+        details = ["Dataset: %s" % dataset_info.name]
+        if dataset_info.loci_count:
+            details.append("%d loci" % dataset_info.loci_count)
+        if dataset_info.taxa_count:
+            details.append("%d taxa" % dataset_info.taxa_count)
+        source = self._dataset_source_label(dataset_info)
+        if source:
+            details.append("source: %s" % source)
+        dataset_button.setToolTip(" · ".join(details))
+
+        dataset_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        dataset_button.customContextMenuRequested.connect(
+            lambda pos, ds=dataset_info, btn=dataset_button: self._show_dataset_context_menu(ds, btn, pos)
+        )
+
+        self.item_buttons.setdefault("datasets", []).append(dataset_button)
+        if dataset_info not in self.items["datasets"]:
+            self.items["datasets"].append(dataset_info)
         dataset_col = len(self.item_buttons.get("alignments", [])) + len(self.item_buttons["datasets"]) - 1
-        self.grid_layout.addWidget(dataset_button, dataset_row, dataset_col)
-        
-        # 存储dataset引用到按钮上，便于后续访问
-        dataset_button.dataset_ref = dataset
-    
+        self.grid_layout.addWidget(dataset_button, 0, dataset_col)
+        dataset_button.dataset_ref = dataset_info
+        self._update_dataset_summary(dataset_info)
+        return dataset_button
+
+    def _dataset_source_label(self, dataset_info):
+        source = dataset_info.settings.get("source", "")
+        return {
+            "one_step_orthofinder": "One-Step OrthoFinder",
+            "legacy": "legacy import",
+        }.get(source, source)
+
+    def _update_dataset_summary(self, dataset_info):
+        if not hasattr(self, "dataset_summary"):
+            return
+        parts = ["Dataset: %s" % dataset_info.name]
+        if dataset_info.loci_count:
+            parts.append("%d loci × %d taxa" % (dataset_info.loci_count, dataset_info.taxa_count))
+        source = self._dataset_source_label(dataset_info)
+        if source:
+            parts.append("source: %s" % source)
+        self.dataset_summary.setText(" · ".join(parts))
+        self.dataset_summary.setVisible(True)
+
+    def _show_dataset_context_menu(self, dataset_info, button, pos):
+        menu = QMenu(self)
+        open_action = menu.addAction("Open Dataset Manager")
+        open_action.triggered.connect(
+            lambda: self._on_dataset_double_click_by_id(dataset_info.id)
+        )
+        summary_action = menu.addAction("Show summary")
+        summary_action.triggered.connect(lambda: self._show_dataset_summary(dataset_info))
+        menu.exec_(button.mapToGlobal(pos))
+
+    def _show_dataset_summary(self, dataset_info):
+        lines = [
+            "Name: %s" % dataset_info.name,
+            "Source: %s" % dataset_info.settings.get("source", "unknown"),
+            "Loci: %d" % dataset_info.loci_count,
+            "Max taxa: %d" % dataset_info.taxa_count,
+        ]
+        description = dataset_info.description
+        if description:
+            lines.append("Description: %s" % description)
+        for key, value in dataset_info.settings.get("summary", {}).items():
+            lines.append("%s: %s" % (key, value))
+        for key, value in dataset_info.settings.get("metadata", {}).items():
+            lines.append("%s: %s" % (key, value))
+        QMessageBox.information(self, "Dataset summary", "\n".join(lines))
+
     def _on_dataset_click(self, dataset_id: str):
         """处理数据集单击事件"""
         if not self.dataset_selection_manager:
@@ -2874,7 +3126,9 @@ class SingleGeneWorkspace(QWidget):
         dataset_info = self.dataset_selection_manager.get_dataset(dataset_id)
         if not dataset_info:
             return
-        
+
+        self._update_dataset_summary(dataset_info)
+
         # 切换数据集的选择状态
         if dataset_info.selection_state == SELECTION_STATE_GREEN:
             # 如果当前是绿色，取消选择（设为无色）
@@ -2940,7 +3194,11 @@ class SingleGeneWorkspace(QWidget):
         self.grid_widget.setLayout(self.grid_layout)
         self.main_layout.addWidget(self.grid_widget)
         self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        
+
+        # Reset button references; the widgets above were deleted.
+        for key in self.item_buttons:
+            self.item_buttons[key] = []
+
         # 重新添加所有项目
         # 添加alignments
         for i, alignment in enumerate(self.items["alignments"]):
@@ -2950,6 +3208,7 @@ class SingleGeneWorkspace(QWidget):
             alignment_button.setIconSize(QSize(45, 45))
             alignment_button.clicked.connect(lambda checked, seq=alignment: self.view_alignment(seq))
             self.grid_layout.addWidget(alignment_button, 0, i)
+            self.item_buttons["alignments"].append(alignment_button)
         
         # 添加models
         for i, model in enumerate(self.items["models"]):
@@ -2960,6 +3219,7 @@ class SingleGeneWorkspace(QWidget):
             model_button.setToolTip(f"Substitution Model: {getattr(model, 'model_name', 'Unknown Model')}")
             model_button.clicked.connect(lambda checked, m=model: self.view_model_result(m))
             self.grid_layout.addWidget(model_button, 1, i)
+            self.item_buttons["models"].append(model_button)
         
         # 添加distances
         for i, distance in enumerate(self.items["distances"]):
@@ -2970,6 +3230,7 @@ class SingleGeneWorkspace(QWidget):
             distance_button.setToolTip(f"Pairwise Distance Matrix")
             distance_button.clicked.connect(lambda checked, d=distance: self.view_distance_matrix(d))
             self.grid_layout.addWidget(distance_button, 2, i)
+            self.item_buttons["distances"].append(distance_button)
         
         # 添加phylogenies
         for i, phylogeny in enumerate(self.items["phylogenies"]):
@@ -2980,6 +3241,7 @@ class SingleGeneWorkspace(QWidget):
             phylogeny_button.setToolTip(f"Phylogenetic Tree")
             phylogeny_button.clicked.connect(self.open_icytree_wrapper)
             self.grid_layout.addWidget(phylogeny_button, 3, i)
+            self.item_buttons["phylogenies"].append(phylogeny_button)
         
         # 添加chains
         for i, chain in enumerate(self.items["chains"]):
@@ -2991,27 +3253,13 @@ class SingleGeneWorkspace(QWidget):
             chain_button.setToolTip(tooltip_text)
             chain_button.clicked.connect(lambda checked, c=chain: self.open_minitracer_wrapper(chain_item=c))
             self.grid_layout.addWidget(chain_button, 4, i)
+            self.item_buttons["chains"].append(chain_button)
         
-        # 添加datasets
-        for i, dataset in enumerate(self.items["datasets"]):
-            dataset_icon = self.resource_factory.get_icon("file/dataset.svg")
-            dataset_button = QToolButton()
-            dataset_button.setIcon(dataset_icon)
-            dataset_button.setIconSize(QSize(45, 45))
-            dataset_button.setToolTip(f"Dataset: {getattr(dataset, 'dataset_name', 'Unnamed Dataset')}")
-            dataset_row = 0  # Dataset与alignments放在同一行（第0行）
-            
-            # 实现单击选中，双击查看的交互逻辑
-            dataset_button.doubleClicked = False
-            dataset_button.mousePressEvent = lambda event, btn=dataset_button: self._on_dataset_mouse_press(btn, event)
-            dataset_button.mouseReleaseEvent = lambda event, btn=dataset_button, ds=dataset: self._on_dataset_mouse_release(btn, ds, event)
-            dataset_button.mouseDoubleClickEvent = lambda event, btn=dataset_button: self._on_dataset_double_click(btn, event)
-            
-            # Dataset 的列号从 alignments 数量开始，避免与 alignments 重叠
-            dataset_col = len(self.items["alignments"]) + i
-            self.grid_layout.addWidget(dataset_button, dataset_row, dataset_col)
-            # 存储dataset引用到按钮上，便于后续访问
-            dataset_button.dataset_ref = dataset
+        # 添加datasets（统一使用 DatasetButton 控件）
+        self.item_buttons["datasets"] = []
+        for dataset in list(self.items["datasets"]):
+            if isinstance(dataset, DatasetInfo):
+                self._add_dataset_button(dataset)
     
     def _on_dataset_mouse_press(self, button, event):
         """Dataset按钮鼠标按下事件"""

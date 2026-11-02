@@ -8,6 +8,8 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Set, Tuple
 from collections import deque
 
+from Bio import SeqIO
+
 from .dataset_models import (
     DatasetItem, DatasetInfo, SelectionNode,
     ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT, ITEM_TYPE_MODEL,
@@ -452,6 +454,34 @@ class DatasetSelectionManager:
         with open(state_file, 'w', encoding='utf-8') as f:
             json.dump(state, f, indent=2, ensure_ascii=False)
     
+    def _hydrate_item_sequences(self, item: DatasetItem):
+        """Restore sequences from file_path after loading workspace state."""
+        if item.sequences or not item.file_path or not os.path.exists(item.file_path):
+            return
+        file_format = item.format
+        if not file_format:
+            ext = os.path.splitext(item.file_path)[1].lower()
+            file_format = {
+                ".fna": "fasta", ".fa": "fasta", ".fas": "fasta", ".fasta": "fasta",
+                ".phy": "phylip", ".nex": "nexus", ".nexus": "nexus",
+            }.get(ext, "")
+        if not file_format:
+            return
+        try:
+            records = list(SeqIO.parse(item.file_path, file_format))
+        except Exception:
+            return
+        if not records:
+            return
+        item.sequences = records
+        if not item.sequence_count:
+            item.sequence_count = len(records)
+        if not item.length:
+            try:
+                item.length = max(len(str(record.seq)) for record in records)
+            except Exception:
+                pass
+
     def _load_state(self):
         """从文件加载状态"""
         if not self.workspace_path:
@@ -482,16 +512,22 @@ class DatasetSelectionManager:
                 for dataset_id, dataset in self.datasets.items():
                     if 'dataset_items' in dataset.settings:
                         saved_items = dataset.settings['dataset_items']
-                        from .dataset_models import ITEM_TYPE_ALIGNMENT
+                        from .dataset_models import ITEM_TYPE_ALIGNMENT, ALL_ITEM_TYPES
                         for item_data in saved_items:
                             # 创建新的DatasetItem
-                            new_item = DatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
+                            item_type = item_data.get('item_type', ITEM_TYPE_ALIGNMENT)
+                            if item_type not in ALL_ITEM_TYPES:
+                                item_type = ITEM_TYPE_ALIGNMENT
+                            new_item = DatasetItem(item_type=item_type)
                             new_item.dataset_id = dataset_id
                             new_item.loci_name = item_data.get('loci_name', '')
                             new_item.file_path = item_data.get('file_path', '')
                             new_item.length = item_data.get('length', 0)
                             new_item.sequence_count = item_data.get('sequence_count', 0)
                             new_item.is_aligned = item_data.get('is_aligned', False)
+                            new_item.format = item_data.get('format', '')
+                            new_item.data = item_data.get('data', {}) or {}
+                            new_item.metadata = item_data.get('metadata', {}) or {}
                             
                             # 设置选择状态
                             if item_data.get('selected', False):
@@ -506,6 +542,10 @@ class DatasetSelectionManager:
                             # 添加到dataset.items
                             dataset.add_item(new_item.id)
                             
+
+            # 序列没有写进 JSON；打开工作区时从 file_path 恢复。
+            for item in self.items.values():
+                self._hydrate_item_sequences(item)
 
             # 加载选中项（如果JSON中有）
             if "selected_items" in state:

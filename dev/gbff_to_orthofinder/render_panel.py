@@ -91,8 +91,11 @@ def main() -> int:
     app.processEvents()
     plugin.grab().save(str(out_dir / "03_review.png"))
 
-    # Output tab with sample results
+    # Output tab with sample results (simulate a YR-MPEA host connection so
+    # the export control is visible in the screenshot).
     plugin.tab_widget.setCurrentIndex(1)
+    plugin._opened_from_yrmpea = True
+    plugin.result_ready.connect(lambda result: None)
     plugin.update_results({
         "species": 4,
         "cds": 335,

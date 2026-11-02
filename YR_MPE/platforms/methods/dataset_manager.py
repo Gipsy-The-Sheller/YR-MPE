@@ -16,7 +16,10 @@ from Bio import SeqIO
 # 添加新的导入
 from .export_partitioned_nexus import export_partitioned_nexus
 from .import_partitioned_nexus import import_partitioned_nexus
-from .dataset_models import SELECTION_STATE_GREEN, SELECTION_STATE_NONE
+from .dataset_models import (
+    SELECTION_STATE_GREEN, SELECTION_STATE_NONE,
+    ITEM_TYPE_ALIGNMENT, ITEM_TYPE_SEQUENCE, ALL_ITEM_TYPES,
+)
 
 
 class DatasetItem:
@@ -31,6 +34,10 @@ class DatasetItem:
         self.file_path = ""           # 原始文件路径
         self.sequences = []           # 序列数据
         self.name = ""                # 添加name属性以兼容Sequence Viewer
+        self.item_type = "alignment"  # 数据类型（sequence/alignment/...）
+        self.format = ""              # 文件格式
+        self.data = {}                # 类型特定数据
+        self.metadata = {}            # 额外元数据
         
     def __str__(self):
         return f"DatasetItem(loci_name={self.loci_name}, length={self.length}, count={self.sequence_count})"
@@ -234,11 +241,14 @@ class DatasetManager(QDialog):
         original_disable_auto_save = self.workspace.dataset_selection_manager.disable_auto_save
         self.workspace.dataset_selection_manager.disable_auto_save = True
         
-        from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT
-        
+        from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT, ALL_ITEM_TYPES
+
         if 'dataset_items' in dataset.settings:
             for item_data in saved_items:
                 # 创建 DatasetItem（本地类）
+                item_type = item_data.get('item_type', ITEM_TYPE_ALIGNMENT)
+                if item_type not in ALL_ITEM_TYPES:
+                    item_type = ITEM_TYPE_ALIGNMENT
                 item = DatasetItem()
                 item.selected = item_data.get('selected', False)
                 item.loci_name = item_data.get('loci_name', '')
@@ -247,6 +257,10 @@ class DatasetManager(QDialog):
                 item.is_aligned = item_data.get('is_aligned', False)
                 item.file_path = item_data.get('file_path', '')
                 item.name = item.loci_name
+                item.item_type = item_type
+                item.format = item_data.get('format', '')
+                item.data = item_data.get('data', {}) or {}
+                item.metadata = item_data.get('metadata', {}) or {}
                 
                 # 处理序列数据
                 sequences_data = item_data.get('sequences')
@@ -292,13 +306,16 @@ class DatasetManager(QDialog):
                             self.workspace.dataset_selection_manager.selected_items.remove(existing_item.id)
                 else:
                     # 创建新格式的DatasetItem并添加到Dataset Selection Manager
-                    new_item = NewDatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
+                    new_item = NewDatasetItem(item_type=item.item_type)
                     new_item.dataset_id = dataset_id
                     new_item.loci_name = item.loci_name
                     new_item.file_path = item.file_path
                     new_item.length = item.length
                     new_item.sequence_count = item.sequence_count
                     new_item.is_aligned = item.is_aligned
+                    new_item.format = item.format
+                    new_item.data = dict(item.data)
+                    new_item.metadata = dict(item.metadata)
                     
                     # 转换序列数据
                     if hasattr(item, 'sequences') and item.sequences:
@@ -319,6 +336,24 @@ class DatasetManager(QDialog):
         """Topology链接状态切换时的处理"""
         self.edge_settings_widget.setEnabled(checked)
         
+    def _make_selection_item(self, item, dataset_id):
+        """Convert a local DatasetItem into the selection-manager model."""
+        from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT
+
+        new_item = NewDatasetItem(item_type=getattr(item, "item_type", ITEM_TYPE_ALIGNMENT))
+        new_item.dataset_id = dataset_id
+        new_item.loci_name = item.loci_name
+        new_item.file_path = item.file_path
+        new_item.length = item.length
+        new_item.sequence_count = item.sequence_count
+        new_item.is_aligned = item.is_aligned
+        new_item.sequences = list(getattr(item, "sequences", []) or [])
+        new_item.format = getattr(item, "format", "")
+        new_item.data = dict(getattr(item, "data", {}) or {})
+        new_item.metadata = dict(getattr(item, "metadata", {}) or {})
+        new_item.selection_state = SELECTION_STATE_NONE
+        return new_item
+
     def add_datasets(self):
         """添加新的序列数据集"""
         file_dialog = QFileDialog()
@@ -340,16 +375,7 @@ class DatasetManager(QDialog):
                         if self.workspace and self.workspace.dataset_selection_manager and hasattr(self.workspace, 'current_dataset_id'):
                             dataset_id = self.workspace.current_dataset_id
                             if dataset_id:
-                                from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT
-                                new_item = NewDatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
-                                new_item.dataset_id = dataset_id
-                                new_item.loci_name = dataset_item.loci_name
-                                new_item.file_path = dataset_item.file_path
-                                new_item.length = dataset_item.length
-                                new_item.sequence_count = dataset_item.sequence_count
-                                new_item.is_aligned = dataset_item.is_aligned
-                                new_item.sequences = dataset_item.sequences
-                                new_item.selection_state = SELECTION_STATE_NONE  # 初始状态为NONE
+                                new_item = self._make_selection_item(dataset_item, dataset_id)
                                 
                                 # 添加到manager
                                 success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
@@ -407,7 +433,9 @@ class DatasetManager(QDialog):
         else:
             # 长度不同，肯定未比对
             item.is_aligned = False
-        
+
+        item.item_type = ITEM_TYPE_ALIGNMENT if item.is_aligned else ITEM_TYPE_SEQUENCE
+        item.format = file_format
         return item
         
     def add_dataset_to_table(self, item: DatasetItem):
@@ -607,16 +635,7 @@ class DatasetManager(QDialog):
                         if self.workspace and self.workspace.dataset_selection_manager and hasattr(self.workspace, 'current_dataset_id'):
                             dataset_id = self.workspace.current_dataset_id
                             if dataset_id:
-                                from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT
-                                new_item = NewDatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
-                                new_item.dataset_id = dataset_id
-                                new_item.loci_name = item.loci_name
-                                new_item.file_path = item.file_path
-                                new_item.length = item.length
-                                new_item.sequence_count = item.sequence_count
-                                new_item.is_aligned = item.is_aligned
-                                new_item.sequences = item.sequences
-                                new_item.selection_state = SELECTION_STATE_NONE
+                                new_item = self._make_selection_item(item, dataset_id)
                                 
                                 # 添加到manager
                                 success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
@@ -630,16 +649,7 @@ class DatasetManager(QDialog):
                         if self.workspace and self.workspace.dataset_selection_manager and hasattr(self.workspace, 'current_dataset_id'):
                             dataset_id = self.workspace.current_dataset_id
                             if dataset_id:
-                                from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT
-                                new_item = NewDatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
-                                new_item.dataset_id = dataset_id
-                                new_item.loci_name = item.loci_name
-                                new_item.file_path = item.file_path
-                                new_item.length = item.length
-                                new_item.sequence_count = item.sequence_count
-                                new_item.is_aligned = item.is_aligned
-                                new_item.sequences = item.sequences
-                                new_item.selection_state = SELECTION_STATE_NONE
+                                new_item = self._make_selection_item(item, dataset_id)
                                 
                                 # 添加到manager
                                 success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
@@ -656,17 +666,8 @@ class DatasetManager(QDialog):
                     if self.workspace and self.workspace.dataset_selection_manager and hasattr(self.workspace, 'current_dataset_id'):
                         dataset_id = self.workspace.current_dataset_id
                         if dataset_id:
-                            from .dataset_models import DatasetItem as NewDatasetItem, ITEM_TYPE_ALIGNMENT
-                            new_item = NewDatasetItem(item_type=ITEM_TYPE_ALIGNMENT)
-                            new_item.dataset_id = dataset_id
-                            new_item.loci_name = item.loci_name
-                            new_item.file_path = item.file_path
-                            new_item.length = item.length
-                            new_item.sequence_count = item.sequence_count
-                            new_item.is_aligned = item.is_aligned
-                            new_item.sequences = item.sequences
-                            new_item.selection_state = SELECTION_STATE_NONE
-                            
+                            new_item = self._make_selection_item(item, dataset_id)
+
                             # 添加到manager
                             success = self.workspace.dataset_selection_manager.add_item(new_item, dataset_id)
 
@@ -1002,20 +1003,26 @@ class DatasetManager(QDialog):
                         # 保存到 settings（保留向后兼容）
                         dataset.settings['dataset_items'] = []
                         for item in self.dataset_items:
+                            # 公共字段：保留 item_type/data/metadata，避免重新
+                            # 打开 Dataset Manager 时退化为 alignment。
+                            item_data = {
+                                'selected': item.selected,
+                                'loci_name': item.loci_name,
+                                'item_type': getattr(item, 'item_type', ITEM_TYPE_ALIGNMENT),
+                                'length': item.length,
+                                'sequence_count': item.sequence_count,
+                                'is_aligned': item.is_aligned,
+                                'file_path': item.file_path,
+                                'format': getattr(item, 'format', ''),
+                                'data': getattr(item, 'data', {}) or {},
+                                'metadata': getattr(item, 'metadata', {}) or {},
+                            }
+
                             # 如果有文件路径且文件存在，只保存文件路径
                             # 否则保存序列数据
                             if item.file_path and os.path.exists(item.file_path):
-                                item_data = {
-                                    'selected': item.selected,
-                                    'loci_name': item.loci_name,
-                                    'length': item.length,
-                                    'sequence_count': item.sequence_count,
-                                    'is_aligned': item.is_aligned,
-                                    'file_path': item.file_path,
-                                    'sequences': None  # 从文件加载
-                                }
+                                item_data['sequences'] = None  # 从文件加载
                             else:
-                                # 没有文件路径或文件不存在，保存序列数据
                                 sequences_dict = []
                                 if hasattr(item, 'sequences') and item.sequences:
                                     for seq in item.sequences:
@@ -1024,16 +1031,7 @@ class DatasetManager(QDialog):
                                             'description': getattr(seq, 'description', ''),
                                             'sequence': str(seq.seq) if hasattr(seq, 'seq') else str(seq)
                                         })
-
-                                item_data = {
-                                    'selected': item.selected,
-                                    'loci_name': item.loci_name,
-                                    'length': item.length,
-                                    'sequence_count': item.sequence_count,
-                                    'is_aligned': item.is_aligned,
-                                    'file_path': item.file_path,
-                                    'sequences': sequences_dict  # 保存序列数据
-                                }
+                                item_data['sequences'] = sequences_dict
 
                             dataset.settings['dataset_items'].append(item_data)
 

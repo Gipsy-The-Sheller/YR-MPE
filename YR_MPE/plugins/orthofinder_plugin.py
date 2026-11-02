@@ -57,6 +57,7 @@ from PyQt5.QtWidgets import (
 
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from .components.methods.gbff_utils import parse_folder, write_dataset
 from .components.methods.orthogroup_utils import (
     derive_single_copy_ids,
@@ -324,6 +325,7 @@ class OrthoFinderPlugin(BasePlugin):
     def __init__(self, import_from=None, import_data=None, **kwargs):
         self._last_summary = None
         self.analysis_thread = None
+        self._opened_from_yrmpea = import_from == "YR_MPEA"
         super().__init__(import_from, import_data, **kwargs)
         self.run_button.setText("Run pipeline")
 
@@ -361,7 +363,7 @@ class OrthoFinderPlugin(BasePlugin):
         layout.addWidget(title)
 
         subtitle = QLabel("GBFF/GB → CDS/AA → OrthoFinder → single-copy orthogroups → CDS")
-        subtitle.setStyleSheet("color: #555;")
+        subtitle.setStyleSheet("color: palette(mid);")
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
 
@@ -423,7 +425,7 @@ class OrthoFinderPlugin(BasePlugin):
 
         self.scan_label = QLabel("No folder selected.")
         self.scan_label.setWordWrap(True)
-        self.scan_label.setStyleSheet("color: #666;")
+        self.scan_label.setStyleSheet("color: palette(mid);")
         scan_row = QHBoxLayout()
         scan_row.addWidget(self.scan_label, 1)
         self.scan_button = QPushButton("Scan folder")
@@ -476,7 +478,7 @@ class OrthoFinderPlugin(BasePlugin):
             "present; otherwise the CDS is translated with the selected genetic code."
         )
         self.tip_label.setWordWrap(True)
-        self.tip_label.setStyleSheet("color: #666;")
+        self.tip_label.setStyleSheet("color: palette(mid);")
         layout.addWidget(self.tip_label)
         layout.addStretch()
         return page
@@ -560,7 +562,7 @@ class OrthoFinderPlugin(BasePlugin):
             "Parse only writes proteomes + CDS + cds_map and does not require OrthoFinder."
         )
         self.mode_hint.setWordWrap(True)
-        self.mode_hint.setStyleSheet("color: #666;")
+        self.mode_hint.setStyleSheet("color: palette(mid);")
         mode_layout.addWidget(self.mode_hint)
         layout.addWidget(mode_group)
         layout.addStretch()
@@ -585,7 +587,7 @@ class OrthoFinderPlugin(BasePlugin):
             "Long runs are non-modal; watch the Console tab."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("color: #555;")
+        note.setStyleSheet("color: palette(mid);")
         layout.addWidget(note)
         layout.addStretch()
         return page
@@ -604,7 +606,7 @@ class OrthoFinderPlugin(BasePlugin):
                 label.setStyleSheet("color: #1565c0; font-weight: 600; border-bottom: 2px solid #1565c0;")
             else:
                 label.setText(f"○ {i + 1} " + ("Input", "OrthoFinder", "Review")[i])
-                label.setStyleSheet("color: #777;")
+                label.setStyleSheet("color: palette(mid);")
         self.back_button.setEnabled(index > 0)
         if index == 0:
             self.next_button.setText("Next: OrthoFinder →")
@@ -875,10 +877,7 @@ class OrthoFinderPlugin(BasePlugin):
         ):
             card = QFrame()
             card.setObjectName("statCard")
-            card.setFrameShape(QFrame.NoFrame)
-            card.setStyleSheet(
-                "QFrame#statCard { background: #f7f9fc; border: 1px solid #d0d7de; border-radius: 6px; }"
-            )
+            card.setFrameShape(QFrame.StyledPanel)
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(12, 8, 12, 8)
             number = QLabel("—")
@@ -886,7 +885,7 @@ class OrthoFinderPlugin(BasePlugin):
             number.setFont(_ui_font(18, bold=True))
             caption_label = QLabel(caption)
             caption_label.setAlignment(Qt.AlignCenter)
-            caption_label.setStyleSheet("color: #555;")
+            caption_label.setStyleSheet("color: palette(mid);")
             card_layout.addWidget(number)
             card_layout.addWidget(caption_label)
             cards.addWidget(card, 1)
@@ -907,7 +906,7 @@ class OrthoFinderPlugin(BasePlugin):
 
         self.output_info = QLabel("Output files will appear here.")
         self.output_info.setWordWrap(True)
-        self.output_info.setStyleSheet("color: #555;")
+        self.output_info.setStyleSheet("color: palette(mid);")
         layout.addWidget(self.output_info)
 
         actions = QHBoxLayout()
@@ -915,8 +914,16 @@ class OrthoFinderPlugin(BasePlugin):
         self.open_output_button.clicked.connect(self._open_output_folder)
         self.export_button = QPushButton("Export summary CSV")
         self.export_button.clicked.connect(self._export_summary)
+        self.workspace_button = QPushButton("Export to workspace")
+        self.workspace_button.clicked.connect(self._export_to_workspace)
+        self.workspace_button.setEnabled(False)
+        self.workspace_button.setToolTip(
+            "Create a YR-MPEA dataset with one item per single-copy orthogroup. "
+            "Available when this plugin is opened from YR-MPEA."
+        )
         actions.addWidget(self.open_output_button)
         actions.addWidget(self.export_button)
+        actions.addWidget(self.workspace_button)
         actions.addStretch()
         layout.addLayout(actions)
 
@@ -1015,6 +1022,7 @@ class OrthoFinderPlugin(BasePlugin):
             self.update_results(self._last_summary)
 
     def update_results(self, summary: dict):
+        self._last_summary = summary
         self.output_status.setText(
             f"Pipeline complete — {summary.get('species', 0)} species · "
             f"{summary.get('cds', 0)} CDS · {summary.get('orthogroups', 0)} orthogroups · "
@@ -1042,6 +1050,125 @@ class OrthoFinderPlugin(BasePlugin):
             self.output_info.setText(
                 f"Output: {output_dir}\nNo single-copy orthogroups were written; check the OrthoFinder log."
             )
+        if hasattr(self, "workspace_button"):
+            self.workspace_button.setEnabled(
+                self._opened_from_yrmpea and summary.get("single_copy_ogs", 0) > 0
+            )
+
+    def _build_result_spec(self):
+        """Build the dataset exported to YR-MPEA (one item per OG)."""
+        summary = self._last_summary
+        if not summary:
+            raise ValueError("Run the pipeline before exporting to the workspace.")
+
+        output_dir = Path(summary.get("output_dir", ""))
+        single_dir = output_dir / "single_copy_ogs"
+        if not single_dir.is_dir():
+            raise ValueError("No single_copy_ogs folder found under %s" % output_dir)
+
+        items = []
+        for cds_path in sorted(single_dir.glob("*.cds.fna")):
+            og = cds_path.name[: -len(".cds.fna")]
+            records = list(SeqIO.parse(str(cds_path), "fasta"))
+            if not records:
+                continue
+            map_path = single_dir / (og + ".map.tsv")
+            faa_path = single_dir / (og + ".faa")
+            items.append(
+                DatasetItemSpec(
+                    loci_name=og,
+                    item_type="sequence",
+                    sequences=records,
+                    file_path=str(cds_path),
+                    format="fasta",
+                    is_aligned=False,
+                    data={
+                        "orthogroup": og,
+                        "protein_fasta": str(faa_path),
+                        "map_tsv": str(map_path),
+                    },
+                    metadata={
+                        "source": self.plugin_name,
+                        "output_dir": str(output_dir),
+                    },
+                )
+            )
+
+        if not items:
+            raise ValueError(
+                "No single-copy CDS FASTA files were found under %s." % single_dir
+            )
+
+        genome_label = output_dir.name or "dataset"
+        dataset = DatasetSpec(
+            name="OrthoFinder_%s" % genome_label,
+            items=items,
+            description=(
+                "%d species, %d CDS, %d orthogroups, %d single-copy orthogroups"
+                % (
+                    summary.get("species", 0),
+                    summary.get("cds", 0),
+                    summary.get("orthogroups", 0),
+                    summary.get("single_copy_ogs", 0),
+                )
+            ),
+            source="one_step_orthofinder",
+            summary={
+                key: summary.get(key)
+                for key in ("species", "cds", "orthogroups", "single_copy_ogs", "output_dir")
+            },
+            metadata={
+                "plugin": self.plugin_name,
+                "input": self.input_edit.text(),
+                "source_type": self.source_combo.currentText(),
+                "genetic_code": self.genetic_code_combo.currentText(),
+                "output": str(output_dir),
+            },
+        )
+        artifacts = [str(single_dir / "single_copy_og_summary.tsv")]
+        return ResultSpec(
+            source="one_step_orthofinder",
+            datasets=[dataset],
+            artifacts=artifacts,
+            summary=dict(summary),
+        )
+
+    def _export_to_workspace(self):
+        """Emit a standard ResultSpec for YR-MPEA's dataset importer."""
+        if not self._opened_from_yrmpea or not self.result_has_consumer():
+            QMessageBox.information(
+                self,
+                "Not connected to YR-MPEA",
+                "Open One-Step OrthoFinder from YR-MPEA to export the result "
+                "as a workspace dataset.",
+            )
+            return
+
+        try:
+            result = self._build_result_spec()
+        except Exception as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
+            return
+
+        dataset = result.datasets[0]
+        if not self.export_result(result):
+            QMessageBox.warning(
+                self, "Export failed",
+                "The result did not pass validation; see the Console tab.",
+            )
+            return
+
+        self.add_console_message(
+            "Sent dataset %s to the YR-MPEA workspace (%d loci)."
+            % (dataset.name, len(dataset.items)),
+            "info",
+        )
+        QMessageBox.information(
+            self,
+            "Dataset exported",
+            "Dataset: %s\nLoci: %d\n\nThe dataset is now in the YR-MPEA workspace."
+            % (dataset.name, len(dataset.items)),
+        )
 
     def _open_output_folder(self):
         folder = self.output_edit.text()

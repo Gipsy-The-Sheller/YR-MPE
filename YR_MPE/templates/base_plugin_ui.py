@@ -21,7 +21,7 @@ from ..runtime.citations import get_citation_library
 class BasePlugin(QWidget):
     """
     YR-MPEA基础插件类
-    
+
     这是所有YR-MPEA插件的基类，提供了通用的功能和接口：
     - 插件配置管理
     - 控制台日志系统
@@ -29,6 +29,9 @@ class BasePlugin(QWidget):
     - 文件导入/导出支持
     - 进度条和运行控制
     """
+
+    # Standard channel for exporting structured results to the host.
+    result_ready = pyqtSignal(object)
     
     def __init__(self, import_from=None, import_data=None, **kwargs):
         """
@@ -104,6 +107,29 @@ class BasePlugin(QWidget):
             "input_types": self.input_types,
             "output_types": self.output_types
         }
+
+    def export_result(self, result):
+        """Validate and emit a ResultSpec to the host.
+
+        Plugins call this instead of defining their own export signal. The
+        host connects ``result_ready`` once and decides how to display or
+        persist the result.
+        """
+        problems = result.validate() if hasattr(result, "validate") else ["invalid result object"]
+        if problems:
+            message = "Export blocked: " + "; ".join(problems)
+            if hasattr(self, "console_text"):
+                self.add_console_message(message, "error")
+            return False
+        self.result_ready.emit(result)
+        return True
+
+    def result_has_consumer(self):
+        """True when the host has connected to ``result_ready``."""
+        try:
+            return self.receivers(self.result_ready) > 0
+        except Exception:
+            return False
 
     def _find_plugin_config(self):
         """Return this plugin's entry in config.json, if any."""
