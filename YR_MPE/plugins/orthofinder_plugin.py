@@ -99,6 +99,35 @@ def _path_row(edit: QLineEdit, button: QPushButton) -> QWidget:
     return row
 
 
+class DropArea(QWidget):
+    """A QWidget that forwards local dropped paths to the plugin."""
+
+    pathsDropped = pyqtSignal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        paths = []
+        for url in event.mimeData().urls():
+            if url.isLocalFile():
+                path = Path(url.toLocalFile())
+                if path.exists():
+                    paths.append(path)
+        if paths:
+            event.acceptProposedAction()
+            self.pathsDropped.emit(paths)
+        else:
+            event.ignore()
+
+
 def _section(title: str) -> tuple[QGroupBox, QVBoxLayout]:
     group = QGroupBox(title)
     layout = QVBoxLayout(group)
@@ -339,8 +368,14 @@ class OrthoFinderPlugin(BasePlugin):
         self._last_error = ""
         self._progress_text = ""
         self._show_run_dialogs = True
+        self._drop_temp_dirs = []
         super().__init__(import_from, import_data, **kwargs)
         self.run_button.setText("Run pipeline")
+
+    def on_destroyed(self):
+        super().on_destroyed()
+        for path in getattr(self, "_drop_temp_dirs", []):
+            shutil.rmtree(path, ignore_errors=True)
 
     def init_plugin_info(self):
         self.plugin_name = "One-Step OrthoFinder (for Organelle Genomes)"
@@ -357,6 +392,7 @@ class OrthoFinderPlugin(BasePlugin):
     # input tab / wizard
     # ------------------------------------------------------------------
     def setup_input_tab(self):
+        self.setAcceptDrops(True)
         outer = QVBoxLayout(self.input_tab)
         outer.setContentsMargins(0, 0, 0, 0)
 
@@ -365,7 +401,8 @@ class OrthoFinderPlugin(BasePlugin):
         scroll.setFrameShape(QFrame.NoFrame)
         outer.addWidget(scroll)
 
-        content = QWidget()
+        content = DropArea()
+        content.pathsDropped.connect(self._apply_dropped_paths)
         scroll.setWidget(content)
         layout = QVBoxLayout(content)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -429,7 +466,8 @@ class OrthoFinderPlugin(BasePlugin):
         source_form.addRow("Source type:", self.source_combo)
 
         self.input_edit = QLineEdit()
-        self.input_edit.setPlaceholderText("Folder with .gb/.gbff/.gbk files")
+        self.input_edit.setAcceptDrops(False)
+        self.input_edit.setPlaceholderText("Drop or browse a GenBank folder/file")
         self.input_browse_button = QPushButton("Browse")
         self.input_browse_button.clicked.connect(self._browse_input)
         self.input_label = QLabel("Input folder:")
@@ -487,8 +525,9 @@ class OrthoFinderPlugin(BasePlugin):
         layout.addWidget(output_group)
 
         self.tip_label = QLabel(
-            "Tip: one file per species is recommended. /translation is used when "
-            "present; otherwise the CDS is translated with the selected genetic code."
+            "Tip: drop a GenBank folder/file here, or browse. One file per species "
+            "is recommended. /translation is used when present; otherwise the CDS "
+            "is translated with the selected genetic code."
         )
         self.tip_label.setWordWrap(True)
         self.tip_label.setStyleSheet("color: palette(mid);")
@@ -654,22 +693,22 @@ class OrthoFinderPlugin(BasePlugin):
             placeholder = "Folder with .gb/.gbff/.gbk files"
             input_label = "Input folder:"
             scan_label = "Scan folder"
-            tip = ("Tip: one file per species is recommended. /translation is used "
-                   "when present; otherwise the CDS is translated with the selected "
-                   "genetic code.")
+            tip = ("Tip: drop a GenBank folder/file here, or browse. One file per "
+                   "species is recommended. /translation is used when present; "
+                   "otherwise the CDS is translated with the selected genetic code.")
         elif mode == "gbff_records":
             placeholder = "Single GenBank file with multiple records"
             input_label = "Input file:"
             scan_label = "Scan file"
-            tip = ("Tip: a single GenBank file can contain multiple records; each "
-                   "record is treated as a separate taxon. /translation is used when "
-                   "present; otherwise the CDS is translated with the selected "
-                   "genetic code.")
+            tip = ("Tip: drop a single GenBank file or folder here. A multi-record "
+                   "file is supported; each record is treated as a separate taxon. "
+                   "/translation is used when present; otherwise the CDS is "
+                   "translated with the selected genetic code.")
         else:
             placeholder = "Folder with .fa/.faa/.fasta files"
             input_label = "Input folder:"
             scan_label = "Scan folder"
-            tip = "Tip: one protein FASTA per species."
+            tip = "Tip: drop a folder of protein FASTA files here, one per species."
         self.input_edit.setPlaceholderText(placeholder)
         if hasattr(self, "input_label"):
             self.input_label.setText(input_label)
@@ -779,6 +818,152 @@ class OrthoFinderPlugin(BasePlugin):
                 f"✓ {len(files)} file(s) · {len(species)} species · CDS counted on run."
             )
             self.scan_label.setStyleSheet("color: #2e7d32;")
+
+    # ------------------------------------------------------------------
+    # drag and drop input
+    # ------------------------------------------------------------------
+    def _drop_paths(self, mime):
+        if not mime.hasUrls():
+            return []
+        paths = []
+        for url in mime.urls():
+            if not url.isLocalFile():
+                continue
+            path = Path(url.toLocalFile())
+            if path.exists():
+                paths.append(path)
+        return paths
+
+    def _is_supported_drop(self, path: Path) -> bool:
+        if path.is_dir():
+            return True
+        return path.suffix.lower() in {
+            ".gb", ".gbff", ".gbk", ".genbank",
+            ".fa", ".faa", ".fasta", ".fas",
+        }
+
+    def dragEnterEvent(self, event):
+        paths = self._drop_paths(event.mimeData())
+        if paths and all(self._is_supported_drop(path) for path in paths):
+            event.acceptProposedAction()
+            if hasattr(self, "scan_label"):
+                self._drag_prev_scan = self.scan_label.text()
+                self.scan_label.setText("Release to use as input.")
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        if hasattr(self, "scan_label") and hasattr(self, "_drag_prev_scan"):
+            self.scan_label.setText(self._drag_prev_scan)
+            self._drag_prev_scan = None
+        event.accept()
+
+    def dropEvent(self, event):
+        paths = self._drop_paths(event.mimeData())
+        if not paths:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self._apply_dropped_paths(paths, show_dialogs=True)
+
+    def _detect_folder_type(self, folder: Path):
+        gb_suffixes = {".gb", ".gbff", ".gbk", ".genbank"}
+        fa_suffixes = {".fa", ".faa", ".fasta", ".fas"}
+        has_fasta = False
+        try:
+            children = list(folder.iterdir())
+        except OSError:
+            return None
+        for child in children:
+            if not child.is_file():
+                continue
+            suffix = child.suffix.lower()
+            if suffix in gb_suffixes:
+                return "gbff"
+            if suffix in fa_suffixes:
+                has_fasta = True
+        return "proteome" if has_fasta else None
+
+    def _make_drop_folder(self, paths):
+        folder = Path(tempfile.mkdtemp(prefix="yrmpe_drop_"))
+        self._drop_temp_dirs.append(str(folder))
+        used = set()
+        for path in paths:
+            name = path.name
+            target = folder / name
+            index = 2
+            while target.exists() or name in used:
+                target = folder / ("%s_%d%s" % (path.stem, index, path.suffix))
+                index += 1
+            used.add(target.name)
+            shutil.copy2(path, target)
+        return folder
+
+    def _set_dropped_input(self, path: Path, source_type: str) -> bool:
+        try:
+            self._set_combo_data(self.source_combo, source_type)
+        except Exception:
+            return False
+        self.input_edit.setText(str(path))
+        if not self.output_edit.text().strip():
+            self.output_edit.setText(
+                os.path.join(self.workdir or tempfile.gettempdir(),
+                             "orthofinder_%s" % _timestamp())
+            )
+        self.tab_widget.setCurrentIndex(0)
+        self._scan_input()
+        self.add_console_message("Dropped input: %s" % path, "info")
+        return True
+
+    def _apply_dropped_paths(self, paths, show_dialogs=True) -> bool:
+        paths = [Path(path) for path in paths if Path(path).exists()]
+        if not paths:
+            if show_dialogs:
+                QMessageBox.warning(self, "Drop input", "No local files were dropped.")
+            return False
+
+        if len(paths) == 1 and paths[0].is_dir():
+            source_type = self._detect_folder_type(paths[0])
+            if source_type is None:
+                if show_dialogs:
+                    QMessageBox.warning(
+                        self, "Drop input",
+                        "The dropped folder contains no GenBank or protein FASTA files.",
+                    )
+                return False
+            if source_type == "proteome":
+                self.add_console_message(
+                    "Dropped folder: no GenBank files found; using proteome FASTA mode.",
+                    "info",
+                )
+            return self._set_dropped_input(paths[0], source_type)
+
+        if len(paths) == 1 and not paths[0].is_dir():
+            suffix = paths[0].suffix.lower()
+            if suffix in {".gb", ".gbff", ".gbk", ".genbank"}:
+                return self._set_dropped_input(paths[0], "gbff_records")
+            if suffix in {".fa", ".faa", ".fasta", ".fas"}:
+                folder = self._make_drop_folder(paths)
+                return self._set_dropped_input(folder, "proteome")
+            if show_dialogs:
+                QMessageBox.warning(self, "Drop input", "Unsupported file type: %s" % suffix)
+            return False
+
+        suffixes = {path.suffix.lower() for path in paths if path.is_file()}
+        gb_suffixes = {".gb", ".gbff", ".gbk", ".genbank"}
+        fa_suffixes = {".fa", ".faa", ".fasta", ".fas"}
+        if suffixes and suffixes <= gb_suffixes:
+            folder = self._make_drop_folder(paths)
+            return self._set_dropped_input(folder, "gbff")
+        if suffixes and suffixes <= fa_suffixes:
+            folder = self._make_drop_folder(paths)
+            return self._set_dropped_input(folder, "proteome")
+        if show_dialogs:
+            QMessageBox.warning(
+                self, "Drop input",
+                "Drop a single GenBank folder/file, or a uniform set of GenBank/FASTA files.",
+            )
+        return False
 
     def _validate_inputs(self, show: bool = True) -> bool:
         input_path = Path(self.input_edit.text())
