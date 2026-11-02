@@ -55,6 +55,20 @@ class GBFFParserTests(unittest.TestCase):
             mapping = read_cds_map(out / "cds_map.tsv")
             self.assertEqual(len(mapping), sum(summary.values()))
 
+    def test_multirecord_file_as_taxa(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            multi = Path(tmp) / "multi.gb"
+            with multi.open("wb") as handle:
+                for name in GB_FILES[:2]:
+                    handle.write((GB_DIR / name).read_bytes())
+            records = parse_genbank_file(multi, default_table=11, record_as_species=True)
+            species = {record.species for record in records}
+            self.assertEqual(len(species), 2)
+            self.assertGreater(len(records), 100)
+            # parse_folder must also accept a file path, not only a directory.
+            records2 = parse_folder(multi, default_table=11, record_as_species=True)
+            self.assertEqual(len(records2), len(records))
+
     def test_single_copy_backmap(self):
         records = self._parse_test_files()
         with tempfile.TemporaryDirectory() as tmp:

@@ -139,8 +139,9 @@ def parse_genbank_file(
     internal_stop: str = "skip",
     keep_stop: bool = False,
     max_records: int | None = None,
+    record_as_species: bool = False,
 ) -> list[CDSRecord]:
-    species = species or _sanitize(path.stem)
+    default_species = species or _sanitize(path.stem)
     records: list[CDSRecord] = []
     seen: set[str] = set()
 
@@ -150,6 +151,12 @@ def parse_genbank_file(
         accession = record.id
         if record.annotations.get("accessions"):
             accession = str(record.annotations["accessions"][0])
+        if record_as_species:
+            record_species = _sanitize(
+                record.id or accession or f"{path.stem}_{record_index + 1}"
+            )
+        else:
+            record_species = default_species
         for feature_index, feature in enumerate(record.features):
             if feature.type != "CDS":
                 continue
@@ -199,7 +206,7 @@ def parse_genbank_file(
                 continue
 
             base = locus_tag or ncbi_protein_id or gene or f"cds_{record.id}_{feature_index}"
-            protein_id = _sanitize(f"{species}_{base}")
+            protein_id = _sanitize(f"{record_species}_{base}")
             suffix = 1
             original = protein_id
             while protein_id in seen:
@@ -211,7 +218,7 @@ def parse_genbank_file(
             records.append(
                 CDSRecord(
                     protein_id=protein_id,
-                    species=species,
+                    species=record_species,
                     record_id=record.id,
                     record_accession=accession,
                     locus_tag=locus_tag,
@@ -232,8 +239,13 @@ def parse_genbank_file(
     return records
 
 
-def iter_genbank_files(input_dir: Path) -> Iterator[Path]:
-    for path in sorted(input_dir.iterdir()):
+def iter_genbank_files(input_path: Path) -> Iterator[Path]:
+    input_path = Path(input_path)
+    if input_path.is_file():
+        if input_path.suffix.lower() in GENBANK_SUFFIXES:
+            yield input_path
+        return
+    for path in sorted(input_path.iterdir()):
         if path.is_file() and path.suffix.lower() in GENBANK_SUFFIXES:
             yield path
 
@@ -274,14 +286,15 @@ def write_dataset(records: Iterable[CDSRecord], output_dir: Path) -> dict[str, i
 
 
 def parse_folder(
-    input_dir: Path,
+    input_path: Path,
     default_table: int = 1,
     skip_pseudo: bool = True,
     internal_stop: str = "skip",
     keep_stop: bool = False,
+    record_as_species: bool = False,
 ) -> list[CDSRecord]:
     records: list[CDSRecord] = []
-    for path in iter_genbank_files(input_dir):
+    for path in iter_genbank_files(input_path):
         records.extend(
             parse_genbank_file(
                 path,
@@ -289,6 +302,7 @@ def parse_folder(
                 skip_pseudo=skip_pseudo,
                 internal_stop=internal_stop,
                 keep_stop=keep_stop,
+                record_as_species=record_as_species,
             )
         )
     return records

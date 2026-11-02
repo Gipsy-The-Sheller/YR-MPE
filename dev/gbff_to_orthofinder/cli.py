@@ -97,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--internal-stop", choices=["skip", "warn", "keep"], default="skip")
     parser.add_argument("--keep-stop", action="store_true",
                         help="keep the terminal stop codon in the CDS FASTA")
+    parser.add_argument("--record-as-taxon", action="store_true",
+                        help="treat each GenBank record as a separate taxon (multi-record .gb file)")
     parser.add_argument("--run-orthofinder", action="store_true")
     parser.add_argument("--orthofinder", type=Path,
                         default=Path("E:/Codes/gf_mito_b/orthofinder.exe"))
@@ -117,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         skip_pseudo=args.skip_pseudo,
         internal_stop=args.internal_stop,
         keep_stop=args.keep_stop,
+        record_as_species=args.record_as_taxon,
     )
     if not records:
         print("no CDS records parsed", file=sys.stderr)

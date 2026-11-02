@@ -1,8 +1,10 @@
-# OrthoFinder plugin panel — design
+# One-Step OrthoFinder (for Organelle Genomes) — panel design
 
 ## Goal
 
-A three-step panel for **GBFF → CDS/AA → OrthoFinder → single-copy OG → CDS**.
+A three-step panel for **GBFF/GB → CDS/AA → OrthoFinder → single-copy OG → CDS**.
+A single multi-record GenBank file can be used directly: each record becomes a
+separate taxon.
 It should make the pipeline obvious, validate inputs before running, and never
 block the platform during a long OrthoFinder run.
 
@@ -23,8 +25,10 @@ The panel follows the existing `BasePlugin` four-tab contract:
 │  ● 1 Input          ○ 2 OrthoFinder          ○ 3 Review            │
 ├────────────────────────────────────────────────────────────────────┤
 │ Input source                                                       │
-│   ( ) GenBank (GBFF/GB/GBK)     ( ) Proteome FASTA                 │
-│   Folder: [____________________________________] [Browse]           │
+│   ( ) GenBank folder (one file per species)                        │
+│   ( ) GenBank multi-record file (each record = taxon)              │
+│   ( ) Proteome FASTA (protein-only)                                │
+│   Path: [______________________________________] [Browse]           │
 │   4 files · 4 species · CDS counted on run                          │
 │                                                                    │
 │ CDS parsing                                                        │
@@ -79,8 +83,10 @@ The panel follows the existing `BasePlugin` four-tab contract:
 
 ## Validation
 
-- **Input folder** must exist and contain at least one `.gb/.gbff/.gbk`
-  (GBFF mode) or `.fa/.faa/.fasta` (proteome mode).
+- **Input path** must exist and contain at least one `.gb/.gbff/.gbk`
+  (folder or multi-record file) or `.fa/.faa/.fasta` (proteome mode).
+  In multi-record mode, each GenBank record becomes one taxon and the scan
+  shows the record count.
 - **Output folder** must be writable; default to
   `<workdir>/orthofinder_<timestamp>` or the system temp dir.
 - **Genetic code** Auto uses `/transl_table` when present; fallback to the

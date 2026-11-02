@@ -27,8 +27,9 @@ import tempfile
 import time
 from pathlib import Path
 
+from Bio import SeqIO
 from PyQt5.QtCore import Qt, QUrl, pyqtSignal
-from PyQt5.QtGui import QDesktopServices, QFont
+from PyQt5.QtGui import QDesktopServices, QFont, QFontDatabase
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -68,6 +69,17 @@ from .components.methods.orthogroup_utils import (
 
 def _timestamp() -> str:
     return _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def _ui_font(point_size: int = 10, bold: bool = False) -> QFont:
+    """Return a modern UI font, falling back to the platform general font."""
+    families = set(QFontDatabase().families())
+    family = "Segoe UI" if "Segoe UI" in families else QFontDatabase.systemFont(
+        QFontDatabase.GeneralFont
+    ).family()
+    font = QFont(family, point_size)
+    font.setBold(bold)
+    return font
 
 
 def _path_row(edit: QLineEdit, button: QPushButton) -> QWidget:
@@ -224,6 +236,7 @@ class OrthoFinderThread(BaseProcessThread):
                 skip_pseudo=self.skip_pseudo,
                 internal_stop=self.internal_stop,
                 keep_stop=self.keep_stop,
+                record_as_species=(self.source_mode == "gbff_records"),
             )
             if not records:
                 raise ValueError(
@@ -244,7 +257,7 @@ class OrthoFinderThread(BaseProcessThread):
                 "output_dir": str(self.output_dir),
                 "elapsed": round(time.time() - started, 1),
                 "run_mode": "parse_only",
-                "cds_mapping": self.source_mode == "gbff",
+                "cds_mapping": self.source_mode in ("gbff", "gbff_records"),
             }
             self.result_summary.emit(summary)
             self.finished.emit(self._output_files(), [])
@@ -315,8 +328,17 @@ class OrthoFinderPlugin(BasePlugin):
         super().__init__(import_from, import_data, **kwargs)
         self.run_button.setText("Run pipeline")
 
+    def init_ui(self):
+        # Use a modern UI font for the whole panel; on Chinese Windows the Qt
+        # default system font is SimSun (serif-like) and looks dated.
+        self.setFont(_ui_font(10))
+        super().init_ui()
+        if hasattr(self, "tab_widget"):
+            self.tab_widget.setFont(_ui_font(10))
+            self.tab_widget.tabBar().setFont(_ui_font(10))
+
     def init_plugin_info(self):
-        self.plugin_name = "Genomic Dataset Formation (OrthoFinder)"
+        self.plugin_name = "One-Step OrthoFinder (for Organelle Genomes)"
         self.tool_name = "OrthoFinder"
         self.citation = [
             "Emms, D. M. & Kelly, S. (2019) OrthoFinder: phylogenetic orthology "
@@ -360,14 +382,11 @@ class OrthoFinderPlugin(BasePlugin):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
 
-        title = QLabel("Genomic Dataset Formation (OrthoFinder)")
-        title_font = QFont()
-        title_font.setPointSize(15)
-        title_font.setBold(True)
-        title.setFont(title_font)
+        title = QLabel("One-Step OrthoFinder (for Organelle Genomes)")
+        title.setFont(_ui_font(15, bold=True))
         layout.addWidget(title)
 
-        subtitle = QLabel("GBFF → CDS/AA → OrthoFinder → single-copy orthogroups → CDS")
+        subtitle = QLabel("GBFF/GB → CDS/AA → OrthoFinder → single-copy orthogroups → CDS")
         subtitle.setStyleSheet("color: #555;")
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
@@ -414,7 +433,8 @@ class OrthoFinderPlugin(BasePlugin):
         source_form.setSpacing(8)
 
         self.source_combo = QComboBox()
-        self.source_combo.addItem("GenBank (GBFF/GB/GBK)", "gbff")
+        self.source_combo.addItem("GenBank folder (one file per species)", "gbff")
+        self.source_combo.addItem("GenBank multi-record file (each record = taxon)", "gbff_records")
         self.source_combo.addItem("Proteome FASTA (protein-only)", "proteome")
         self.source_combo.currentIndexChanged.connect(self._on_source_changed)
         source_form.addRow("Source type:", self.source_combo)
@@ -423,7 +443,8 @@ class OrthoFinderPlugin(BasePlugin):
         self.input_edit.setPlaceholderText("Folder with .gb/.gbff/.gbk files")
         self.input_browse_button = QPushButton("Browse")
         self.input_browse_button.clicked.connect(self._browse_input)
-        source_form.addRow("Input folder:", _path_row(self.input_edit, self.input_browse_button))
+        self.input_label = QLabel("Input folder:")
+        source_form.addRow(self.input_label, _path_row(self.input_edit, self.input_browse_button))
         source_layout.addLayout(source_form)
 
         self.scan_label = QLabel("No folder selected.")
@@ -475,6 +496,14 @@ class OrthoFinderPlugin(BasePlugin):
         output_form.addRow("Output folder:", _path_row(self.output_edit, self.output_browse_button))
         output_layout.addLayout(output_form)
         layout.addWidget(output_group)
+
+        self.tip_label = QLabel(
+            "Tip: one file per species is recommended. /translation is used when "
+            "present; otherwise the CDS is translated with the selected genetic code."
+        )
+        self.tip_label.setWordWrap(True)
+        self.tip_label.setStyleSheet("color: #666;")
+        layout.addWidget(self.tip_label)
         layout.addStretch()
         return page
 
@@ -543,8 +572,15 @@ class OrthoFinderPlugin(BasePlugin):
         self.existing_browse_button = QPushButton("Browse")
         self.existing_browse_button.clicked.connect(self._browse_existing)
         self.existing_row = _path_row(self.existing_edit, self.existing_browse_button)
-        mode_form.addRow("Existing results:", self.existing_row)
+        self.existing_label = QLabel("Existing results:")
+        self.existing_container = QWidget()
+        existing_layout = QHBoxLayout(self.existing_container)
+        existing_layout.setContentsMargins(0, 0, 0, 0)
+        existing_layout.setSpacing(8)
+        existing_layout.addWidget(self.existing_label)
+        existing_layout.addWidget(self.existing_row, 1)
         mode_layout.addLayout(mode_form)
+        mode_layout.addWidget(self.existing_container)
 
         self.mode_hint = QLabel(
             "Parse only writes proteomes + CDS + cds_map and does not require OrthoFinder."
@@ -619,19 +655,47 @@ class OrthoFinderPlugin(BasePlugin):
         self._set_step(max(self.step_stack.currentIndex() - 1, 0))
 
     def _on_source_changed(self) -> None:
-        is_gbff = self.source_combo.currentData() == "gbff"
-        self.genetic_code_combo.setEnabled(is_gbff)
-        self.skip_pseudo_check.setEnabled(is_gbff)
-        self.internal_stop_combo.setEnabled(is_gbff)
-        self.keep_stop_check.setEnabled(is_gbff)
-        self.input_edit.setPlaceholderText(
-            "Folder with .gb/.gbff/.gbk files" if is_gbff else "Folder with .fa/.faa/.fasta files"
-        )
-        self.scan_label.setText("No folder selected." if not self.input_edit.text() else self.scan_label.text())
+        mode = self.source_combo.currentData()
+        is_genbank = mode in ("gbff", "gbff_records")
+        self.genetic_code_combo.setEnabled(is_genbank)
+        self.skip_pseudo_check.setEnabled(is_genbank)
+        self.internal_stop_combo.setEnabled(is_genbank)
+        self.keep_stop_check.setEnabled(is_genbank)
+        if mode == "gbff":
+            placeholder = "Folder with .gb/.gbff/.gbk files"
+            input_label = "Input folder:"
+            scan_label = "Scan folder"
+            tip = ("Tip: one file per species is recommended. /translation is used "
+                   "when present; otherwise the CDS is translated with the selected "
+                   "genetic code.")
+        elif mode == "gbff_records":
+            placeholder = "Single GenBank file with multiple records"
+            input_label = "Input file:"
+            scan_label = "Scan file"
+            tip = ("Tip: a single GenBank file can contain multiple records; each "
+                   "record is treated as a separate taxon. /translation is used when "
+                   "present; otherwise the CDS is translated with the selected "
+                   "genetic code.")
+        else:
+            placeholder = "Folder with .fa/.faa/.fasta files"
+            input_label = "Input folder:"
+            scan_label = "Scan folder"
+            tip = "Tip: one protein FASTA per species."
+        self.input_edit.setPlaceholderText(placeholder)
+        if hasattr(self, "input_label"):
+            self.input_label.setText(input_label)
+        if hasattr(self, "scan_button"):
+            self.scan_button.setText(scan_label)
+        if hasattr(self, "tip_label"):
+            self.tip_label.setText(tip)
+        if hasattr(self, "scan_label"):
+            self.scan_label.setText(
+                "No input selected." if not self.input_edit.text() else self.scan_label.text()
+            )
 
     def _on_run_mode_changed(self) -> None:
         mode = self.run_mode_combo.currentData()
-        self.existing_row.setVisible(mode == "existing")
+        self.existing_container.setVisible(mode == "existing")
         if mode == "parse_only":
             self.mode_hint.setText("Parse only writes proteomes + CDS + cds_map; no OrthoFinder needed.")
         elif mode == "existing":
@@ -643,11 +707,23 @@ class OrthoFinderPlugin(BasePlugin):
     # browse / validation
     # ------------------------------------------------------------------
     def _browse_input(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select input folder", self.input_edit.text() or os.path.expanduser("~"))
+        if self.source_combo.currentData() == "gbff_records":
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select multi-record GenBank file",
+                self.input_edit.text() or os.path.expanduser("~"),
+                "GenBank (*.gb *.gbff *.gbk);;All files (*)",
+            )
+        else:
+            path = QFileDialog.getExistingDirectory(
+                self, "Select input folder", self.input_edit.text() or os.path.expanduser("~")
+            )
         if path:
             self.input_edit.setText(path)
             if not self.output_edit.text():
-                self.output_edit.setText(os.path.join(self.workdir or tempfile.gettempdir(), f"orthofinder_{_timestamp()}"))
+                self.output_edit.setText(
+                    os.path.join(self.workdir or tempfile.gettempdir(), f"orthofinder_{_timestamp()}")
+                )
             self._scan_input()
 
     def _browse_output(self) -> None:
@@ -676,13 +752,35 @@ class OrthoFinderPlugin(BasePlugin):
         return {".gb", ".gbff", ".gbk", ".genbank"}
 
     def _scan_input(self) -> None:
-        folder = Path(self.input_edit.text())
-        if not folder.exists():
-            self.scan_label.setText("⚠ Folder not found.")
+        input_path = Path(self.input_edit.text())
+        if not input_path.exists():
+            self.scan_label.setText("⚠ Input path not found.")
+            self.scan_label.setStyleSheet("color: #b00020;")
+            return
+
+        if self.source_combo.currentData() == "gbff_records":
+            if not input_path.is_file() or input_path.suffix.lower() not in self._input_suffixes():
+                self.scan_label.setText("⚠ Select a .gb/.gbff/.gbk file.")
+                self.scan_label.setStyleSheet("color: #b00020;")
+                return
+            try:
+                count = sum(1 for _ in SeqIO.parse(str(input_path), "genbank"))
+            except Exception as exc:
+                self.scan_label.setText(f"⚠ Could not read records: {exc}")
+                self.scan_label.setStyleSheet("color: #b00020;")
+                return
+            self.scan_label.setText(
+                f"✓ {input_path.name} · {count} record(s) (each record = taxon) · CDS counted on run."
+            )
+            self.scan_label.setStyleSheet("color: #2e7d32;")
+            return
+
+        if not input_path.is_dir():
+            self.scan_label.setText("⚠ Select an input folder.")
             self.scan_label.setStyleSheet("color: #b00020;")
             return
         suffixes = self._input_suffixes()
-        files = [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in suffixes]
+        files = [p for p in input_path.iterdir() if p.is_file() and p.suffix.lower() in suffixes]
         species = {p.stem for p in files}
         if not files:
             self.scan_label.setText("⚠ No matching files in this folder.")
@@ -694,15 +792,22 @@ class OrthoFinderPlugin(BasePlugin):
             self.scan_label.setStyleSheet("color: #2e7d32;")
 
     def _validate_inputs(self, show: bool = True) -> bool:
-        folder = Path(self.input_edit.text())
-        if not folder.is_dir():
-            if show:
-                QMessageBox.warning(self, "Input missing", "Please select an existing input folder.")
-            return False
-        if not any(p.is_file() and p.suffix.lower() in self._input_suffixes() for p in folder.iterdir()):
-            if show:
-                QMessageBox.warning(self, "No input files", "No matching input files were found in the folder.")
-            return False
+        input_path = Path(self.input_edit.text())
+        mode = self.source_combo.currentData()
+        if mode == "gbff_records":
+            if not input_path.is_file() or input_path.suffix.lower() not in self._input_suffixes():
+                if show:
+                    QMessageBox.warning(self, "Input missing", "Please select a multi-record .gb/.gbff/.gbk file.")
+                return False
+        else:
+            if not input_path.is_dir():
+                if show:
+                    QMessageBox.warning(self, "Input missing", "Please select an existing input folder.")
+                return False
+            if not any(p.is_file() and p.suffix.lower() in self._input_suffixes() for p in input_path.iterdir()):
+                if show:
+                    QMessageBox.warning(self, "No input files", "No matching input files were found in the folder.")
+                return False
         if not self.output_edit.text().strip():
             if show:
                 QMessageBox.warning(self, "Output missing", "Please choose an output folder.")
@@ -757,7 +862,13 @@ class OrthoFinderPlugin(BasePlugin):
         if not hasattr(self, "review_label"):
             return
         mode = self.run_mode_combo.currentData() if hasattr(self, "run_mode_combo") else "full"
-        source = "GenBank (GBFF)" if self.source_combo.currentData() == "gbff" else "Proteome FASTA"
+        source_mode = self.source_combo.currentData()
+        if source_mode == "gbff":
+            source = "GenBank folder (one file per species)"
+        elif source_mode == "gbff_records":
+            source = "GenBank multi-record file (each record = taxon)"
+        else:
+            source = "Proteome FASTA"
         self.review_label.setText(
             f"<b>Input</b>: {source} — {self.input_edit.text() or '<i>not selected</i>'}<br>"
             f"<b>Output</b>: {self.output_edit.text() or '<i>not selected</i>'}<br>"
@@ -789,15 +900,16 @@ class OrthoFinderPlugin(BasePlugin):
             ("single_copy_ogs", "Single-copy OGs"),
         ):
             card = QFrame()
-            card.setFrameShape(QFrame.StyledPanel)
+            card.setObjectName("statCard")
+            card.setFrameShape(QFrame.NoFrame)
+            card.setStyleSheet(
+                "QFrame#statCard { background: #f7f9fc; border: 1px solid #d0d7de; border-radius: 6px; }"
+            )
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(12, 8, 12, 8)
             number = QLabel("—")
             number.setAlignment(Qt.AlignCenter)
-            font = QFont()
-            font.setPointSize(18)
-            font.setBold(True)
-            number.setFont(font)
+            number.setFont(_ui_font(18, bold=True))
             caption_label = QLabel(caption)
             caption_label.setAlignment(Qt.AlignCenter)
             caption_label.setStyleSheet("color: #555;")
@@ -813,6 +925,8 @@ class OrthoFinderPlugin(BasePlugin):
         self.og_table = QTableWidget(0, 4)
         self.og_table.setHorizontalHeaderLabels(["Orthogroup", "Species", "Proteins", "Status"])
         self.og_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.og_table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.og_table.verticalHeader().setVisible(False)
         self.og_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.og_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         layout.addWidget(self.og_table, 1)
@@ -835,6 +949,11 @@ class OrthoFinderPlugin(BasePlugin):
     def setup_control_panel(self):
         super().setup_control_panel()
         self.run_button.setText("Run pipeline")
+        self.run_button.setMinimumWidth(160)
+        self.stop_button.setMinimumWidth(100)
+        self.run_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.stop_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.control_layout.insertStretch(0, 1)
 
     # ------------------------------------------------------------------
     # run lifecycle

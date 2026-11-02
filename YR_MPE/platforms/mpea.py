@@ -451,7 +451,7 @@ class YR_MPEA_Widget(QWidget):
         create_seqdbg_action.triggered.connect(self.create_dataset_by_seqdbg)
         dataset_menu.addAction(create_seqdbg_action)
 
-        create_orthofinder_action = QAction("Genomic Dataset Formation (OrthoFinder)", dataset_menu)
+        create_orthofinder_action = QAction("One-Step OrthoFinder (for Organelle Genomes)", dataset_menu)
         create_orthofinder_action.setIcon(self.resource_factory.get_icon("file/dataset.svg"))
         create_orthofinder_action.triggered.connect(self.create_dataset_by_orthofinder)
         dataset_menu.addAction(create_orthofinder_action)

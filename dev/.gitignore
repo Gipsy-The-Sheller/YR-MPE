@@ -7,3 +7,8 @@ gbff_to_orthofinder/testdata/work/
 # Python caches
 __pycache__/
 *.pyc
+
+# Generated plugin test outputs and multi-record fixture
+gbff_to_orthofinder/testdata/work/
+gbff_to_orthofinder/testdata/plugin_*/
+gbff_to_orthofinder/testdata/gb_multirecord/

@@ -1,9 +1,14 @@
-# GBFF -> OrthoFinder -> single-copy OG -> CDS (prototype)
+# One-Step OrthoFinder (for Organelle Genomes) — prototype
 
-Prototype for the YR-MPE "Genomic Dataset Formation (OrthoFinder)" feature.
+Prototype for the YR-MPE one-step organelle dataset feature.
 It takes organelle GenBank files (GBFF/GB/GBK), extracts CDS features, writes
 protein FASTA + in-frame CDS FASTA + a mapping table, runs OrthoFinder, and
 maps single-copy orthogroups back to CDS.
+
+A single multi-record GenBank file is supported: use
+`--record-as-taxon` (CLI) or the "GenBank multi-record file (each record =
+taxon)" input mode (plugin). This is useful when GenBank's "send to GB"
+produces one file containing many organelle genomes.
 
 ## What it does
 
@@ -74,6 +79,23 @@ Input: `testdata/gb/` — `HM347959.gb`, `JN637766.gb`, `KF150644.gb`,
   `dev/temp/WorkingDirectory` (or set `cwd` accordingly) before running.
 - On Windows, `subprocess` resolves `blastp` using the parent process PATH;
   the CLI temporarily prepends the blast directory to `os.environ["PATH"]`.
+
+## Screenshots
+
+Rendered offscreen/native Qt from the actual plugin:
+
+- `screenshots/01_input.png` — Input step (folder mode)
+- `screenshots/02_orthofinder.png` — OrthoFinder runtime/run mode
+- `screenshots/03_review.png` — Review step
+- `screenshots/04_output.png` — Output preview with 62 single-copy OGs
+- `screenshots/05_input_multirecord.png` — single multi-record GenBank file
+  (each record = taxon)
+
+Regenerate with:
+
+```bash
+python dev/gbff_to_orthofinder/render_panel.py
+```
 
 ## Plugin integration (2026-11-02)
 

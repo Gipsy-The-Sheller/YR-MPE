@@ -30,11 +30,12 @@ SELECTION.}
 \section{SeqDBG}
 \section{Sequence Concatenator}
 \section{TreeMerger}
-\section{Genomic dataset formation (OrthoFinder)}
-The plugin uses a three-step panel. \textbf{Input} selects a folder of
-GBFF/GB/GBK files (one file per organelle genome) or a folder of proteome
-FASTA files, and sets the genetic code, pseudogene handling, internal-stop
-policy, and output folder. GenBank input is parsed into CDS features,
+\section{One-Step OrthoFinder for organelle genomes}
+The plugin uses a three-step panel. \textbf{Input} selects either a folder of
+GBFF/GB/GBK files (one file per organelle genome), a single multi-record
+GenBank file (each record becomes a separate taxon), or a folder of proteome
+FASTA files. It also sets the genetic code, pseudogene handling,
+internal-stop policy, and output folder. GenBank input is parsed into CDS features,
 translated to protein, and written as \texttt{proteomes/<species>.faa},
 \texttt{cds/<species>.fna}, and \texttt{cds\_map.tsv}. \textbf{OrthoFinder}
 sets the OrthoFinder executable, the BLAST+/MCL directory, the thread count,
