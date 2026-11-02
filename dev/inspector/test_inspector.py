@@ -51,6 +51,16 @@ class InspectorPanelTests(unittest.TestCase):
         self.assertGreater(panel.workflow_tree.topLevelItemCount(), 0)
         self.assertTrue(panel.workflow_tree.topLevelItem(0).isExpanded())
 
+    def test_run_icon_uses_tool(self):
+        panel = self.panel
+        run = self.store.get_run(self.tree_item.run_id)
+        self.assertEqual(panel._run_icon_path(run), "software/iqtree.svg")
+        mafft = next(
+            record for record in self.store.index.runs.values()
+            if record.method == "mafft"
+        )
+        self.assertEqual(panel._run_icon_path(mafft), "software/mafft.svg")
+
     def test_sequence_has_no_run_switcher(self):
         panel = self.panel
         sequence = next(

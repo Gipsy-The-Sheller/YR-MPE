@@ -97,6 +97,27 @@ PREVIEW_ICON_PATHS = {
     "chain": "software/minitracer.svg",
 }
 
+# Ordered longest/specific first. Matched against method + tool + run name.
+RUN_ICON_HINTS = [
+    ("iq-tree", "software/iqtree.svg"),
+    ("iqtree", "software/iqtree.svg"),
+    ("mafft", "software/mafft.svg"),
+    ("muscle", "software/muscle.svg"),
+    ("clustal", "software/clustalo.svg"),
+    ("macse", "software/macse.svg"),
+    ("trimal", "software/trimal.svg"),
+    ("gblocks", "software/gblocks.svg"),
+    ("mrbayes", "software/mrbayes.svg"),
+    ("phylobayes", "software/phylobayes.svg"),
+    ("lsd2", "software/lsd2.svg"),
+    ("astral", "software/astral.svg"),
+    ("caster", "software/caster.svg"),
+    ("raxml", "software/raxml.svg"),
+    ("mcmctree", "clock.svg"),
+    ("paml", "clock.svg"),
+    ("minitracer", "software/minitracer.svg"),
+]
+
 
 def _attr(obj: Any, *names: str, default=None):
     for name in names:
@@ -704,7 +725,7 @@ class InspectorPanel(QWidget):
         )
         self._add_operation(
             "Modify && rerun", lambda: self._emit_operation("rerun_run", run.id),
-            "inspector.operation.rerun", icon="operations/refresh.svg",
+            "inspector.operation.rerun", icon=self._run_icon_path(run),
         )
         self._set_operations_visible(True)
 
@@ -749,7 +770,7 @@ class InspectorPanel(QWidget):
         ]
         if run is not None:
             link = self._link_button("Open edge: %s" % run.name, "inspector.metadata.edge")
-            link.setIcon(self._icon("operations/refresh.svg"))
+            link.setIcon(self._icon(self._run_icon_path(run)))
             link.setIconSize(QSize(16, 16))
             link.clicked.connect(lambda: self.show_run(run.id))
             rows.append(("Edge", link))
@@ -812,6 +833,16 @@ class InspectorPanel(QWidget):
     # ------------------------------------------------------------------
     # workflow tree
     # ------------------------------------------------------------------
+    def _run_icon_path(self, run):
+        key = " ".join(
+            str(getattr(run, field, "") or "")
+            for field in ("method", "tool", "name")
+        ).lower()
+        for token, path in RUN_ICON_HINTS:
+            if token in key:
+                return path
+        return "operations/refresh.svg"
+
     def _icon(self, name):
         if name in self._icons:
             return self._icons[name]
@@ -893,7 +924,7 @@ class InspectorPanel(QWidget):
                     "RUN",
                 ])
                 node.setData(0, Qt.UserRole, ("run", record.id))
-                node.setIcon(0, self._icon("operations/refresh.svg"))
+                node.setIcon(0, self._icon(self._run_icon_path(record)))
                 node.setToolTip(0, "Status: %s" % record.status)
                 self._run_nodes[record.id] = node
 
