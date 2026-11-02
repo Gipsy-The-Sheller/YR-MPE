@@ -29,9 +29,10 @@ from pathlib import Path
 
 from Bio import SeqIO
 from PyQt5.QtCore import Qt, QUrl, pyqtSignal
-from PyQt5.QtGui import QDesktopServices, QFont, QFontDatabase
+from PyQt5.QtGui import QDesktopServices, QFont
 from PyQt5.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -72,13 +73,11 @@ def _timestamp() -> str:
 
 
 def _ui_font(point_size: int = 10, bold: bool = False) -> QFont:
-    """Return a modern UI font, falling back to the platform general font."""
-    families = set(QFontDatabase().families())
-    family = "Segoe UI" if "Segoe UI" in families else QFontDatabase.systemFont(
-        QFontDatabase.GeneralFont
-    ).family()
-    font = QFont(family, point_size)
-    font.setBold(bold)
+    """Derive a font from the host application font (YRTools: MiSans Medium)."""
+    font = QFont(QApplication.font())
+    font.setPointSize(point_size)
+    if bold:
+        font.setBold(True)
     return font
 
 
@@ -327,15 +326,6 @@ class OrthoFinderPlugin(BasePlugin):
         self.analysis_thread = None
         super().__init__(import_from, import_data, **kwargs)
         self.run_button.setText("Run pipeline")
-
-    def init_ui(self):
-        # Use a modern UI font for the whole panel; on Chinese Windows the Qt
-        # default system font is SimSun (serif-like) and looks dated.
-        self.setFont(_ui_font(10))
-        super().init_ui()
-        if hasattr(self, "tab_widget"):
-            self.tab_widget.setFont(_ui_font(10))
-            self.tab_widget.tabBar().setFont(_ui_font(10))
 
     def init_plugin_info(self):
         self.plugin_name = "One-Step OrthoFinder (for Organelle Genomes)"

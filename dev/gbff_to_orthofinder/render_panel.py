@@ -9,6 +9,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtCore import Qt  # noqa: E402
+from PyQt5.QtGui import QFont, QFontDatabase  # noqa: E402
 from PyQt5.QtWidgets import QApplication  # noqa: E402
 
 QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
@@ -22,6 +23,17 @@ from YR_MPE.plugins.orthofinder_plugin import OrthoFinderPlugin  # noqa: E402
 
 def main() -> int:
     app = QApplication(sys.argv)
+    # Mirror YRTools: load MiSans Medium and use it as the application font.
+    font_path = Path("E:/Codes/YRTools/fonts/MiSans-Medium.ttf")
+    if font_path.exists():
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        families = QFontDatabase.applicationFontFamilies(font_id) if font_id != -1 else []
+        if families:
+            app_font = QFont(families[0], 10)
+            app_font.setWeight(QFont.Medium)
+            app.setFont(app_font)
+            print("font:", app_font.toString())
+
     out_dir = HERE.parent / "screenshots"
     out_dir.mkdir(parents=True, exist_ok=True)
 
