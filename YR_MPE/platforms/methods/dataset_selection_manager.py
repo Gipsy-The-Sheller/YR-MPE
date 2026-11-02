@@ -5,10 +5,22 @@
 import os
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Any, Optional, Set, Tuple
 from collections import deque
 
 from Bio import SeqIO
+
+from ...runtime.workspace_store import DatasetRecord, ItemRecord, WorkspaceStore
+
+
+def _parse_datetime(value):
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except Exception:
+        return datetime.now()
 
 from .dataset_models import (
     DatasetItem, DatasetInfo, SelectionNode,
@@ -25,7 +37,7 @@ from .dataset_models import (
 class DatasetSelectionManager:
     """数据集选择管理器 - 负责管理数据集、数据项和选择状态"""
     
-    def __init__(self, disable_auto_save: bool = False):
+    def __init__(self, disable_auto_save: bool = False, store: Optional[WorkspaceStore] = None):
         # 数据存储
         self.datasets: Dict[str, DatasetInfo] = {}  # 数据集ID -> DatasetInfo
         self.items: Dict[str, DatasetItem] = {}     # 数据项ID -> DatasetItem
@@ -36,6 +48,7 @@ class DatasetSelectionManager:
         
         # 管理器状态
         self.workspace_path: Optional[str] = None
+        self.store: Optional[WorkspaceStore] = store
         self.version = "2.0"
         self.disable_auto_save = disable_auto_save  # 禁用自动保存
         
@@ -306,6 +319,27 @@ class DatasetSelectionManager:
         return [item for item in self.items.values() 
                 if item.selection_state == SELECTION_STATE_GREEN]
     
+    # ========== 结果/工作流存储 ==========
+    def require_store(self) -> WorkspaceStore:
+        if self.store is None:
+            raise RuntimeError("Workspace store is not initialized")
+        return self.store
+
+    def create_import(self, source_paths, importer, **kwargs):
+        return self.require_store().new_import(source_paths, importer, **kwargs)
+
+    def create_run(self, method, tool, input_ids, **kwargs):
+        return self.require_store().new_run(method, tool, input_ids, **kwargs)
+
+    def finish_run(self, run_id, **kwargs):
+        return self.require_store().finish_run(run_id, **kwargs)
+
+    def create_stream(self, name, dataset_id, run_ids=None):
+        return self.require_store().add_stream(name, dataset_id, run_ids)
+
+    def rename_run(self, run_id, name):
+        return self.require_store().rename_run(run_id, name)
+
     # ========== 兼容性方法 ==========
     
     def add_alignment(self, alignment_data: Any, dataset_id: str = None) -> str:
@@ -424,20 +458,156 @@ class DatasetSelectionManager:
     # ========== 持久化 ==========
     
     def set_workspace_path(self, path: str):
-        """设置工作区路径"""
+        """设置工作区路径并加载新的 workspace store。"""
         self.workspace_path = path
-        
-        # 加载保存的状态
-        state_file = os.path.join(path, "dataset_selection_state.json")
-        if os.path.exists(state_file):
+        if not path:
+            return
+
+        try:
+            self.store = WorkspaceStore(path)
+            if self.store.index.datasets or self.store.index.items:
+                self._load_from_store()
+                return
+
+            legacy = os.path.join(path, "dataset_selection_state.json")
+            if os.path.exists(legacy):
+                self.store.migrate_legacy_selection_state(legacy)
+                self._load_from_store()
+        except Exception:
+            # Keep old workspaces usable if migration/store setup fails.
+            self.store = None
             self._load_state()
-    
+
+    def _load_from_store(self):
+        """Rebuild the in-memory selection model from workspace.json."""
+        if not self.store:
+            return
+
+        self.datasets.clear()
+        self.items.clear()
+        self.selection_trees.clear()
+        self.selected_items.clear()
+
+        for record in self.store.index.datasets.values():
+            dataset = DatasetInfo()
+            dataset.id = record.id
+            dataset.name = record.name
+            dataset.description = record.description
+            dataset.settings = dict(record.settings)
+            dataset.items = list(record.item_ids)
+            dataset.is_multigene = len(dataset.items) > 1
+            dataset.created_at = _parse_datetime(record.created_at)
+            self.datasets[dataset.id] = dataset
+
+        for record in self.store.index.items.values():
+            item = DatasetItem(item_type=record.type)
+            item.id = record.id
+            item.dataset_id = record.dataset_id
+            item.loci_name = record.name
+            item.name = record.name
+            item.file_path = str(self.store.path(record.file)) if record.file else ""
+            item.format = record.format
+            item.length = record.length
+            item.sequence_count = record.sequence_count
+            item.is_aligned = record.is_aligned
+            item.metadata = dict(record.metadata)
+            item.data = dict(record.data)
+            item.parent_id = record.parent_id
+            item.import_id = record.import_id
+            item.run_id = record.run_id
+            item.created_at = _parse_datetime(record.created_at)
+            item.modified_at = _parse_datetime(record.modified_at)
+            self.items[item.id] = item
+            self._hydrate_item_sequences(item)
+
+        for dataset in self.datasets.values():
+            dataset.loci_count = sum(
+                1 for item_id in dataset.items
+                if item_id in self.items and self.items[item_id].item_type in ("sequence", "alignment")
+            )
+            dataset.taxa_count = max(
+                (self.items[item_id].sequence_count for item_id in dataset.items
+                 if item_id in self.items),
+                default=0,
+            )
+            self._build_selection_tree(dataset.id)
+
+    def _sync_to_store(self):
+        """Mirror the in-memory model into workspace.json."""
+        if not self.store:
+            return
+
+        index = self.store.index
+        for dataset in self.datasets.values():
+            record = index.datasets.get(dataset.id)
+            if record is None:
+                record = DatasetRecord(id=dataset.id, name=dataset.name)
+                index.datasets[dataset.id] = record
+            record.name = dataset.name
+            record.description = dataset.description
+            record.source = dataset.settings.get("source", "")
+            record.item_ids = list(dataset.items)
+            record.settings = dict(dataset.settings)
+
+        for dataset_id in list(index.datasets):
+            if dataset_id not in self.datasets:
+                del index.datasets[dataset_id]
+
+        for item in self.items.values():
+            record = index.items.get(item.id)
+            if record is None:
+                record = ItemRecord(
+                    id=item.id,
+                    type=item.item_type,
+                    name=item.loci_name,
+                    dataset_id=item.dataset_id,
+                )
+                index.items[item.id] = record
+            record.type = item.item_type
+            record.name = item.loci_name
+            record.dataset_id = item.dataset_id
+            record.format = item.format
+            record.file = self._store_item_file(item)
+            record.length = item.length
+            record.sequence_count = item.sequence_count
+            record.is_aligned = item.is_aligned
+            record.metadata = dict(item.metadata)
+            record.data = dict(item.data)
+            record.import_id = getattr(item, "import_id", None)
+            record.run_id = getattr(item, "run_id", None)
+            record.parent_id = item.parent_id
+
+        for item_id in list(index.items):
+            if item_id not in self.items:
+                del index.items[item_id]
+
+    def _store_item_file(self, item):
+        if not self.store:
+            return ""
+        if item.file_path and os.path.exists(item.file_path):
+            return self.store.relative(Path(item.file_path))
+        if item.sequences and item.dataset_id:
+            target = self.store.item_path(item.dataset_id, item.id, "data.fna")
+            try:
+                SeqIO.write(item.sequences, str(target), "fasta")
+            except Exception:
+                return ""
+            item.file_path = str(target)
+            item.format = item.format or "fasta"
+            return self.store.relative(target)
+        return item.file_path or ""
+
     def _save_state(self):
-        """保存状态到文件"""
+        """保存状态到 workspace store；无 store 时回退到旧 JSON。"""
         if self.disable_auto_save:
-            return  # 禁用自动保存
+            return
 
         if not self.workspace_path:
+            return
+
+        if self.store:
+            self._sync_to_store()
+            self.store.save()
             return
 
         state_file = os.path.join(self.workspace_path, "dataset_selection_state.json")

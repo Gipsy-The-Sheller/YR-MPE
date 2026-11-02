@@ -96,6 +96,8 @@ class DatasetItem:
         self.file_path: str = ""           # 原始文件路径
         self.item_type: str = item_type    # 数据项类型
         self.parent_id: Optional[str] = None  # 父项ID
+        self.import_id: Optional[str] = None  # 来源 import（精确回溯）
+        self.run_id: Optional[str] = None     # 产出该数据的 run
         self.created_at: datetime = datetime.now()
         self.modified_at: datetime = datetime.now()
         
@@ -215,6 +217,8 @@ class DatasetItem:
             "file_path": self.file_path,
             "item_type": self.item_type,
             "parent_id": self.parent_id,
+            "import_id": self.import_id,
+            "run_id": self.run_id,
             "created_at": self.created_at.isoformat(),
             "modified_at": self.modified_at.isoformat(),
             "is_aligned": self.is_aligned,
@@ -239,7 +243,9 @@ class DatasetItem:
         item.loci_name = data.get("loci_name", "")
         item.file_path = data.get("file_path", "")
         item.parent_id = data.get("parent_id")
-        
+        item.import_id = data.get("import_id")
+        item.run_id = data.get("run_id")
+
         if "created_at" in data:
             item.created_at = datetime.fromisoformat(data["created_at"])
         if "modified_at" in data:
