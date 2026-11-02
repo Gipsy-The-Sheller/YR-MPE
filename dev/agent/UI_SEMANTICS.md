@@ -71,3 +71,10 @@ A YRTools-level `UIActionRegistry` should:
 
 Do not synthesize Qt mouse events for normal agent use. Keep a separate
 screenshot/geometry API for visual testing only.
+
+## Plugin-level example
+
+The One-Step OrthoFinder plugin has a concrete implementation of the same
+pattern: `inspect_options()`, `modify_options()`, `inspect_status()`,
+`inspect_console()`, `preview_results()`, `inspect_actions()`, and
+`agent_invoke()`. See `dev/agent/ORTHOFINDER_API.md`.

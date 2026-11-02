@@ -21,6 +21,7 @@ streams its log to the Console tab.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import os
 import shutil
 import tempfile
@@ -67,6 +68,12 @@ from .components.methods.orthogroup_utils import (
     read_single_copy_ids,
     write_single_copy_ogs,
 )
+
+
+SOURCE_TYPES = ("gbff", "gbff_records", "proteome")
+RUN_MODES = ("full", "parse_only", "existing")
+INTERNAL_STOPS = ("skip", "warn", "keep")
+GENETIC_CODES = (None, 1, 2, 4, 5, 11)
 
 
 def _timestamp() -> str:
@@ -326,6 +333,12 @@ class OrthoFinderPlugin(BasePlugin):
         self._last_summary = None
         self.analysis_thread = None
         self._opened_from_yrmpea = import_from == "YR_MPEA"
+        self._status_state = "idle"
+        self._started_at = None
+        self._completed_at = None
+        self._last_error = ""
+        self._progress_text = ""
+        self._show_run_dialogs = True
         super().__init__(import_from, import_data, **kwargs)
         self.run_button.setText("Run pipeline")
 
@@ -940,11 +953,16 @@ class OrthoFinderPlugin(BasePlugin):
     # run lifecycle
     # ------------------------------------------------------------------
     def run_analysis(self):
-        if not self._validate_inputs(show=True):
-            return
+        return self.start_pipeline(show_dialogs=True)
+
+    def start_pipeline(self, show_dialogs=True):
+        """Start the pipeline. Agents call this with show_dialogs=False."""
+        self._show_run_dialogs = bool(show_dialogs)
+        if not self._validate_inputs(show=show_dialogs):
+            return False
         mode = self.run_mode_combo.currentData()
-        if mode != "parse_only" and not self._validate_runtime_inputs(show=True):
-            return
+        if mode != "parse_only" and not self._validate_runtime_inputs(show=show_dialogs):
+            return False
 
         output_dir = Path(self.output_edit.text())
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -952,6 +970,12 @@ class OrthoFinderPlugin(BasePlugin):
         default_table = self.genetic_code_combo.currentData() or 1
 
         self.is_running = True
+        self._status_state = "running"
+        self._started_at = time.time()
+        self._completed_at = None
+        self._last_error = ""
+        self._last_summary = None
+        self._progress_text = "Starting pipeline..."
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.progress_bar.setVisible(True)
@@ -960,29 +984,43 @@ class OrthoFinderPlugin(BasePlugin):
         self.tab_widget.setCurrentIndex(2)  # Console
         self.add_console_message("Starting OrthoFinder pipeline...", "info")
 
-        self.analysis_thread = OrthoFinderThread(
-            input_dir=self.input_edit.text(),
-            output_dir=str(output_dir),
-            source_mode=source_mode,
-            default_table=default_table,
-            skip_pseudo=self.skip_pseudo_check.isChecked(),
-            internal_stop=self.internal_stop_combo.currentData(),
-            keep_stop=self.keep_stop_check.isChecked(),
-            run_mode=mode,
-            orthofinder_path=self.orthofinder_edit.text(),
-            blast_dir=self.blast_edit.text(),
-            threads=self.threads_spin.value(),
-            existing_root=self.existing_edit.text() or None,
-            workdir=str(output_dir),
-        )
-        self.analysis_thread.progress.connect(self._on_progress)
-        self.analysis_thread.console_output.connect(self.add_console_message)
-        self.analysis_thread.result_summary.connect(self._on_summary)
-        self.analysis_thread.finished.connect(self.analysis_finished)
-        self.analysis_thread.error.connect(self.analysis_error)
-        self.analysis_thread.start()
+        try:
+            self.analysis_thread = OrthoFinderThread(
+                input_dir=self.input_edit.text(),
+                output_dir=str(output_dir),
+                source_mode=source_mode,
+                default_table=default_table,
+                skip_pseudo=self.skip_pseudo_check.isChecked(),
+                internal_stop=self.internal_stop_combo.currentData(),
+                keep_stop=self.keep_stop_check.isChecked(),
+                run_mode=mode,
+                orthofinder_path=self.orthofinder_edit.text(),
+                blast_dir=self.blast_edit.text(),
+                threads=self.threads_spin.value(),
+                existing_root=self.existing_edit.text() or None,
+            )
+            self.analysis_thread.progress.connect(self._on_progress)
+            self.analysis_thread.console_output.connect(self.add_console_message)
+            self.analysis_thread.result_summary.connect(self._on_summary)
+            self.analysis_thread.finished.connect(self.analysis_finished)
+            self.analysis_thread.error.connect(self.analysis_error)
+            self.analysis_thread.start()
+            return True
+        except Exception as exc:
+            self.is_running = False
+            self._status_state = "failed"
+            self._last_error = str(exc)
+            self._progress_text = "Failed to start"
+            self.run_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+            self.progress_bar.setVisible(False)
+            self.add_console_message("Pipeline failed to start: %s" % exc, "error")
+            if show_dialogs:
+                QMessageBox.critical(self, "Pipeline failed", str(exc))
+            return False
 
     def _on_progress(self, message: str) -> None:
+        self._progress_text = message
         self.progress_bar.setFormat(message)
         self.add_console_message(message, "info")
 
@@ -991,6 +1029,9 @@ class OrthoFinderPlugin(BasePlugin):
 
     def analysis_finished(self, output_files, html_files):
         self.is_running = False
+        self._status_state = "completed"
+        self._completed_at = time.time()
+        self._progress_text = "Completed"
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
@@ -1001,17 +1042,25 @@ class OrthoFinderPlugin(BasePlugin):
 
     def analysis_error(self, error_message: str):
         self.is_running = False
+        self._status_state = "failed"
+        self._completed_at = time.time()
+        self._last_error = error_message
+        self._progress_text = "Failed"
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.add_console_message(f"Pipeline failed: {error_message}", "error")
-        QMessageBox.critical(self, "Pipeline failed", error_message)
+        if self._show_run_dialogs:
+            QMessageBox.critical(self, "Pipeline failed", error_message)
 
     def stop_analysis(self):
         if self.analysis_thread and self.analysis_thread.isRunning():
             self.analysis_thread.stop()
             self.analysis_thread.wait()
         self.is_running = False
+        self._status_state = "stopped"
+        self._completed_at = time.time()
+        self._progress_text = "Stopped"
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
@@ -1054,6 +1103,422 @@ class OrthoFinderPlugin(BasePlugin):
             self.workspace_button.setEnabled(
                 self._opened_from_yrmpea and summary.get("single_copy_ogs", 0) > 0
             )
+
+    # ------------------------------------------------------------------
+    # semantic API for agents / scripts
+    # ------------------------------------------------------------------
+    def _collect_options(self):
+        return {
+            "source_type": self.source_combo.currentData(),
+            "input_path": self.input_edit.text(),
+            "output_dir": self.output_edit.text(),
+            "genetic_code": self.genetic_code_combo.currentData(),
+            "skip_pseudogenes": self.skip_pseudo_check.isChecked(),
+            "internal_stop": self.internal_stop_combo.currentData(),
+            "keep_terminal_stop": self.keep_stop_check.isChecked(),
+            "run_mode": self.run_mode_combo.currentData(),
+            "existing_results": self.existing_edit.text(),
+            "orthofinder_path": self.orthofinder_edit.text(),
+            "blast_dir": self.blast_edit.text(),
+            "threads": self.threads_spin.value(),
+        }
+
+    def inspect_options(self, as_json=False):
+        payload = {
+            "schema": "yrmpe.orthofinder.options.v1",
+            "tool": "OrthoFinder",
+            "options": self._collect_options(),
+            "constraints": {
+                "source_type": list(SOURCE_TYPES),
+                "genetic_code": list(GENETIC_CODES),
+                "internal_stop": list(INTERNAL_STOPS),
+                "run_mode": list(RUN_MODES),
+                "threads": {"min": self.threads_spin.minimum(),
+                            "max": self.threads_spin.maximum()},
+            },
+        }
+        if as_json:
+            return json.dumps(payload, indent=2, ensure_ascii=False)
+        return payload
+
+    def _set_combo_data(self, combo, value):
+        for index in range(combo.count()):
+            if combo.itemData(index) == value:
+                combo.setCurrentIndex(index)
+                return
+        raise ValueError("no combo entry for %r" % (value,))
+
+    @staticmethod
+    def _as_bool(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and value in (0, 1):
+            return bool(value)
+        text = str(value).strip().lower()
+        if text in ("true", "yes", "1", "on"):
+            return True
+        if text in ("false", "no", "0", "off"):
+            return False
+        raise ValueError("expected a boolean, got %r" % (value,))
+
+    def modify_options(self, options):
+        """Apply a dict/JSON option set atomically.
+
+        Returns {ok, applied, rejected, errors, options}. A single invalid key
+        rejects the whole patch so callers never get a half-applied state.
+        """
+        if isinstance(options, str):
+            try:
+                options = json.loads(options)
+            except Exception as exc:
+                return {"ok": False, "applied": [], "rejected": {},
+                        "errors": ["invalid JSON: %s" % exc],
+                        "options": self._collect_options()}
+        if not isinstance(options, dict):
+            return {"ok": False, "applied": [], "rejected": {},
+                    "errors": ["options must be an object"],
+                    "options": self._collect_options()}
+        if isinstance(options.get("options"), dict):
+            options = options["options"]
+
+        if self.is_running:
+            return {"ok": False, "applied": [], "rejected": options,
+                    "errors": ["pipeline is running; stop it before changing options"],
+                    "options": self._collect_options()}
+
+        aliases = {
+            "input": "input_path",
+            "output": "output_dir",
+            "transl_table": "genetic_code",
+            "existing": "existing_results",
+            "orthofinder_executable": "orthofinder_path",
+            "blast": "blast_dir",
+        }
+        source_aliases = {
+            "genbank": "gbff", "gb": "gbff", "genbank_folder": "gbff",
+            "multi_record": "gbff_records", "multi-record": "gbff_records",
+            "fasta": "proteome", "proteomes": "proteome",
+        }
+        run_aliases = {
+            "parse-only": "parse_only", "parse": "parse_only",
+            "existing_results": "existing", "existing_results_only": "existing",
+        }
+
+        normalized = {}
+        errors = []
+        rejected = {}
+        for raw_key, raw_value in options.items():
+            key = aliases.get(raw_key, raw_key)
+            try:
+                if key == "source_type":
+                    value = source_aliases.get(str(raw_value).strip().lower(), str(raw_value).strip().lower())
+                    if value not in SOURCE_TYPES:
+                        raise ValueError("source_type must be one of %s" % (SOURCE_TYPES,))
+                elif key in ("input_path", "output_dir", "existing_results",
+                             "orthofinder_path", "blast_dir"):
+                    value = str(raw_value)
+                elif key == "genetic_code":
+                    if raw_value in (None, "", "auto", "Auto", "None", "none"):
+                        value = None
+                    else:
+                        value = int(raw_value)
+                    if value not in GENETIC_CODES:
+                        raise ValueError("genetic_code must be one of %s" % (GENETIC_CODES,))
+                elif key in ("skip_pseudogenes", "keep_terminal_stop"):
+                    value = self._as_bool(raw_value)
+                elif key == "internal_stop":
+                    value = str(raw_value).strip().lower()
+                    if value not in INTERNAL_STOPS:
+                        raise ValueError("internal_stop must be one of %s" % (INTERNAL_STOPS,))
+                elif key == "run_mode":
+                    value = run_aliases.get(str(raw_value).strip().lower(), str(raw_value).strip().lower())
+                    if value not in RUN_MODES:
+                        raise ValueError("run_mode must be one of %s" % (RUN_MODES,))
+                elif key == "threads":
+                    value = int(raw_value)
+                    if not self.threads_spin.minimum() <= value <= self.threads_spin.maximum():
+                        raise ValueError("threads must be between %d and %d"
+                                         % (self.threads_spin.minimum(), self.threads_spin.maximum()))
+                else:
+                    raise KeyError("unknown option %r" % raw_key)
+                normalized[key] = value
+            except Exception as exc:
+                errors.append(str(exc))
+                rejected[raw_key] = str(exc)
+
+        if errors:
+            return {"ok": False, "applied": [], "rejected": rejected,
+                    "errors": errors, "options": self._collect_options()}
+
+        setters = {
+            "source_type": lambda v: self._set_combo_data(self.source_combo, v),
+            "input_path": lambda v: self.input_edit.setText(v),
+            "output_dir": lambda v: self.output_edit.setText(v),
+            "genetic_code": lambda v: self._set_combo_data(self.genetic_code_combo, v),
+            "skip_pseudogenes": lambda v: self.skip_pseudo_check.setChecked(v),
+            "internal_stop": lambda v: self._set_combo_data(self.internal_stop_combo, v),
+            "keep_terminal_stop": lambda v: self.keep_stop_check.setChecked(v),
+            "run_mode": lambda v: self._set_combo_data(self.run_mode_combo, v),
+            "existing_results": lambda v: self.existing_edit.setText(v),
+            "orthofinder_path": lambda v: self.orthofinder_edit.setText(v),
+            "blast_dir": lambda v: self.blast_edit.setText(v),
+            "threads": lambda v: self.threads_spin.setValue(v),
+        }
+        for key, value in normalized.items():
+            setters[key](value)
+        self._update_review()
+        return {"ok": True, "applied": list(normalized), "rejected": {},
+                "errors": [], "options": self._collect_options()}
+
+    def inspect_status(self):
+        running = bool(self.is_running or (self.analysis_thread and self.analysis_thread.isRunning()))
+        state = "running" if running else self._status_state
+        elapsed = None
+        if running and self._started_at:
+            elapsed = round(time.time() - self._started_at, 2)
+        elif self._last_summary and self._last_summary.get("elapsed") is not None:
+            elapsed = self._last_summary.get("elapsed")
+        elif self._started_at and self._completed_at:
+            elapsed = round(self._completed_at - self._started_at, 2)
+
+        max_value = self.progress_bar.maximum()
+        can_export = bool(
+            self._opened_from_yrmpea
+            and self.result_has_consumer()
+            and not running
+            and self._last_summary
+            and self._last_summary.get("single_copy_ogs", 0) > 0
+        )
+        return {
+            "schema": "yrmpe.orthofinder.status.v1",
+            "state": state,
+            "running": running,
+            "wizard_step": self.step_stack.currentIndex(),
+            "progress": {
+                "text": self._progress_text,
+                "visible": self.progress_bar.isVisible(),
+                "indeterminate": max_value == 0 and self.progress_bar.minimum() == 0,
+                "value": None if self.progress_bar.value() < 0 else self.progress_bar.value(),
+            },
+            "elapsed": elapsed,
+            "summary": dict(self._last_summary or {}),
+            "last_error": self._last_error,
+            "console_lines": len(self.console_output),
+            "can_run": not running,
+            "can_stop": running,
+            "can_export": can_export,
+            "can_close": not running,
+        }
+
+    def inspect_console(self, since=0, limit=200, level=None):
+        lines = self.console_output
+        start = max(0, int(since))
+        limit = max(1, min(int(limit), 1000))
+        window = list(enumerate(lines[start:start + limit], start=start))
+        selected = [
+            (index, line) for index, line in window
+            if not level or line.get("type") == level
+        ]
+        return {
+            "schema": "yrmpe.orthofinder.console.v1",
+            "total": len(lines),
+            "since": start,
+            "next": start + len(window),
+            "lines": [
+                {
+                    "index": index,
+                    "timestamp": line.get("timestamp", ""),
+                    "type": line.get("type", ""),
+                    "message": line.get("message", ""),
+                }
+                for index, line in selected
+            ],
+        }
+
+    def preview_results(self):
+        summary = dict(self._last_summary or {})
+        output_dir = Path(summary.get("output_dir") or self.output_edit.text())
+        files = []
+
+        def add_file(role, path):
+            path = Path(path)
+            item = {"role": role, "path": str(path), "exists": path.exists()}
+            if path.is_file() and path.exists():
+                item["size"] = path.stat().st_size
+            files.append(item)
+
+        add_file("cds_map", output_dir / "cds_map.tsv")
+        add_file("single_copy_summary", output_dir / "single_copy_ogs" / "single_copy_og_summary.tsv")
+        for path in sorted((output_dir / "proteomes").glob("*.faa")):
+            add_file("proteome", path)
+        for path in sorted((output_dir / "cds").glob("*.fna")):
+            add_file("cds", path)
+
+        orthogroups = None
+        orthofinder_root = output_dir / "orthofinder"
+        if self.run_mode_combo.currentData() == "existing" and self.existing_edit.text():
+            orthofinder_root = Path(self.existing_edit.text())
+        try:
+            orthogroups = str(find_orthogroups_dir(orthofinder_root) / "Orthogroups.tsv")
+        except Exception:
+            pass
+
+        single_copy = []
+        for path in sorted((output_dir / "single_copy_ogs").glob("*.cds.fna")):
+            og = path.name[: -len(".cds.fna")]
+            single_copy.append({
+                "orthogroup": og,
+                "cds_fasta": str(path),
+                "protein_fasta": str(path.with_name(og + ".faa")),
+                "map_tsv": str(path.with_name(og + ".map.tsv")),
+            })
+
+        return {
+            "schema": "yrmpe.orthofinder.results.v1",
+            "ready": bool(summary),
+            "output_dir": str(output_dir),
+            "summary": summary,
+            "orthogroups_tsv": orthogroups,
+            "single_copy_ogs": single_copy,
+            "files": files,
+        }
+
+    def validate_configuration(self):
+        input_ok = self._validate_inputs(show=False)
+        runtime_ok = self._validate_runtime_inputs(show=False)
+        return {
+            "ok": bool(input_ok and runtime_ok),
+            "input": bool(input_ok),
+            "runtime": bool(runtime_ok),
+            "status": self.inspect_status(),
+        }
+
+    def can_close(self):
+        running = bool(self.is_running or (self.analysis_thread and self.analysis_thread.isRunning()))
+        return {
+            "can_close": not running,
+            "running": running,
+            "reason": "pipeline is running; stop it before closing" if running else "",
+        }
+
+    def inspect_actions(self):
+        status = self.inspect_status()
+        can_export = status["can_export"]
+        output_ready = bool(self.output_edit.text()) and Path(self.output_edit.text()).is_dir()
+        actions = [
+            {"id": "orthofinder.run", "label": "Run pipeline", "enabled": status["can_run"],
+             "reason": "" if status["can_run"] else "pipeline already running",
+             "parameters": {"show_dialogs": {"type": "boolean", "required": False}}},
+            {"id": "orthofinder.stop", "label": "Stop pipeline", "enabled": status["can_stop"],
+             "reason": "" if status["can_stop"] else "pipeline is not running"},
+            {"id": "orthofinder.validate", "label": "Validate inputs/runtime",
+             "enabled": status["can_run"]},
+            {"id": "orthofinder.modify_options", "label": "Modify options",
+             "enabled": status["can_run"],
+             "parameters": {"options": {"type": "object", "required": True}}},
+            {"id": "orthofinder.preview_results", "label": "Preview result files",
+             "enabled": True},
+            {"id": "orthofinder.export_to_workspace", "label": "Import to YR-MPEA dataset",
+             "enabled": can_export,
+             "reason": "" if can_export else "run must complete and the plugin must be opened from YR-MPEA"},
+            {"id": "orthofinder.open_output", "label": "Open output folder",
+             "enabled": output_ready,
+             "reason": "" if output_ready else "output folder does not exist"},
+            {"id": "orthofinder.set_step", "label": "Switch wizard step",
+             "enabled": status["can_run"],
+             "parameters": {"step": {"type": "integer", "minimum": 0, "maximum": 2}}},
+            {"id": "orthofinder.close", "label": "Close window",
+             "enabled": status["can_close"],
+             "reason": "" if status["can_close"] else "stop the pipeline first"},
+        ]
+        return {
+            "schema": "yrmpe.orthofinder.actions.v1",
+            "actions": actions,
+            "next_import": {
+                "action": "orthofinder.export_to_workspace",
+                "target": "YR-MPEA dataset",
+                "enabled": can_export,
+            },
+        }
+
+    def agent_contract(self):
+        return {
+            "schema": "yrmpe.ui.orthofinder.v1",
+            "id": "one_step_orthofinder",
+            "options": self.inspect_options(),
+            "status": self.inspect_status(),
+            "actions": self.inspect_actions(),
+        }
+
+    def agent_invoke(self, action_id, params=None):
+        params = params or {}
+        name = action_id[len("orthofinder."):] if action_id.startswith("orthofinder.") else action_id
+        try:
+            if name == "inspect_options":
+                return {"ok": True, "result": self.inspect_options()}
+            if name == "inspect_status":
+                return {"ok": True, "result": self.inspect_status()}
+            if name == "inspect_console":
+                return {"ok": True, "result": self.inspect_console(
+                    since=params.get("since", 0),
+                    limit=params.get("limit", 200),
+                    level=params.get("level"),
+                )}
+            if name == "inspect_actions":
+                return {"ok": True, "result": self.inspect_actions()}
+            if name == "preview_results":
+                return {"ok": True, "result": self.preview_results()}
+            if name == "modify_options":
+                return self.modify_options(params.get("options", params))
+            if name == "validate":
+                return {"ok": True, "result": self.validate_configuration()}
+            if name == "run":
+                started = self.start_pipeline(show_dialogs=bool(params.get("show_dialogs", False)))
+                outcome = {"ok": started, "status": self.inspect_status()}
+                if not started:
+                    outcome["error"] = "input/runtime validation failed; call orthofinder.validate for details"
+                return outcome
+            if name == "stop":
+                self.stop_analysis()
+                return {"ok": True, "status": self.inspect_status()}
+            if name == "export_to_workspace":
+                outcome = self.export_to_workspace()
+                outcome["status"] = self.inspect_status()
+                return outcome
+            if name == "open_output":
+                folder = self.output_edit.text()
+                if not folder or not Path(folder).is_dir():
+                    return {"ok": False, "error": "output folder does not exist"}
+                self._open_output_folder()
+                return {"ok": True, "path": folder}
+            if name == "set_step":
+                self._set_step(int(params["step"]))
+                return {"ok": True, "status": self.inspect_status()}
+            if name == "close":
+                state = self.can_close()
+                if not state["can_close"]:
+                    return {"ok": False, "error": state["reason"]}
+                self.close()
+                return {"ok": True, "closed": True}
+            raise KeyError("unknown action %r" % action_id)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def closeEvent(self, event):
+        state = self.can_close()
+        if not state["can_close"]:
+            reply = QMessageBox.question(
+                self,
+                "Pipeline running",
+                "The OrthoFinder pipeline is still running. Stop it and close?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+            self.stop_analysis()
+        super().closeEvent(event)
 
     def _build_result_spec(self):
         """Build the dataset exported to YR-MPEA (one item per OG)."""
@@ -1133,41 +1598,40 @@ class OrthoFinderPlugin(BasePlugin):
             summary=dict(summary),
         )
 
-    def _export_to_workspace(self):
-        """Emit a standard ResultSpec for YR-MPEA's dataset importer."""
+    def export_to_workspace(self):
+        """Emit the dataset result. Returns a JSON-safe status dict."""
         if not self._opened_from_yrmpea or not self.result_has_consumer():
-            QMessageBox.information(
-                self,
-                "Not connected to YR-MPEA",
-                "Open One-Step OrthoFinder from YR-MPEA to export the result "
-                "as a workspace dataset.",
-            )
-            return
-
+            return {
+                "ok": False,
+                "error": "Not connected to YR-MPEA; open this plugin from the workspace.",
+            }
         try:
             result = self._build_result_spec()
         except Exception as exc:
-            QMessageBox.warning(self, "Export failed", str(exc))
-            return
+            return {"ok": False, "error": str(exc)}
 
         dataset = result.datasets[0]
         if not self.export_result(result):
-            QMessageBox.warning(
-                self, "Export failed",
-                "The result did not pass validation; see the Console tab.",
-            )
-            return
+            return {"ok": False, "error": "Result validation failed; see the console."}
 
         self.add_console_message(
             "Sent dataset %s to the YR-MPEA workspace (%d loci)."
             % (dataset.name, len(dataset.items)),
             "info",
         )
+        return {"ok": True, "dataset": dataset.name, "loci": len(dataset.items)}
+
+    def _export_to_workspace(self):
+        """UI wrapper for export_to_workspace()."""
+        outcome = self.export_to_workspace()
+        if not outcome.get("ok"):
+            QMessageBox.warning(self, "Export failed", outcome.get("error", "Unknown error"))
+            return
         QMessageBox.information(
             self,
             "Dataset exported",
             "Dataset: %s\nLoci: %d\n\nThe dataset is now in the YR-MPEA workspace."
-            % (dataset.name, len(dataset.items)),
+            % (outcome["dataset"], outcome["loci"]),
         )
 
     def _open_output_folder(self):
