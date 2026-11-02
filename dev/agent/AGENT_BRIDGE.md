@@ -116,6 +116,30 @@ printf '%s\n' '{"id":"c1","op":"bridge.ping"}' >> "$SESSION/commands.jsonl"
 - Paths supplied to actions are validated by the action handler (for example,
   OrthoFinder validates input/runtime before running).
 
+## QTimer vs a tail thread
+
+`poll_once()` is not only "read agent input": it reads new command bytes,
+dispatches registered actions, writes responses/events and emits heartbeats.
+In the GUI it should run on the Qt main thread via a `QTimer` (100–200 ms).
+Qt widgets must not be touched from a worker thread; dispatching actions in
+the timer keeps `modify_options`, `run`, `show_item`, etc. on the GUI thread.
+
+A `tail -f`-style thread is possible, but split it correctly:
+
+- the thread only does file I/O and parses JSON;
+- it emits a Qt signal with the command dict (queued connection);
+- a main-thread slot calls `registry.invoke()`.
+
+Do **not** call widget handlers directly from the tail thread. Regular files
+do not support blocking `readline()` like a pipe, so a thread still needs a
+poll/sleep loop or an OS watcher; `QFileSystemWatcher` can miss append/truncate
+events on Windows, so byte-offset polling is more reliable. For true blocking
+reads, add a named pipe / Unix FIFO / localhost socket transport later and
+reuse the same command/response schema.
+
+Start with `QTimer`; add a thread only if the GUI stalls or sub-50 ms command
+latency is required. Tool runs, not file I/O, dominate the workflow.
+
 ## Host wiring (next step)
 
 1. Create `UIActionRegistry` at app startup.

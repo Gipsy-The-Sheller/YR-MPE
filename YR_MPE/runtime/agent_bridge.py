@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -99,6 +100,7 @@ class AgentBridge:
         self._offset = 0
         self._buffer = ""
         self._seq = 0
+        self._io_lock = threading.RLock()
         self._closed = False
         self._started_at = _now()
         self._last_heartbeat = 0.0
@@ -146,8 +148,9 @@ class AgentBridge:
     # ------------------------------------------------------------------
     def _append_jsonl(self, path: Path, payload: Dict[str, Any]) -> None:
         line = json.dumps(_jsonable(payload), ensure_ascii=False)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+        with self._io_lock:
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
 
     def emit_event(
         self,
@@ -160,26 +163,27 @@ class AgentBridge:
         run_id: Optional[str] = None,
         code: Optional[str] = None,
     ) -> Dict[str, Any]:
-        self._seq += 1
-        event = {
-            "schema": EVENT_SCHEMA,
-            "seq": self._seq,
-            "ts": _now(),
-            "stream": stream,
-            "level": level,
-            "kind": kind,
-            "source": source,
-            "message": message,
-            "code": code,
-            "run_id": run_id,
-            "payload": _jsonable(payload or {}),
-        }
-        self._append_jsonl(self.events_path, event)
-        raw = message if message else json.dumps(event["payload"], ensure_ascii=False)
-        if raw:
-            target = self.stderr_path if stream == "stderr" else self.stdout_path
-            with target.open("a", encoding="utf-8") as handle:
-                handle.write(raw + "\n")
+        with self._io_lock:
+            self._seq += 1
+            event = {
+                "schema": EVENT_SCHEMA,
+                "seq": self._seq,
+                "ts": _now(),
+                "stream": stream,
+                "level": level,
+                "kind": kind,
+                "source": source,
+                "message": message,
+                "code": code,
+                "run_id": run_id,
+                "payload": _jsonable(payload or {}),
+            }
+            self._append_jsonl(self.events_path, event)
+            raw = message if message else json.dumps(event["payload"], ensure_ascii=False)
+            if raw:
+                target = self.stderr_path if stream == "stderr" else self.stdout_path
+                with target.open("a", encoding="utf-8") as handle:
+                    handle.write(raw + "\n")
         return event
 
     def emit_stdout(self, message: str, source: str = "app", level: str = "info") -> Dict[str, Any]:
