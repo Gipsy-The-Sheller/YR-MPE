@@ -100,6 +100,10 @@ class PluginFactory:
     def get_seqdbg_plugin(self):
         """获取SeqDBG插件"""
         return self.load_plugin("YR_MPE.plugins.seqdbg_plugin", "SeqDBGPlugin")
+
+    def get_orthofinder_plugin(self):
+        """获取 OrthoFinder 基因组数据集插件"""
+        return self.load_plugin("YR_MPE.plugins.orthofinder_plugin", "OrthoFinderPluginEntry")
     
     def get_model_parameter_plugin(self):
         """获取Model Parameter Estimation插件"""

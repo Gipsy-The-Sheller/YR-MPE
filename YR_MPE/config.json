@@ -62,5 +62,9 @@
     {
         "name": "MPBoot",
         "path": "/bin/mpboot/mpboot.exe"
+    },
+    {
+        "name": "OrthoFinder",
+        "path": "E:/YR-MPE_tutorial/YR-MPE_dev/dev/bin/orthofinder/orthofinder.exe"
     }
 ]

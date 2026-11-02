@@ -72,14 +72,16 @@ class BaseProcessThread(QThread):
         # 这里应该被子类重写
         self.error.emit("execute_commands method not implemented in subclass")
     
-    def execute_command(self, cmd: List[str], cwd: Optional[str] = None) -> subprocess.CompletedProcess:
+    def execute_command(self, cmd: List[str], cwd: Optional[str] = None,
+                        env: Optional[dict] = None) -> subprocess.CompletedProcess:
         """
         执行单个命令
-        
+
         Args:
             cmd (List[str]): 命令和参数列表
             cwd (Optional[str]): 工作目录
-            
+            env (Optional[dict]): 子进程环境变量（用于注入 PATH/runtime）
+
         Returns:
             subprocess.CompletedProcess: 命令执行结果
         """
@@ -101,6 +103,9 @@ class BaseProcessThread(QThread):
                 universal_newlines=True,
                 bufsize=1,  # 行缓冲
                 cwd=cwd,
+                env=env,
+                encoding="utf-8",
+                errors="replace",
                 startupinfo=startupinfo  # Windows隐藏控制台窗口
             )
 

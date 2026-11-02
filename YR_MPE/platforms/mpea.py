@@ -450,7 +450,12 @@ class YR_MPEA_Widget(QWidget):
         create_seqdbg_action.setIcon(self.resource_factory.get_icon("seqdbg/seqdbg.svg"))
         create_seqdbg_action.triggered.connect(self.create_dataset_by_seqdbg)
         dataset_menu.addAction(create_seqdbg_action)
-        
+
+        create_orthofinder_action = QAction("Genomic Dataset Formation (OrthoFinder)", dataset_menu)
+        create_orthofinder_action.setIcon(self.resource_factory.get_icon("file/dataset.svg"))
+        create_orthofinder_action.triggered.connect(self.create_dataset_by_orthofinder)
+        dataset_menu.addAction(create_orthofinder_action)
+
         dataset_action.setMenu(dataset_menu)
         workspace_button.addAction(dataset_action)
         
@@ -707,6 +712,10 @@ class YR_MPEA_Widget(QWidget):
         lsd2_action.setIcon(self.resource_factory.get_icon("software/lsd2.svg"))
         lsd2_action.triggered.connect(self.open_lsd2_wrapper)
         clock_button_menu.addAction(lsd2_action)
+
+        clock_button_menu.addSeparator()
+        # MrBayes
+        clock_button_menu.addAction(mrbayes_action)
 
         # mainworkspace_group = QGroupBox("Workspace")
         # # mainworkspace_layout = QGridLayout(10,4)
@@ -1885,6 +1894,18 @@ class YR_MPEA_Widget(QWidget):
             self.open_seqdbg_wrapper()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create dataset by SeqDBG: {str(e)}")
+
+    def create_dataset_by_orthofinder(self):
+        """Open the Genomic Dataset Formation (OrthoFinder) plugin."""
+        try:
+            entry = self.plugin_factory.get_orthofinder_plugin()
+            window = entry.run(import_from="YR_MPEA", workdir=self.get_workdir())
+            if not hasattr(self, "orthofinder_windows"):
+                self.orthofinder_windows = []
+            self.orthofinder_windows.append(window)
+            window.show()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open OrthoFinder: {str(e)}")
     
     def _check_workspace_required(self, plugin_name: str) -> bool:
         """
