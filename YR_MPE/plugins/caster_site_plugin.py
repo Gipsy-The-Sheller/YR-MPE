@@ -271,10 +271,7 @@ class CasterSitePlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "CASTER-site"
         self.tool_name = "caster-site"
-        self.citation = [
-            "Chao Zhang, Rasmus Nielsen, Siavash Mirarab, ASTER: A Package for Large-Scale Phylogenomic Reconstructions, Molecular Biology and Evolution, Volume 42, Issue 8, August 2025, msaf172, https://doi.org/10.1093/molbev/msaf172",
-            "Chao Zhang et al., CASTER: Direct species tree inference from whole-genome alignments. Science 387, eadk9688 (2025). DOI: 10.1126/science.adk9688"
-        ]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {
             "FASTA": ["fas", "fna", "fa", "fasta"],
             "List": ["txt"],

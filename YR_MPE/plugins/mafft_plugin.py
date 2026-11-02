@@ -156,7 +156,7 @@ class MAFFTPlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "MAFFT Aligner"
         self.tool_name = "MAFFT"
-        self.citation = ["""Kazutaka Katoh, Kazuharu Misawa, Kei‐ichi Kuma, Takashi Miyata, MAFFT: a novel method for rapid multiple sequence alignment based on fast Fourier transform, <i>Nucleic Acids Research</i>, Volume 30, Issue 14, 15 July 2002, Pages 3059–3066. DOI: <a href="https://doi.org/10.1093/nar/gkf436">10.1093/nar/gkf436</a>"""]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"]}
         self.output_types = {"FASTA": ".fas"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')

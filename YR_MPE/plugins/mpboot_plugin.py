@@ -255,9 +255,7 @@ class MPBootPlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "MPBoot Phylogeny"
         self.tool_name = "MPBoot"
-        self.citation = [
-            """D.T. Hoang, L.S. Vinh, T. Flouri, A. Stamatakis, A. von Haeseler, and B.Q. Minh (2018) MPBoot: fast phylogenetic maximum parsimony tree inference and bootstrap approximation. BMC Evol. Biol., 18, 11. https://doi.org/10.1186/s12862-018-1131-3"""
-        ]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], "PHYLIP": ["phy"]}
         self.output_types = {"Newick Tree": ".treefile", "MPBoot Report": ".mpboot"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')

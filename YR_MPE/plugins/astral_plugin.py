@@ -451,9 +451,7 @@ class AstralPlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "ASTRAL"
         self.tool_name = "astral"
-        self.citation = [
-            "Chao Zhang, Rasmus Nielsen, Siavash Mirarab, ASTER: A Package for Large-Scale Phylogenomic Reconstructions, Molecular Biology and Evolution, Volume 42, Issue 8, August 2025, msaf172, https://doi.org/10.1093/molbev/msaf172"
-        ]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {
             "Newick": ["nwk", "newick", "tre", "tree"]
         }

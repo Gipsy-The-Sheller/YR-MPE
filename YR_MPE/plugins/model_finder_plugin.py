@@ -127,10 +127,8 @@ class ModelFinderPlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "IQ-TREE ModelFinder"
         self.tool_name = "IQ-Tree 3"
-        self.citation = [
-            """Bui Quang Minh, Heiko A. Schmidt, Olga Chernomor, Dominik Schrempf, Michael D. Woodhams, Arndt von Haeseler, and Robert Lanfear (2020) IQ-TREE 2: New models and efficient methods for phylogenetic inference in the genomic era. Mol. Biol. Evol., in press. https://doi.org/10.1038/s41586-020-2176-9""",
-            """Subha Kalyaanamoorthy, Bui Quang Minh, Thomas KF Wong, Arndt von Haeseler, and Lars S Jermiin (2017) ModelFinder: Fast model selection for accurate phylogenetic estimates. Nature Methods, 14:587–589. https://doi.org/10.1038/nmeth.4285"""
-        ]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        self.citation_keys = ["kalyaanamoorthy2017modelfinder"]
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], "PHYLIP": ["phy"]}
         self.output_types = {"IQ-TREE": ".iqtree"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
@@ -1326,7 +1324,7 @@ class ModelFinderPlugin(BasePlugin):
     def copy_citation(self):
         """复制引用"""
         clipboard = QApplication.clipboard()
-        clipboard.setText("\n".join(self.citation))
+        clipboard.setText("\n".join(self.get_citation_text()))
         QMessageBox.information(self, "Copied", "Citation copied to clipboard!")
 
 

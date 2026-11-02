@@ -8,11 +8,14 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtGui import QFont, QTextCursor, QIcon
 import json
 import os
+import re
 import subprocess
 import tempfile
 import platform
 import datetime
 from Bio import SeqIO
+
+from ..runtime.citations import get_citation_library
 
 
 class BasePlugin(QWidget):
@@ -52,6 +55,10 @@ class BasePlugin(QWidget):
         # 运行状态
         self.is_running = False
         self.tool_path = None
+        self.plugin_config = None
+        self.citation_keys = []
+        self._missing_citation_keys = []
+        self.auto_scroll = True
         
         # 数据存储
         self.imported_files = []  # 导入的文件路径列表
@@ -93,10 +100,32 @@ class BasePlugin(QWidget):
         return {
             "name": self.plugin_name,
             "tool": self.tool_name,
-            "citation": self.citation,
+            "citation": self.get_citation(),
             "input_types": self.input_types,
             "output_types": self.output_types
         }
+
+    def _find_plugin_config(self):
+        """Return this plugin's entry in config.json, if any."""
+        if self.plugin_config is not None:
+            return self.plugin_config
+
+        try:
+            config_path = os.path.join(self.plugin_path, "config.json")
+            if not os.path.exists(config_path):
+                return None
+
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+
+            for tool in config_data:
+                if tool.get("name", "").lower() == self.tool_name.lower():
+                    self.plugin_config = tool
+                    return tool
+        except Exception as e:
+            print(f"Config lookup failed: {e}")
+
+        return None
 
     def config(self):
         """
@@ -106,28 +135,85 @@ class BasePlugin(QWidget):
             bool: 配置是否有效
         """
         try:
-            config_path = os.path.join(self.plugin_path, "config.json")
-            if not os.path.exists(config_path):
-                return False
-
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config_data = json.load(f)
-
-            plugin_config = None
-            for tool in config_data:
-                if tool.get("name").lower() == self.tool_name.lower():
-                    plugin_config = tool
-                    break
-
+            plugin_config = self._find_plugin_config()
             if not plugin_config:
                 return False
 
-            self.tool_path = os.path.join(self.plugin_path, plugin_config["path"].lstrip("/").lstrip("\\"))
+            tool_path = plugin_config.get("path", "")
+            if not tool_path:
+                # Built-in tools have no executable; their citation entry is
+                # still valid config.
+                return bool(plugin_config.get("builtin"))
+
+            self.tool_path = os.path.join(self.plugin_path, tool_path.lstrip("/").lstrip("\\"))
             return os.path.exists(self.tool_path)
 
         except Exception as e:
             print(f"Config check failed: {e}")
             return False
+
+    def get_citation_keys(self):
+        """Return citation keys for this plugin, config first.
+
+        A tool entry in config.json may carry ``"citations": [...]`` (or a
+        single ``"citation": "key"``). Composite/built-in plugins that do
+        not map 1:1 to a binary can add extra keys in ``self.citation_keys``;
+        the citation text itself still lives in citations/*.bib|*.ris.
+        """
+        keys = []
+
+        plugin_config = self._find_plugin_config()
+        if plugin_config:
+            raw = plugin_config.get("citations", plugin_config.get("citation"))
+            if isinstance(raw, str):
+                keys.append(raw)
+            elif isinstance(raw, (list, tuple)):
+                keys.extend(str(key) for key in raw)
+
+        keys.extend(str(key) for key in (self.citation_keys or []))
+
+        seen = set()
+        ordered = []
+        for key in keys:
+            key = key.strip()
+            if key and key not in seen:
+                seen.add(key)
+                ordered.append(key)
+        return ordered
+
+    def get_citation(self):
+        """Resolve citations from the library; fall back to legacy text."""
+        keys = self.get_citation_keys()
+        self._missing_citation_keys = []
+
+        if keys:
+            library = get_citation_library(os.path.join(self.plugin_path, "citations"))
+            entries, missing = library.get_many(keys)
+            self._missing_citation_keys = missing
+            if missing and hasattr(self, "console_text"):
+                self.add_console_message(
+                    "Missing citation key(s) in citations/: " + ", ".join(missing),
+                    "warning",
+                )
+            if entries:
+                return [entry.format_html() for entry in entries]
+
+        if self.citation:
+            return self.citation
+        return ["No citation available"]
+
+    def get_citation_text(self):
+        """Plain-text citations for the clipboard."""
+        keys = self.get_citation_keys()
+        if keys:
+            library = get_citation_library(os.path.join(self.plugin_path, "citations"))
+            entries, _missing = library.get_many(keys)
+            if entries:
+                return [entry.format_text() for entry in entries]
+
+        if self.citation:
+            return [re.sub(r"<[^>]+>", "", item) for item in self.citation]
+        return []
 
     def show_config_guide(self):
         """
@@ -331,6 +417,14 @@ class BasePlugin(QWidget):
 
         # find citation
         citation = self.get_citation()
+        if self._missing_citation_keys:
+            warning = QLabel(
+                "Missing citation key(s) in citations/: "
+                + ", ".join(self._missing_citation_keys)
+            )
+            warning.setWordWrap(True)
+            warning.setStyleSheet("color: #b45309;")
+            self.citation_tab_layout.addWidget(warning)
         for i in citation:
             self.export_citation_layout(i)
         self.citation_tab_layout.addStretch()
@@ -351,7 +445,7 @@ class BasePlugin(QWidget):
             """
             复制引用信息到剪贴板
             """
-            QApplication.clipboard().setText(citation)
+            QApplication.clipboard().setText(re.sub(r"<[^>]+>", "", citation))
             self.add_console_message("Citation copied to clipboard", "info")
         copy_btn = QPushButton()
         copy_btn.setIcon(QIcon(os.path.join(self.plugin_path, "icons/copy.svg")))
@@ -450,15 +544,6 @@ class BasePlugin(QWidget):
             'type': msg_type,
             'formatted': formatted_msg
         })
-
-    def get_citation(self):
-        """
-        获取引用信息
-        
-        Returns:
-            str: 插件的引用信息
-        """
-        return self.citation
 
     def run_analysis(self):
         """

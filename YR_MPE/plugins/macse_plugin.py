@@ -268,10 +268,7 @@ class MACSEPlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "MACSE Aligner"
         self.tool_name = "MACSE2"
-        self.citation = [
-            """Ranwez V, Douzery EJP, Cambon C, Chantret N, Delsuc F. MACSE v2: Toolkit for the Alignment of Coding Sequences Accounting for Frameshifts and Stop Codons. <i>Molecular Biology and Evolution</i>. 2020;35(10):2582-2584. DOI: <a href="https://doi.org/10.1093/molbev/msy159">10.1093/molbev/msy159</a>""",
-            """Ranwez V, Harispe S, Delsuc F, Douzery EJP. MACSE: Multiple Alignment of Coding SEquences accounting for frameshifts and stop codons. <i>PLoS One</i>. 2011;6(9):e22594. DOI: <a href="https://doi.org/10.1371/journal.pone.0022594">10.1371/journal.pone.0022594</a>"""
-        ]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"]}
         self.output_types = {"FASTA": ".fasta"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')

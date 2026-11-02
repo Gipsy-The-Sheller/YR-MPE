@@ -330,23 +330,7 @@ class OrthoFinderPlugin(BasePlugin):
     def init_plugin_info(self):
         self.plugin_name = "One-Step OrthoFinder (for Organelle Genomes)"
         self.tool_name = "OrthoFinder"
-        self.citation = [
-            "Emms, D. M. & Kelly, S. (2019) OrthoFinder: phylogenetic orthology "
-            "inference for comparative genomics. Genome Biology 20:238. "
-            "doi: <a href='https://doi.org/10.1186/s13059-019-1816-6'>"
-            "10.1186/s13059-019-1816-6</a>",
-            "Camacho, C. et al. (2009) BLAST+: architecture and applications. "
-            "BMC Bioinformatics 10:421. "
-            "doi: <a href='https://doi.org/10.1186/1471-2105-10-421'>"
-            "10.1186/1471-2105-10-421</a>",
-            "van Dongen, S. (2000) Graph clustering by flow simulation. "
-            "PhD thesis, University of Utrecht (MCL).",
-            "Cock, P. J. A. et al. (2009) Biopython: freely available Python tools "
-            "for computational molecular biology and bioinformatics. "
-            "Bioinformatics 25:1422-1423. "
-            "doi: <a href='https://doi.org/10.1093/bioinformatics/btp163'>"
-            "10.1093/bioinformatics/btp163</a>",
-        ]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {
             "GenBank": ["gb", "gbff", "gbk"],
             "Proteome FASTA": ["fa", "faa", "fasta"],

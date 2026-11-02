@@ -544,7 +544,7 @@ class Muscle5Plugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "MUSCLE5 Aligner"
         self.tool_name = "Muscle5"
-        self.citation = ["""Edgar, R.C. Muscle5: High-accuracy alignment ensembles enable unbiased assessments of sequence homology and phylogeny. <i>Nat Commun</i> <b>13</b>, 6968 (2022). DOI: <a href="https://doi.org/10.1038/s41467-022-34630-w">10.1038/s41467-022-34630-w</a>"""]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"]}
         self.output_types = {"FASTA": ".fas"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
@@ -1060,7 +1060,7 @@ class Muscle5Plugin(BasePlugin):
     def copy_citation(self):
         """复制引用信息到剪贴板"""
         from PyQt5.QtWidgets import QApplication
-        QApplication.clipboard().setText(self.get_citation())
+        QApplication.clipboard().setText("\n".join(self.get_citation_text()))
         self.add_console_message("Citation copied to clipboard", "info")
 
 

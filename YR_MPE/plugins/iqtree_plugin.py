@@ -138,9 +138,7 @@ class IQTreePlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "IQ-TREE Phylogeny"
         self.tool_name = "IQ-TREE 3"
-        self.citation = [
-            """Bui Quang Minh, Heiko A. Schmidt, Olga Chernomor, Dominik Schrempf, Michael D. Woodhams, Arndt von Haeseler, and Robert Lanfear (2020) IQ-TREE 2: New models and efficient methods for phylogenetic inference in the genomic era. Mol. Biol. Evol., in press. https://doi.org/10.1093/molbev/msaa015"""
-        ]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], "PHYLIP": ["phy"]}
         self.output_types = {"Newick Tree": ".treefile", "IQ-TREE Report": ".iqtree"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')

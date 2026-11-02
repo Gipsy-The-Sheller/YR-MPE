@@ -210,16 +210,12 @@ class GBlocksPlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "GBlocks Trimmer"
         self.tool_name = "GBlocks"
-        self.citation = ["""Talavera, G., and Castresana, J. 2007. Improvement of phylogenies after removing divergent and ambiguously aligned blocks from protein sequence alignments. Systematic Biology 56: 564-577. doi: <a href='https://doi.org/10.1080/10635150701472164'>10.1080/10635150701472164</a>."""]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], 
                            "NBRF/PIR": ["pir"]}
         self.output_types = {"FASTA": ".fas"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
     
-    def get_citation(self):
-        """获取引用信息"""
-        return self.citation
-
     def setup_input_tab(self):
         """设置输入和参数标签页"""
         layout = QVBoxLayout()

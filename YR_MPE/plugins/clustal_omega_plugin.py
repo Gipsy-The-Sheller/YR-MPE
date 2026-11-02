@@ -110,7 +110,7 @@ class ClustalOmegaPlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "Clustal Omega Aligner"
         self.tool_name = "Clustal Omega"
-        self.citation = ["""Sievers F, Wilm A, Dineen D, et al. Fast, scalable generation of high-quality protein multiple sequence alignments using Clustal Omega. <i>Mol Syst Biol.</i> 2011;7:539. Published 2011 Oct 11. DOI: <a href="https://doi.org/10.1038/msb.2011.75">10.1038/msb.2011.75</a>"""]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"]}
         self.output_types = {"FASTA": ".fas"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')

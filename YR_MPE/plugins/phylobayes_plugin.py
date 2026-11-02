@@ -215,12 +215,7 @@ class PhyloBayesPlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "PhyloBayes-MPI Phylogeny"
         self.tool_name = "PhyloBayes-MPI"
-        self.citation = [
-            """Lartillot N., Philippe H. A Bayesian Mixture Model for Across-Site Heterogeneities in the Amino-Acid Replacement Process. Molecular Biology and Evolution 2004 21(6): 1095-1109.""",
-            """Lartillot N., Philippe H. Computing Bayes factors using thermodynamic integration. Systematic Biology 2006 55:195-207.""",
-            """Lartillot N., Brinkmann H., Philippe H. Suppression of long-branch attraction artefacts in the animal phylogeny using a site-heterogeneous model. BMC Evolutionary Biology 2007 Feb 8;7 Suppl 1:S4.""",
-            """Nicolas Lartillot, Thomas Lepage and Samuel Blanquart. PhyloBayes 3: a Bayesian software package for phylogenetic reconstruction and molecular dating. Bioinformatics 2009 25(17): 2286–2288."""
-        ]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {"PHYLIP": ["phy"], "Chain File": [""]}
         self.output_types = {"Chain File": [".chain"], "Tree File": [".con.tre"], "Tree List": [".treelist"]}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')

@@ -75,7 +75,7 @@ class DecentTreePlugin(BasePlugin):
     def init_plugin_info(self):
         self.plugin_name = "DecentTree Distance Methods"
         self.tool_name = "DecentTree"
-        self.citation = ["Weiwen Wang, James Barbetti, Thomas Wong, Bryan Thornlow, Russ Corbett-Detig, Yatish Turakhia, Robert Lanfear, Bui Quang Minh, DecentTree: scalable Neighbour-Joining for the genomic era, Bioinformatics, Volume 39, Issue 9, September 2023, btad536, doi: <a href='https://doi.org/10.1093/bioinformatics/btad536'>10.1093/bioinformatics/btad536</a>"]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {"ML Distance Matrix": ["mldist", "dist"]}
         self.output_types = {"Newick Tree": ".nwk"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')

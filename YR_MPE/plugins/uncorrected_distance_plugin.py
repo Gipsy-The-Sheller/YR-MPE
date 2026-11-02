@@ -195,7 +195,7 @@ class UncorrectedDistancePlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "Uncorrected Distance (p-distance)"
         self.tool_name = "Built-in Python Implementation"
-        self.citation = []  # 空的引用列表
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], "NEXUS": ["nex", "nexus"]}
         self.output_types = {"Distance Matrix": ".dist"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')

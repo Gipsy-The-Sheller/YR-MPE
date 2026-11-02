@@ -57,6 +57,9 @@ class PdGuidePlugin(BasePlugin):
             # "Newick Tree": ".nwk",
             # "JSON": ".json"
         }
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        # PD-Guide composes LSD2 (from config) with IQ-TREE and MCMCTree.
+        self.citation_keys = ["minh2020iqtree", "yang2007paml", "dosreis2011approximate"]
     
     def get_tool_path(self, tool_name):
         """获取工具可执行文件路径"""

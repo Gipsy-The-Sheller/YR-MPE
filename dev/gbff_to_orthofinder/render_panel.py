@@ -1,4 +1,7 @@
-"""Render the OrthoFinder plugin panel to PNG files (offscreen Qt)."""
+"""Render the OrthoFinder plugin panel to PNG files.
+
+The renderer uses the host platform style and font; it does not set a QStyle.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,10 @@ import os
 import sys
 from pathlib import Path
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Use the host platform/style; never force Fusion or another QStyle.
+# YRTools owns the application stylesheet and font.
+if os.environ.get("QT_QPA_PLATFORM") is None:
+    os.environ["QT_QPA_PLATFORM"] = "windows" if sys.platform == "win32" else "offscreen"
 
 from PyQt5.QtCore import Qt  # noqa: E402
 from PyQt5.QtGui import QFont, QFontDatabase  # noqa: E402
@@ -99,6 +105,11 @@ def main() -> int:
     })
     app.processEvents()
     plugin.grab().save(str(out_dir / "04_output.png"))
+
+    # Citation tab: parsed from citations/software.bib via config.json
+    plugin.tab_widget.setCurrentIndex(3)
+    app.processEvents()
+    plugin.grab().save(str(out_dir / "06_citation.png"))
 
     plugin.close()
     print("wrote:")

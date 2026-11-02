@@ -118,7 +118,7 @@ class TrimAlPlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "TrimAl Trimmer"
         self.tool_name = "TrimAl"
-        self.citation = ["""Capella-Gutierrez S, Silla-Martinez JM, Gabaldon T. 2009. trimAl: a tool for automated alignment trimming in large-scale phylogenetic analyses. Bioinformatics. 25: 1972-1973. doi: <a href='https://doi.org/10.1093/bioinformatics/btp348'>10.1093/bioinformatics/btp348</a>."""]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], 
                            "CLUSTAL": ["aln"], 
                            "PHYLIP": ["phy"],
@@ -126,10 +126,6 @@ class TrimAlPlugin(BasePlugin):
         self.output_types = {"FASTA": ".fas"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
     
-    def get_citation(self):
-        """获取引用信息"""
-        return self.citation
-
     def handle_import_data(self, import_data):
         """处理从YR-MPEA或Dataset Manager导入的数据"""
         if isinstance(import_data, list):

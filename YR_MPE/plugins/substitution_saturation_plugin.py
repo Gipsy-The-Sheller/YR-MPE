@@ -334,9 +334,8 @@ class SubstitutionSaturationPlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "Substitution Saturation Analysis"
         self.tool_name = "Built-in Python Implementation (BaCoCa Method)"
-        self.citation = [
-            """Kück, P., & Struck, T. H. (2014). BaCoCa--a heuristic software tool for the parallel assessment of sequence biases in hundreds of gene and taxon partitions. Molecular Phylogenetics and Evolution, 70, 94–98. https://doi.org/10.1016/j.ympev.2013.09.011"""
-        ]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        self.citation_keys = ["kuck2014bacoca"]
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], "NEXUS": ["nex", "nexus"]}
         self.output_types = {"Saturation Plot": ".png", "Report": ".txt"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')

@@ -751,10 +751,7 @@ class MrBayesPlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "MrBayes-MPI-BEAGLE Phylogeny"
         self.tool_name = "MrBayes-MPI-BEAGLE"
-        self.citation = [
-            """Ronquist, F., Teslenko, M., van der Mark, P., Ayres, D. L., Darling, A., Höhna, S., Larget, B., Liu, L., Suchard, M. A., & Huelsenbeck, J. P. (2012). MrBayes 3.2: efficient Bayesian phylogenetic inference and model choice across a large model space. Systematic biology, 61(3), 539–542. https://doi.org/10.1093/sysbio/sys029""",
-            """Daniel L Ayres, Michael P Cummings, Guy Baele, Aaron E Darling, Paul O Lewis, David L Swofford, John P Huelsenbeck, Philippe Lemey, Andrew Rambaut, Marc A Suchard, BEAGLE 3: Improved Performance, Scaling, and Usability for a High-Performance Computing Library for Statistical Phylogenetics, Systematic Biology, Volume 68, Issue 6, November 2019, Pages 1052–1061, https://doi.org/10.1093/sysbio/syz020"""
-        ]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         self.input_types = {"PHYLIP": ["phy"], "NEXUS": ["nex", "nexus"], "Chain File": [""]}
         self.output_types = {"Chain File": [".chain"], "Tree File": [".con.tre"]}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')

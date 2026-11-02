@@ -61,7 +61,7 @@ class LSD2Plugin(BasePlugin):
             "Newick Tree": ".nwk",
             "Result File": ".result"
         }
-        self.citation = ["To T, Jungreis I, Linard B, et al. (2016) Fast dating using least-squares criteria and algorithms. Syst Biol 65(1):82-96."]
+        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
     
     def config(self):
         """检查插件配置"""
