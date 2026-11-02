@@ -1,0 +1,9 @@
+# Local prototype runtime (OrthoFinder + BLAST + MCL, ~264 MB)
+bin/
+
+# Generated test output
+gbff_to_orthofinder/testdata/work/
+
+# Python caches
+__pycache__/
+*.pyc
