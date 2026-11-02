@@ -18,7 +18,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from PyQt5.QtCore import QSize, Qt, pyqtSignal
+from PyQt5.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QAbstractItemView,
@@ -27,13 +27,17 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QStyle,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -127,6 +131,11 @@ class InspectorPanel(QWidget):
         self.current_dataset_id: Optional[str] = None
         self._item_nodes: Dict[str, QTreeWidgetItem] = {}
         self._run_nodes: Dict[str, QTreeWidgetItem] = {}
+        self._metadata_expanded = False
+        self._has_operations = False
+        self._has_run = False
+        self._metadata_collapsed_height = 132
+        self._metadata_animation: Optional[QPropertyAnimation] = None
 
         self.setObjectName("inspector")
         self._icons = {}
@@ -154,11 +163,15 @@ class InspectorPanel(QWidget):
         self.current_dataset_id = None
         self.title_label.setText("Inspector")
         self.subtitle_label.setText("Select a data node or dataset")
+        self._has_operations = False
+        self._has_run = False
+        self._metadata_expanded = False
         self._clear_operations()
-        self._set_operations_visible(False)
         self._set_form_rows([])
         self.workflow_tree.clear()
-        self.run_section.setVisible(False)
+        self.metadata_toggle.setEnabled(False)
+        self._apply_metadata_mode(animated=False)
+        self._set_secondary_visible(False)
 
     def show_item(self, item_id: str):
         item = self._get_item(item_id)
@@ -183,6 +196,8 @@ class InspectorPanel(QWidget):
         self._fill_item_metadata(item, item_type, dataset_name, run)
         self._fill_workflow(self.current_dataset_id, item_id=item_id, run_id=None)
         self._fill_runs(item)
+        self.metadata_toggle.setEnabled(True)
+        self._apply_metadata_mode(animated=False)
 
     def show_run(self, run_id: str):
         store = self._get_store()
@@ -200,10 +215,13 @@ class InspectorPanel(QWidget):
         self.subtitle_label.setText(
             "Run · %s · %s" % (run.method, dataset_name or "no dataset")
         )
+        self._has_run = False
         self._fill_run_operations(run)
         self._fill_run_metadata(run, dataset_name)
         self._fill_workflow(self.current_dataset_id, item_id=None, run_id=run_id)
         self.run_section.setVisible(False)
+        self.metadata_toggle.setEnabled(True)
+        self._apply_metadata_mode(animated=False)
 
     def show_dataset(self, dataset_id: str):
         dataset = self._get_dataset(dataset_id)
@@ -217,11 +235,14 @@ class InspectorPanel(QWidget):
         name = _attr(dataset, "name", default=dataset_id)
         self.title_label.setText(name)
         self.subtitle_label.setText("Dataset")
+        self._has_operations = False
+        self._has_run = False
         self._clear_operations()
-        self._set_operations_visible(False)
         self._fill_dataset_metadata(dataset)
         self._fill_workflow(dataset_id, item_id=None, run_id=None)
         self.run_section.setVisible(False)
+        self.metadata_toggle.setEnabled(True)
+        self._apply_metadata_mode(animated=False)
 
     def refresh(self):
         if self.current_item_id:
@@ -245,6 +266,7 @@ class InspectorPanel(QWidget):
                 "item_id": self.current_item_id,
                 "run_id": self.current_run_id,
                 "dataset_id": self.current_dataset_id,
+                "metadata_expanded": self._metadata_expanded,
             },
             "actions": [
                 {
@@ -277,6 +299,11 @@ class InspectorPanel(QWidget):
                         "run_id": {"type": "string", "required": True},
                         "name": {"type": "string", "required": True},
                     },
+                },
+                {
+                    "id": "inspector.set_metadata_expanded",
+                    "description": "Expand or collapse the metadata section",
+                    "parameters": {"expanded": {"type": "boolean", "required": True}},
                 },
                 {
                     "id": "inspector.rerun_run",
@@ -318,6 +345,9 @@ class InspectorPanel(QWidget):
                 store.rename_run(params["run_id"], params["name"])
                 self.run_renamed.emit(params["run_id"], params["name"])
                 self.refresh()
+            elif action_id == "inspector.set_metadata_expanded":
+                self._metadata_expanded = bool(params["expanded"])
+                self._apply_metadata_mode(animated=False)
             elif action_id == "inspector.rerun_run":
                 self.action_requested.emit(
                     "rerun_run",
@@ -385,7 +415,8 @@ class InspectorPanel(QWidget):
         layout.addWidget(self.operations_widget)
 
         # Metadata ----------------------------------------------------
-        layout.addWidget(self._section_label("Metadata"))
+        self.metadata_label = self._section_label("Metadata")
+        layout.addWidget(self.metadata_label)
         self.metadata_widget = QWidget()
         self.metadata_form = QFormLayout(self.metadata_widget)
         self.metadata_form.setContentsMargins(0, 0, 0, 0)
@@ -394,10 +425,35 @@ class InspectorPanel(QWidget):
         self.metadata_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.metadata_form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.metadata_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        layout.addWidget(self.metadata_widget)
+
+        self.metadata_scroll = QScrollArea()
+        self.metadata_scroll.setObjectName("inspector.metadata.scroll")
+        self.metadata_scroll.setWidgetResizable(True)
+        self.metadata_scroll.setFrameShape(QFrame.NoFrame)
+        self.metadata_scroll.setWidget(self.metadata_widget)
+        self.metadata_scroll.setMaximumHeight(self._metadata_collapsed_height)
+        self.metadata_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.metadata_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        layout.addWidget(self.metadata_scroll, 1)
+
+        self.metadata_toggle = QToolButton()
+        self.metadata_toggle.setObjectName("inspector.metadata.toggle")
+        self.metadata_toggle.setArrowType(Qt.DownArrow)
+        self.metadata_toggle.setAutoRaise(True)
+        self.metadata_toggle.setFixedHeight(16)
+        self.metadata_toggle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.metadata_toggle.setToolTip("Expand metadata")
+        self.metadata_toggle.clicked.connect(self._toggle_metadata)
+        layout.addWidget(self.metadata_toggle)
+
+        self._metadata_animation = QPropertyAnimation(self.metadata_scroll, b"maximumHeight", self)
+        self._metadata_animation.setDuration(180)
+        self._metadata_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._metadata_animation.finished.connect(self._on_metadata_animation_finished)
 
         # Workflow ----------------------------------------------------
-        layout.addWidget(self._section_label("Workflow"))
+        self.workflow_label = self._section_label("Workflow")
+        layout.addWidget(self.workflow_label)
         self.workflow_tree = QTreeWidget()
         self.workflow_tree.setObjectName("inspector.workflow")
         self.workflow_tree.setColumnCount(2)
@@ -453,6 +509,52 @@ class InspectorPanel(QWidget):
         if object_name:
             button.setObjectName(object_name)
         return button
+
+    # ------------------------------------------------------------------
+    # metadata collapse / expand
+    # ------------------------------------------------------------------
+    def _toggle_metadata(self):
+        if self.metadata_form.rowCount() == 0:
+            return
+        self._metadata_expanded = not self._metadata_expanded
+        self._apply_metadata_mode(animated=True)
+
+    def _apply_metadata_mode(self, animated=False):
+        expanded = self._metadata_expanded
+        self.metadata_toggle.setArrowType(Qt.UpArrow if expanded else Qt.DownArrow)
+        self.metadata_toggle.setToolTip("Collapse metadata" if expanded else "Expand metadata")
+        self.metadata_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAlwaysOn if expanded else Qt.ScrollBarAlwaysOff
+        )
+        self._set_secondary_visible(not expanded)
+
+        if self._metadata_animation is not None:
+            self._metadata_animation.stop()
+
+        if not animated:
+            self.metadata_scroll.setMaximumHeight(
+                16777215 if expanded else self._metadata_collapsed_height
+            )
+            return
+
+        start = max(0, self.metadata_scroll.height())
+        if expanded:
+            end = max(240, self.height() - 80)
+        else:
+            end = self._metadata_collapsed_height
+        self._metadata_animation.setStartValue(start)
+        self._metadata_animation.setEndValue(end)
+        self._metadata_animation.start()
+
+    def _on_metadata_animation_finished(self):
+        if self._metadata_expanded:
+            self.metadata_scroll.setMaximumHeight(16777215)
+
+    def _set_secondary_visible(self, visible):
+        self._set_operations_visible(visible and self._has_operations)
+        self.workflow_label.setVisible(visible)
+        self.workflow_tree.setVisible(visible)
+        self.run_section.setVisible(visible and self._has_run)
 
     # ------------------------------------------------------------------
     # data access
@@ -548,6 +650,7 @@ class InspectorPanel(QWidget):
         return None
 
     def _fill_item_operations(self, item, item_type, run):
+        self._has_operations = True
         self._clear_operations()
         self._add_operation("Show in dataset", self._on_show, "inspector.operation.show")
         kind = self._preview_kind(item_type)
@@ -569,6 +672,7 @@ class InspectorPanel(QWidget):
         self._set_operations_visible(True)
 
     def _fill_run_operations(self, run):
+        self._has_operations = True
         self._clear_operations()
         self._add_operation(
             "View command", lambda: self._view_command(run.id),
@@ -906,6 +1010,7 @@ class InspectorPanel(QWidget):
             siblings = [other for other in siblings if self._run_for_item(other) is not None]
             if not any(_attr(other, "id", default="") == _attr(item, "id", default="") for other in siblings):
                 siblings.insert(0, item)
+        self._has_run = run is not None
         self.run_section.setVisible(run is not None)
 
         self.run_combo.blockSignals(True)

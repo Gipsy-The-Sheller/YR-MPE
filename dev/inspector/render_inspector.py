@@ -141,6 +141,14 @@ def main() -> int:
         app.processEvents()
     panel.grab().save(str(out_dir / "01_inspector_item.png"))
 
+    panel._metadata_expanded = True
+    panel._apply_metadata_mode(animated=False)
+    for _ in range(4):
+        app.processEvents()
+    panel.grab().save(str(out_dir / "04_inspector_metadata_expanded.png"))
+    panel._metadata_expanded = False
+    panel._apply_metadata_mode(animated=False)
+
     panel.show_run(tree_item.run_id)
     for _ in range(4):
         app.processEvents()
@@ -155,6 +163,7 @@ def main() -> int:
     print("wrote", out_dir / "01_inspector_item.png")
     print("wrote", out_dir / "02_inspector_dataset.png")
     print("wrote", out_dir / "03_inspector_edge.png")
+    print("wrote", out_dir / "04_inspector_metadata_expanded.png")
     return 0
 
 

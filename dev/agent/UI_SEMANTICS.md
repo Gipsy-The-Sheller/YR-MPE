@@ -30,6 +30,8 @@ panel.agent_invoke("inspector.rename_run", {"run_id": "run_...", "name": "IQ-TRE
     {"id": "inspector.show_dataset", "parameters": {"dataset_id": {"type": "string", "required": true}}},
     {"id": "inspector.preview", "parameters": {"item_id": {"type": "string"}, "kind": {"type": "string"}}},
     {"id": "inspector.rename_run", "parameters": {"run_id": {"type": "string"}, "name": {"type": "string"}}},
+    {"id": "inspector.set_metadata_expanded", "parameters": {"expanded": {"type": "boolean"}}},
+    {"id": "inspector.rerun_run", "parameters": {"run_id": {"type": "string"}, "parameters": {"type": "object"}}},
     {"id": "inspector.invoke_operation", "parameters": {"operation": {"type": "string"}, "target_id": {"type": "string"}}}
   ]
 }

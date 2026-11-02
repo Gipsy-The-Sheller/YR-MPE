@@ -94,6 +94,26 @@ class InspectorPanelTests(unittest.TestCase):
         panel._on_tree_clicked(item_node, 0)
         self.assertEqual(len(activated), 1)
 
+    def test_metadata_expand_collapse(self):
+        panel = self.panel
+        panel.show_item(self.tree_item.id)
+        self.assertFalse(panel._metadata_expanded)
+        self.assertEqual(panel.metadata_scroll.maximumHeight(), panel._metadata_collapsed_height)
+        self.assertEqual(panel.metadata_toggle.arrowType(), Qt.DownArrow)
+
+        panel._toggle_metadata()
+        self.assertTrue(panel._metadata_expanded)
+        self.assertEqual(panel.metadata_toggle.arrowType(), Qt.UpArrow)
+        self.assertTrue(panel.workflow_tree.isHidden())
+        self.assertEqual(
+            panel.metadata_scroll.verticalScrollBarPolicy(), Qt.ScrollBarAlwaysOn
+        )
+
+        panel._toggle_metadata()
+        self.assertFalse(panel._metadata_expanded)
+        self.assertEqual(panel.metadata_toggle.arrowType(), Qt.DownArrow)
+        self.assertFalse(panel.workflow_tree.isHidden())
+
     def test_agent_contract(self):
         panel = self.panel
         contract = panel.agent_contract()
@@ -102,8 +122,15 @@ class InspectorPanelTests(unittest.TestCase):
         self.assertIn("inspector.show_run", ids)
         self.assertIn("inspector.preview", ids)
         self.assertIn("inspector.rename_run", ids)
+        self.assertIn("inspector.set_metadata_expanded", ids)
         self.assertIn("inspector.rerun_run", ids)
         self.assertIn("inspector.invoke_operation", ids)
+
+        result = panel.agent_invoke(
+            "inspector.set_metadata_expanded", {"expanded": True}
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(panel._metadata_expanded)
 
         emitted = []
         panel.action_requested.connect(lambda *args: emitted.append(args))
