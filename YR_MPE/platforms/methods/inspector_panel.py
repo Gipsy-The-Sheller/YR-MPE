@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from PyQt5.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QIcon
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -78,6 +79,24 @@ PREVIEW_LABELS = {
     "chain": "Preview chain",
 }
 
+ITEM_ICON_PATHS = {
+    "sequence": "file/sequence.svg",
+    "alignment": "align.svg",
+    "model": "file/model.svg",
+    "distance": "file/distance.svg",
+    "phylogeny": "file/phylogeny.svg",
+    "treeset": "file/treeset.svg",
+    "chain": "file/chain.svg",
+}
+
+PREVIEW_ICON_PATHS = {
+    "tree": "software/icytree.svg",
+    "alignment": "file/sequence.svg",
+    "model": "file/model.svg",
+    "distance": "file/distance.svg",
+    "chain": "software/minitracer.svg",
+}
+
 
 def _attr(obj: Any, *names: str, default=None):
     for name in names:
@@ -134,10 +153,11 @@ class InspectorPanel(QWidget):
         self._metadata_expanded = False
         self._has_operations = False
         self._has_run = False
-        self._metadata_collapsed_height = 132
+        self._metadata_collapsed_height = 148
         self._metadata_animation: Optional[QPropertyAnimation] = None
 
         self.setObjectName("inspector")
+        self._icon_dir = Path(__file__).resolve().parents[2] / "icons"
         self._icons = {}
         self._build_ui()
         self.show_empty()
@@ -652,22 +672,26 @@ class InspectorPanel(QWidget):
     def _fill_item_operations(self, item, item_type, run):
         self._has_operations = True
         self._clear_operations()
-        self._add_operation("Show in dataset", self._on_show, "inspector.operation.show")
+        self._add_operation(
+            "Show in dataset", self._on_show, "inspector.operation.show",
+            icon="file/dataset.svg",
+        )
         kind = self._preview_kind(item_type)
         if kind is not None:
             self._add_operation(
                 PREVIEW_LABELS.get(kind, "Preview"),
                 self._on_preview,
                 "inspector.operation.preview",
+                icon=PREVIEW_ICON_PATHS.get(kind),
             )
         if kind == "tree":
             self._add_operation(
                 "Import to LSD2", lambda: self._emit_operation("import_lsd2"),
-                "inspector.operation.import_lsd2",
+                "inspector.operation.import_lsd2", icon="software/lsd2.svg",
             )
             self._add_operation(
                 "Import to MCMCTree", lambda: self._emit_operation("import_mcmctree"),
-                "inspector.operation.import_mcmctree",
+                "inspector.operation.import_mcmctree", icon="clock.svg",
             )
         self._set_operations_visible(True)
 
@@ -676,11 +700,11 @@ class InspectorPanel(QWidget):
         self._clear_operations()
         self._add_operation(
             "View command", lambda: self._view_command(run.id),
-            "inspector.operation.view_command",
+            "inspector.operation.view_command", icon="console.svg",
         )
         self._add_operation(
             "Modify && rerun", lambda: self._emit_operation("rerun_run", run.id),
-            "inspector.operation.rerun",
+            "inspector.operation.rerun", icon="operations/refresh.svg",
         )
         self._set_operations_visible(True)
 
@@ -697,8 +721,11 @@ class InspectorPanel(QWidget):
                 widget.setParent(None)
                 widget.deleteLater()
 
-    def _add_operation(self, text, slot, object_name=None):
+    def _add_operation(self, text, slot, object_name=None, icon=None):
         button = self._link_button(text, object_name)
+        if icon:
+            button.setIcon(self._icon(icon))
+            button.setIconSize(QSize(16, 16))
         button.clicked.connect(slot)
         self.operations_layout.addWidget(button)
 
@@ -722,6 +749,8 @@ class InspectorPanel(QWidget):
         ]
         if run is not None:
             link = self._link_button("Open edge: %s" % run.name, "inspector.metadata.edge")
+            link.setIcon(self._icon("operations/refresh.svg"))
+            link.setIconSize(QSize(16, 16))
             link.clicked.connect(lambda: self.show_run(run.id))
             rows.append(("Edge", link))
         self._set_form_rows(rows)
@@ -784,16 +813,20 @@ class InspectorPanel(QWidget):
     # workflow tree
     # ------------------------------------------------------------------
     def _icon(self, name):
-        if name not in self._icons:
-            style = self.style()
-            mapping = {
-                "dataset": QStyle.SP_DirIcon,
-                "item": QStyle.SP_FileIcon,
-                "import": QStyle.SP_ArrowDown,
-                "run": QStyle.SP_MediaPlay,
-            }
-            self._icons[name] = style.standardIcon(mapping[name])
-        return self._icons[name]
+        if name in self._icons:
+            return self._icons[name]
+        path = self._icon_dir / name
+        if path.exists():
+            icon = QIcon(str(path))
+        else:
+            fallback = {
+                "file/dataset.svg": QStyle.SP_DirIcon,
+                "operations/import.svg": QStyle.SP_ArrowDown,
+                "operations/refresh.svg": QStyle.SP_MediaPlay,
+            }.get(name, QStyle.SP_FileIcon)
+            icon = self.style().standardIcon(fallback)
+        self._icons[name] = icon
+        return icon
 
     def _fill_workflow(self, dataset_id: str, item_id: Optional[str] = None,
                        run_id: Optional[str] = None):
@@ -813,7 +846,7 @@ class InspectorPanel(QWidget):
             "DS",
         ])
         root.setData(0, Qt.UserRole, ("dataset", dataset_id))
-        root.setIcon(0, self._icon("dataset"))
+        root.setIcon(0, self._icon("file/dataset.svg"))
         root.setExpanded(True)
         self.workflow_tree.addTopLevelItem(root)
 
@@ -824,7 +857,15 @@ class InspectorPanel(QWidget):
                 TYPE_SHORT.get(_attr(item, "item_type", "type", default=""), ""),
             ])
             node.setData(0, Qt.UserRole, ("item", record_id))
-            node.setIcon(0, self._icon("item"))
+            node.setIcon(
+                0,
+                self._icon(
+                    ITEM_ICON_PATHS.get(
+                        _attr(item, "item_type", "type", default="sequence"),
+                        "file/sequence.svg",
+                    )
+                ),
+            )
             node.setToolTip(0, _text(_attr(item, "file_path", "file", default=""), 500))
             self._item_nodes[record_id] = node
 
@@ -839,7 +880,7 @@ class InspectorPanel(QWidget):
                     "IMP",
                 ])
                 node.setData(0, Qt.UserRole, ("import", record.id))
-                node.setIcon(0, self._icon("import"))
+                node.setIcon(0, self._icon("operations/import.svg"))
                 node.setToolTip(0, "\n".join(record.source_paths))
                 import_nodes[record.id] = node
                 root.addChild(node)
@@ -852,7 +893,7 @@ class InspectorPanel(QWidget):
                     "RUN",
                 ])
                 node.setData(0, Qt.UserRole, ("run", record.id))
-                node.setIcon(0, self._icon("run"))
+                node.setIcon(0, self._icon("operations/refresh.svg"))
                 node.setToolTip(0, "Status: %s" % record.status)
                 self._run_nodes[record.id] = node
 
