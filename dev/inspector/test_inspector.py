@@ -11,7 +11,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QApplication, QPushButton
+from PyQt5.QtWidgets import QApplication, QFormLayout, QPushButton
 
 QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 
@@ -92,6 +92,47 @@ class InspectorPanelTests(unittest.TestCase):
         self.assertTrue(panel.run_section.isHidden())
         self.assertTrue(panel.workflow_tree.topLevelItem(0).isExpanded())
         self.assertGreaterEqual(panel.workflow_tree.topLevelItem(0).childCount(), 1)
+
+    def test_multi_input_run_is_forward_anchored(self):
+        items = {item.name: item for item in self.store.index.items.values()}
+        first, second = items["OG0000009"], items["OG0000010"]
+        out_path = self.root / "runs" / "dual" / "distance.tsv"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text("a\tb\t0.1\n", encoding="utf-8")
+        run = self.store.new_run(
+            "distance", "Dual input tool", [first.id, second.id],
+            name="Dual input run",
+        )
+        output = self.store.add_item(
+            self.tree_item.dataset_id, "distance", "Pairwise distance",
+            source_path=str(out_path), copy=True, file_format="tsv",
+            run_id=run.id,
+        )
+        self.store.finish_run(run.id, output_ids=[output.id])
+
+        self.panel.show_item(output.id)
+        root = self.panel.workflow_tree.topLevelItem(0)
+        run_nodes = [node for node in self._walk(root)
+                     if node.data(0, Qt.UserRole) == ("run", run.id)]
+        self.assertEqual(len(run_nodes), 1)
+        run_node = run_nodes[0]
+        self.assertEqual(run_node.parent().data(0, Qt.UserRole),
+                         ("item", first.id))
+        self.assertEqual(run_node.childCount(), 1)
+        self.assertIn(second.name, run_node.toolTip(0))
+        self.assertIn("Inputs (2)", run_node.toolTip(0))
+        labels = []
+        for row in range(self.panel.metadata_form.rowCount()):
+            entry = self.panel.metadata_form.itemAt(row, QFormLayout.LabelRole)
+            widget = entry.widget() if entry is not None else None
+            if widget is not None and hasattr(widget, "text"):
+                labels.append(widget.text())
+        self.assertIn("Run inputs", labels)
+
+    def _walk(self, node):
+        yield node
+        for index in range(node.childCount()):
+            yield from self._walk(node.child(index))
 
     def test_tree_click_emits_item(self):
         panel = self.panel

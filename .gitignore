@@ -13,6 +13,9 @@ dev/fig3/
 dev/cases/assets/
 dev/cases/bayes/
 dev/cases/figures/
+dev/cases/single_gene/
+dev/cases/organelle/
+dev/cases/sanger/
 
 # LaTeX build artifacts
 docs/cases.bcf-SAVE-ERROR

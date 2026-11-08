@@ -1,0 +1,504 @@
+{
+  "config": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\config.json",
+  "version_checks": [
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "muscle 5.3.win64 [d9725ac]",
+        "Built Nov 10 2024 22:59:05"
+      ],
+      "name": "Muscle5",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\muscle5\\muscle.exe",
+      "args": [
+        "--version"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "1.2.2"
+      ],
+      "name": "Clustal Omega",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\clustalo\\clustalo.exe",
+      "args": [
+        "--version"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "Active code page: 65001",
+        " ",
+        "Preparing environment to run MAFFT on Windows. ",
+        "This may take a while, if real-time scanning by anti-virus software is on. ",
+        "",
+        "It may take a while before the calculation starts",
+        "if being scanned by anti-virus software.",
+        "Also consider using a faster version for Windows 10:"
+      ],
+      "name": "MAFFT",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\mafft\\mafft.bat",
+      "args": [
+        "--version"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "IQ-TREE version 3.0.1 for Windows 64-bit built May  5 2025",
+        "Developed by Bui Quang Minh, Thomas Wong, Nhan Ly-Trong, Huaiyan Ren",
+        "Contributed by Lam-Tung Nguyen, Dominik Schrempf, Chris Bielow,",
+        "Olga Chernomor, Michael Woodhams, Diep Thi Hoang, Heiko Schmidt"
+      ],
+      "name": "IQ-TREE 3",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\iqtree3\\iqtree3.exe",
+      "args": [
+        "--version"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "_      _ _            _      _   _  _____ ",
+        "                            | |    | | |          | |    | \\ | |/ ____|",
+        "         _ __ ___   ___   __| | ___| | |_ ___  ___| |_   |  \\| | |  __ ",
+        "        | '_ ` _ \\ / _ \\ / _` |/ _ \\ | __/ _ \\/ __| __|  | . ` | | |_ |",
+        "        | | | | | | (_) | (_| |  __/ | ||  __/\\__ \\ |_   | |\\  | |__| |",
+        "        |_| |_| |_|\\___/ \\__,_|\\___|_|\\__\\___||___/\\__|  |_| \\_|\\_____|",
+        "--------------------------------------------------------------------------------",
+        "ModelTest-NG v0.1.7 released on 17.03.2021 by The Exelixis Lab."
+      ],
+      "name": "ModelTest-NG",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\modeltest-ng\\modeltest-ng.exe",
+      "args": [
+        "--version"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "RAxML-NG v. 1.2.2-master released on 30.04.2024 by The Exelixis Lab.",
+        "Developed by: Alexey M. Kozlov and Alexandros Stamatakis.",
+        "Contributors: Diego Darriba, Tomas Flouri, Benoit Morel, Sarah Lutteropp, Ben Bettisworth, Julia Haag, Anastasis Togkousidis.",
+        "Latest version: https://github.com/amkozlov/raxml-ng",
+        "Questions/problems/suggestions? Please visit: https://groups.google.com/forum/#!forum/raxml",
+        "",
+        "System: unknown CPU, 10 cores, 47 GB RAM"
+      ],
+      "name": "RAxML-NG",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\raxml-ng\\raxml-ng.exe",
+      "args": [
+        "--version"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "trimAl 1.2rev57. Copyright (C) 2009. Salvador Capella-Gutierrez and Toni Gabald贸n.",
+        "",
+        "trimAl webpage: http://trimal.cgenomics.org",
+        "",
+        "This program is free software: you can redistribute it and/or modify ",
+        "it under the terms of the GNU General Public License as published by ",
+        "the Free Software Foundation, the last available version.",
+        ""
+      ],
+      "name": "TrimAl",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\trimAl\\bin\\trimal.exe",
+      "args": []
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "******************************************************",
+        "                    GBLOCKS 1.0                     ",
+        "Selection of conserved blocks from multiple alignments",
+        "        for their use in phylogenetic analysis        ",
+        "******************************************************",
+        "",
+        "                COMMAND LINE PARAMETERS               ",
+        ""
+      ],
+      "name": "GBlocks",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\Gblocks\\GBlocks.exe",
+      "args": [
+        "-h"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "pb_mpi version 1.9"
+      ],
+      "name": "PhyloBayes-mpi",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\pbmpi-1.9\\pb_mpi.exe",
+      "args": [
+        "--version"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "Microsoft MPI Startup Program [Version 10.1.12498.52]",
+        "",
+        "Launches an application on multiple hosts.",
+        "",
+        "Usage:",
+        "",
+        "    mpiexec [options] executable [args] [ : [options] exe [args] : ... ]",
+        "    mpiexec -configfile <file name>"
+      ],
+      "name": "MPIRun",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\msmpi\\mpiexec.exe",
+      "args": [
+        "-help"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 1,
+      "output": [
+        "Warning : cannot find -h nor -h.treelist",
+        "",
+        "empty tree collection",
+        "sorry"
+      ],
+      "name": "PhyloBayes-bpcomp",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\pbmpi-1.9\\bpcomp.exe",
+      "args": [
+        "-h"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "MrBayes, Bayesian Analysis of Phylogeny",
+        "",
+        "Usage:",
+        "\tE:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\mb\\mb.exe [-i] [filename ...]",
+        "\tE:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\mb\\mb.exe -v",
+        "\tE:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\mb\\mb.exe -h",
+        "",
+        "Options:"
+      ],
+      "name": "MrBayes-MPI-BEAGLE",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\mb\\mb.exe",
+      "args": [
+        "-h"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "Coalescence-aware Alignment-based Species Tree EstimatoR (Site)",
+        "Version: v1.24.2.6",
+        "Input file path '--version' seems empty!"
+      ],
+      "name": "caster-site",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\aster\\caster-site.exe",
+      "args": [
+        "--version"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 3221225477,
+      "output": [
+        "Accurate Species TRee ALgorithm IV (ASTRAL-IV)",
+        "*** NOW with integrated CASTLES-2 ***",
+        "Version: v1.24.4.8",
+        "#Genetrees: 0"
+      ],
+      "name": "astral",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\aster\\astral.bat",
+      "args": [
+        "astral4",
+        "--version"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "This is MACSE V2.07 If you find MACSE useful, please cite:",
+        "",
+        "MACSE v2: Toolkit for the Alignment of Coding Sequences Accounting for Frameshifts and Stop Codons",
+        "Vincent Ranwez, Emmanuel J P Douzery, Cedric Cambon, Nathalie Chantret, Frederic Delsuc",
+        "Molecular Biology and Evolution, 2020, 35(10):2582-2584, https://doi.org/10.1093/molbev/msy159",
+        "",
+        "MACSE: Multiple Alignment of Coding SEquences accounting for frameshifts and stop codons.",
+        "Vincent Ranwez, Sebastien Harispe, Frederic Delsuc, Emmanuel JP Douzery"
+      ],
+      "name": "MACSE2",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\macse\\macse.bat",
+      "args": [
+        "--version"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 1,
+      "output": [
+        "Enter your Input Tree File name> ",
+        "Error: can not open the input file"
+      ],
+      "name": "LSD2",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\lsd2\\lsd2.exe",
+      "args": []
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "decentTree v1.0.0 for Windows 64-bit",
+        "Based on algorithms (UPGMA, NJ, BIONJ) proposed by Sokal & Michener [1958],",
+        "Saitou & Nei [1987], Gascuel [1997] and [2009]",
+        "Incorporating (in NJ-R and BIONJ-R) techniques proposed by Simonson, Mailund, and Pedersen [2011]",
+        "Developed by Olivier Gascuel [2009], Hoa Sien Cuong [2009], James Barbetti [2020-22]",
+        "(To suppress this banner pass -no-banner)",
+        "Usage: decenttree (-fasta [fastapath] | -phylip [phypath])",
+        "       (-msa-out [msapath]) (-strip-name [stripped]) "
+      ],
+      "name": "DecentTree",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\decenttree\\decenttree.exe",
+      "args": []
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "MPBoot version 1.1.1 for Windows 64-bit built Feb 19 2026",
+        "Copyright (c) 2016 Diep Thi Hoang, Le Sy Vinh, Tomas Flouri, Alexandros Stamatakis, Arndt von Haeseler and Bui Quang Minh.",
+        "",
+        "Usage: E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\mpboot\\mpboot.exe -s <alignment> [OPTIONS] [<treefile>] ",
+        "",
+        "GENERAL OPTIONS:",
+        "  -?                   Printing this help dialog",
+        "  -s <alignment>       Input alignment (REQUIRED) in PHYLIP/FASTA/NEXUS format"
+      ],
+      "name": "MPBoot",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\mpboot\\mpboot.exe",
+      "args": [
+        "-h"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "Treerecs (1.2), Inria - Beagle",
+        "Treerecs 1.2"
+      ],
+      "name": "TreeRecs",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\YR_MPE\\bin\\treerecs\\treerecs.exe",
+      "args": [
+        "--version"
+      ]
+    },
+    {
+      "ok": true,
+      "returncode": 1,
+      "output": [
+        "OrthoFinder version 2.5.5 Copyright (C) 2014 David Emms",
+        "",
+        "Unrecognised argument: --version",
+        "",
+        "ERROR: An error occurred, ***please review the error messages*** they may contain useful information about the problem."
+      ],
+      "name": "OrthoFinder",
+      "path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\dev\\bin\\orthofinder\\orthofinder.exe",
+      "args": [
+        "--version"
+      ]
+    }
+  ],
+  "functional_checks": [
+    {
+      "name": "MAFFT",
+      "ok": true,
+      "returncode": 0,
+      "artifacts": [
+        "C:\\Users\\ASUS\\AppData\\Local\\Temp\\yrmpe-smoke-d_p2d_30\\mafft.fas"
+      ],
+      "output": [
+        "",
+        "Active code page: 65001",
+        " ",
+        "Preparing environment to run MAFFT on Windows. "
+      ]
+    },
+    {
+      "name": "MUSCLE5",
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "muscle 5.3.win64 [d9725ac]  51.1Gb RAM, 20 cores",
+        "Built Nov 10 2024 22:59:05",
+        "(C) Copyright 2004-2021 Robert C. Edgar.",
+        "https://drive5.com",
+        ""
+      ],
+      "artifacts": [
+        "C:\\Users\\ASUS\\AppData\\Local\\Temp\\yrmpe-smoke-d_p2d_30\\muscle.fas"
+      ]
+    },
+    {
+      "name": "Clustal Omega",
+      "ok": true,
+      "returncode": 0,
+      "output": [],
+      "artifacts": [
+        "C:\\Users\\ASUS\\AppData\\Local\\Temp\\yrmpe-smoke-d_p2d_30\\clustalo.fas"
+      ]
+    },
+    {
+      "name": "TrimAl",
+      "ok": true,
+      "returncode": 0,
+      "output": [],
+      "artifacts": [
+        "C:\\Users\\ASUS\\AppData\\Local\\Temp\\yrmpe-smoke-d_p2d_30\\trimal.fas"
+      ]
+    },
+    {
+      "name": "IQ-TREE 3",
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "IQ-TREE version 3.0.1 for Windows 64-bit built May  5 2025",
+        "Developed by Bui Quang Minh, Thomas Wong, Nhan Ly-Trong, Huaiyan Ren",
+        "Contributed by Lam-Tung Nguyen, Dominik Schrempf, Chris Bielow,",
+        "Olga Chernomor, Michael Woodhams, Diep Thi Hoang, Heiko Schmidt",
+        ""
+      ],
+      "artifacts": [
+        "C:\\Users\\ASUS\\AppData\\Local\\Temp\\yrmpe-smoke-d_p2d_30\\iqtree.treefile"
+      ]
+    },
+    {
+      "name": "ModelTest-NG",
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "_      _ _            _      _   _  _____ ",
+        "                            | |    | | |          | |    | \\ | |/ ____|",
+        "         _ __ ___   ___   __| | ___| | |_ ___  ___| |_   |  \\| | |  __ ",
+        "        | '_ ` _ \\ / _ \\ / _` |/ _ \\ | __/ _ \\/ __| __|  | . ` | | |_ |",
+        "        | | | | | | (_) | (_| |  __/ | ||  __/\\__ \\ |_   | |\\  | |__| |"
+      ],
+      "artifacts": [
+        "C:\\Users\\ASUS\\AppData\\Local\\Temp\\yrmpe-smoke-d_p2d_30\\modeltest.out"
+      ]
+    },
+    {
+      "name": "RAxML-NG",
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "RAxML-NG v. 1.2.2-master released on 30.04.2024 by The Exelixis Lab.",
+        "Developed by: Alexey M. Kozlov and Alexandros Stamatakis.",
+        "Contributors: Diego Darriba, Tomas Flouri, Benoit Morel, Sarah Lutteropp, Ben Bettisworth, Julia Haag, Anastasis Togkousidis.",
+        "Latest version: https://github.com/amkozlov/raxml-ng",
+        "Questions/problems/suggestions? Please visit: https://groups.google.com/forum/#!forum/raxml"
+      ],
+      "artifacts": [
+        "C:\\Users\\ASUS\\AppData\\Local\\Temp\\yrmpe-smoke-d_p2d_30\\raxml.raxml.bestTree"
+      ]
+    },
+    {
+      "name": "DecentTree",
+      "ok": false,
+      "returncode": 3221226356,
+      "output": [],
+      "artifacts": []
+    },
+    {
+      "name": "MPBoot",
+      "ok": true,
+      "returncode": 0,
+      "output": [
+        "MPBoot version 1.1.1 for Windows 64-bit built Feb 19 2026",
+        "Copyright (c) 2016 Diep Thi Hoang, Le Sy Vinh, Tomas Flouri, Alexandros Stamatakis, Arndt von Haeseler and Bui Quang Minh.",
+        "",
+        "WARNING: Your CPU supports AVX but you are using SSE3 version of MPBoot!",
+        "WARNING: Please switch to AVX version that is 40% faster than SSE3."
+      ],
+      "artifacts": [
+        "C:\\Users\\ASUS\\AppData\\Local\\Temp\\yrmpe-smoke-d_p2d_30\\mpboot.treefile"
+      ]
+    },
+    {
+      "name": "GBlocks",
+      "ok": true,
+      "skipped": true,
+      "reason": "interactive CLI; only version/help smoke-tested"
+    },
+    {
+      "name": "MrBayes-MPI-BEAGLE",
+      "ok": true,
+      "skipped": true,
+      "reason": "long-running/interactive; version smoke-test only"
+    },
+    {
+      "name": "PhyloBayes-mpi",
+      "ok": true,
+      "skipped": true,
+      "reason": "long-running/interactive; version smoke-test only"
+    },
+    {
+      "name": "PhyloBayes-bpcomp",
+      "ok": true,
+      "skipped": true,
+      "reason": "long-running/interactive; version smoke-test only"
+    },
+    {
+      "name": "astral",
+      "ok": true,
+      "skipped": true,
+      "reason": "long-running/interactive; version smoke-test only"
+    },
+    {
+      "name": "caster-site",
+      "ok": true,
+      "skipped": true,
+      "reason": "long-running/interactive; version smoke-test only"
+    },
+    {
+      "name": "MACSE2",
+      "ok": true,
+      "skipped": true,
+      "reason": "long-running/interactive; version smoke-test only"
+    },
+    {
+      "name": "LSD2",
+      "ok": true,
+      "skipped": true,
+      "reason": "long-running/interactive; version smoke-test only"
+    },
+    {
+      "name": "TreeRecs",
+      "ok": true,
+      "skipped": true,
+      "reason": "long-running/interactive; version smoke-test only"
+    },
+    {
+      "name": "OrthoFinder",
+      "ok": true,
+      "skipped": true,
+      "reason": "long-running/interactive; version smoke-test only"
+    }
+  ],
+  "ok": false
+}

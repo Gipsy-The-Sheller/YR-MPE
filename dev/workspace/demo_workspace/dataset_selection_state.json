@@ -1,0 +1,271 @@
+{
+  "version": "2.0",
+  "datasets": {
+    "030a23a5-14b1-425a-90df-a2d2f4297870": {
+      "id": "030a23a5-14b1-425a-90df-a2d2f4297870",
+      "name": "Persisted chain demo",
+      "description": "",
+      "created_at": "2026-11-03T10:34:30.481021",
+      "modified_at": "2026-11-03T10:34:30.498022",
+      "is_multigene": false,
+      "items": [
+        "b41a79ba-baee-4312-b9e1-425f5a4715e5",
+        "31f511b9-406d-453c-acb1-2518ba860485",
+        "30099e33-9008-4aa9-99a7-1486cfc2bc42",
+        "efb81ef2-8f50-4f6f-8bef-c0ab876b3b15",
+        "96443d00-f786-422e-b105-38b52f5aac00",
+        "d11fa631-958e-405c-9692-cdf1fab263d4",
+        "474acae9-8cc7-4f86-867d-380a181cea38",
+        "b0a2050c-4617-40bc-9742-4e434bd6f803",
+        "e5b38e5d-7571-444c-b003-1e139e6f6de9"
+      ],
+      "settings": {},
+      "partition_scheme": null,
+      "loci_count": 1,
+      "taxa_count": 3,
+      "selection_state": "none"
+    }
+  },
+  "items": {
+    "b41a79ba-baee-4312-b9e1-425f5a4715e5": {
+      "id": "b41a79ba-baee-4312-b9e1-425f5a4715e5",
+      "dataset_id": "030a23a5-14b1-425a-90df-a2d2f4297870",
+      "loci_name": "Sequence import",
+      "file_path": "E:\\YR-MPE_tutorial\\YR-MPE_dev\\dev\\workspace\\demo_workspace\\demo_sequences.fna",
+      "item_type": "sequence",
+      "parent_id": null,
+      "import_id": null,
+      "run_id": null,
+      "created_at": "2026-11-03T10:34:30.494022",
+      "modified_at": "2026-11-03T10:34:30.494022",
+      "is_aligned": false,
+      "length": 63,
+      "sequence_count": 3,
+      "format": "fasta",
+      "data": {},
+      "metadata": {},
+      "selection_state": "none",
+      "selection_reason": "",
+      "ownership_uuid": "demo-chain-a",
+      "is_valid": true,
+      "validation_errors": []
+    },
+    "31f511b9-406d-453c-acb1-2518ba860485": {
+      "id": "31f511b9-406d-453c-acb1-2518ba860485",
+      "dataset_id": "030a23a5-14b1-425a-90df-a2d2f4297870",
+      "loci_name": "Model A",
+      "file_path": "",
+      "item_type": "model",
+      "parent_id": "b41a79ba-baee-4312-b9e1-425f5a4715e5",
+      "import_id": null,
+      "run_id": null,
+      "created_at": "2026-11-03T10:34:30.494022",
+      "modified_at": "2026-11-03T10:34:30.494022",
+      "is_aligned": false,
+      "length": 0,
+      "sequence_count": 0,
+      "format": "",
+      "data": {
+        "name": "Model A",
+        "model": "GTR+F+I+G4"
+      },
+      "metadata": {},
+      "selection_state": "none",
+      "selection_reason": "",
+      "ownership_uuid": "demo-chain-a",
+      "is_valid": true,
+      "validation_errors": []
+    },
+    "30099e33-9008-4aa9-99a7-1486cfc2bc42": {
+      "id": "30099e33-9008-4aa9-99a7-1486cfc2bc42",
+      "dataset_id": "030a23a5-14b1-425a-90df-a2d2f4297870",
+      "loci_name": "Distance A",
+      "file_path": "",
+      "item_type": "distance",
+      "parent_id": "31f511b9-406d-453c-acb1-2518ba860485",
+      "import_id": null,
+      "run_id": null,
+      "created_at": "2026-11-03T10:34:30.495022",
+      "modified_at": "2026-11-03T10:34:30.495022",
+      "is_aligned": false,
+      "length": 0,
+      "sequence_count": 0,
+      "format": "",
+      "data": {
+        "method": "ML"
+      },
+      "metadata": {},
+      "selection_state": "none",
+      "selection_reason": "",
+      "ownership_uuid": "demo-chain-a",
+      "is_valid": true,
+      "validation_errors": []
+    },
+    "efb81ef2-8f50-4f6f-8bef-c0ab876b3b15": {
+      "id": "efb81ef2-8f50-4f6f-8bef-c0ab876b3b15",
+      "dataset_id": "030a23a5-14b1-425a-90df-a2d2f4297870",
+      "loci_name": "Tree A",
+      "file_path": "",
+      "item_type": "phylogeny",
+      "parent_id": "30099e33-9008-4aa9-99a7-1486cfc2bc42",
+      "import_id": null,
+      "run_id": null,
+      "created_at": "2026-11-03T10:34:30.495022",
+      "modified_at": "2026-11-03T10:34:30.495022",
+      "is_aligned": false,
+      "length": 0,
+      "sequence_count": 0,
+      "format": "",
+      "data": {
+        "newick": "(taxon_A,taxon_B,taxon_C);"
+      },
+      "metadata": {},
+      "selection_state": "none",
+      "selection_reason": "",
+      "ownership_uuid": "demo-chain-a",
+      "is_valid": true,
+      "validation_errors": []
+    },
+    "96443d00-f786-422e-b105-38b52f5aac00": {
+      "id": "96443d00-f786-422e-b105-38b52f5aac00",
+      "dataset_id": "030a23a5-14b1-425a-90df-a2d2f4297870",
+      "loci_name": "Model B",
+      "file_path": "",
+      "item_type": "model",
+      "parent_id": null,
+      "import_id": null,
+      "run_id": null,
+      "created_at": "2026-11-03T10:34:30.495022",
+      "modified_at": "2026-11-03T10:34:30.495022",
+      "is_aligned": false,
+      "length": 0,
+      "sequence_count": 0,
+      "format": "",
+      "data": {
+        "name": "Model B",
+        "model": "HKY+F+G4"
+      },
+      "metadata": {},
+      "selection_state": "none",
+      "selection_reason": "",
+      "ownership_uuid": "demo-chain-b",
+      "is_valid": true,
+      "validation_errors": []
+    },
+    "d11fa631-958e-405c-9692-cdf1fab263d4": {
+      "id": "d11fa631-958e-405c-9692-cdf1fab263d4",
+      "dataset_id": "030a23a5-14b1-425a-90df-a2d2f4297870",
+      "loci_name": "Distance B",
+      "file_path": "",
+      "item_type": "distance",
+      "parent_id": "96443d00-f786-422e-b105-38b52f5aac00",
+      "import_id": null,
+      "run_id": null,
+      "created_at": "2026-11-03T10:34:30.496022",
+      "modified_at": "2026-11-03T10:34:30.496022",
+      "is_aligned": false,
+      "length": 0,
+      "sequence_count": 0,
+      "format": "",
+      "data": {
+        "method": "p-distance"
+      },
+      "metadata": {},
+      "selection_state": "none",
+      "selection_reason": "",
+      "ownership_uuid": "demo-chain-b",
+      "is_valid": true,
+      "validation_errors": []
+    },
+    "474acae9-8cc7-4f86-867d-380a181cea38": {
+      "id": "474acae9-8cc7-4f86-867d-380a181cea38",
+      "dataset_id": "030a23a5-14b1-425a-90df-a2d2f4297870",
+      "loci_name": "Tree B",
+      "file_path": "",
+      "item_type": "phylogeny",
+      "parent_id": "d11fa631-958e-405c-9692-cdf1fab263d4",
+      "import_id": null,
+      "run_id": null,
+      "created_at": "2026-11-03T10:34:30.497022",
+      "modified_at": "2026-11-03T10:34:30.497022",
+      "is_aligned": false,
+      "length": 0,
+      "sequence_count": 0,
+      "format": "",
+      "data": {
+        "newick": "(taxon_A,taxon_C,taxon_B);"
+      },
+      "metadata": {},
+      "selection_state": "none",
+      "selection_reason": "",
+      "ownership_uuid": "demo-chain-b",
+      "is_valid": true,
+      "validation_errors": []
+    },
+    "b0a2050c-4617-40bc-9742-4e434bd6f803": {
+      "id": "b0a2050c-4617-40bc-9742-4e434bd6f803",
+      "dataset_id": "030a23a5-14b1-425a-90df-a2d2f4297870",
+      "loci_name": "Gene trees",
+      "file_path": "",
+      "item_type": "treeset",
+      "parent_id": null,
+      "import_id": null,
+      "run_id": null,
+      "created_at": "2026-11-03T10:34:30.498022",
+      "modified_at": "2026-11-03T10:34:30.498022",
+      "is_aligned": false,
+      "length": 0,
+      "sequence_count": 0,
+      "format": "",
+      "data": {
+        "data": [
+          {
+            "content": "(A,B);"
+          },
+          {
+            "content": "(A,C);"
+          }
+        ]
+      },
+      "metadata": {},
+      "selection_state": "green",
+      "selection_reason": "Selected for workflow",
+      "ownership_uuid": "",
+      "is_valid": true,
+      "validation_errors": []
+    },
+    "e5b38e5d-7571-444c-b003-1e139e6f6de9": {
+      "id": "e5b38e5d-7571-444c-b003-1e139e6f6de9",
+      "dataset_id": "030a23a5-14b1-425a-90df-a2d2f4297870",
+      "loci_name": "Species tree",
+      "file_path": "",
+      "item_type": "phylogeny",
+      "parent_id": null,
+      "import_id": null,
+      "run_id": null,
+      "created_at": "2026-11-03T10:34:30.498022",
+      "modified_at": "2026-11-03T10:34:30.498022",
+      "is_aligned": false,
+      "length": 0,
+      "sequence_count": 0,
+      "format": "",
+      "data": {
+        "newick": "(A,B,C);"
+      },
+      "metadata": {},
+      "selection_state": "green",
+      "selection_reason": "Selected for workflow",
+      "ownership_uuid": "",
+      "is_valid": true,
+      "validation_errors": []
+    }
+  },
+  "selected_items": [
+    "b0a2050c-4617-40bc-9742-4e434bd6f803",
+    "e5b38e5d-7571-444c-b003-1e139e6f6de9"
+  ],
+  "basket_items": [
+    "b0a2050c-4617-40bc-9742-4e434bd6f803",
+    "e5b38e5d-7571-444c-b003-1e139e6f6de9"
+  ]
+}

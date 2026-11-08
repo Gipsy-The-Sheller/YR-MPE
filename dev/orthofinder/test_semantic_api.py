@@ -20,6 +20,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 from YR_MPE.plugins.orthofinder_plugin import OrthoFinderPlugin  # noqa: E402
+from YR_MPE.platforms.methods.dataset_manager import sequence_file_stem  # noqa: E402
 
 APP = QApplication.instance() or QApplication(sys.argv)
 
@@ -169,6 +170,36 @@ class OrthoFinderApiTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["loci"], 1)
 
+    def test_sequence_file_stem_removes_compound_suffixes(self):
+        self.assertEqual(sequence_file_stem("OG0000008.cds.fna"), "OG0000008")
+        self.assertEqual(sequence_file_stem("OG1.cds.fasta"), "OG1")
+        self.assertEqual(sequence_file_stem("gene.fas"), "gene")
+
+    def test_export_normalizes_og_names_and_species_ids(self):
+        out = self.root / "out"
+        single = out / "single_copy_ogs"
+        single.mkdir(parents=True)
+        (single / "OG1.cds.fna").write_text(
+            ">sp1_protein1\nATG\n>sp2_protein2\nATG\n", encoding="utf-8"
+        )
+        (single / "OG1.map.tsv").write_text(
+            "orthogroup\tspecies\tprotein_id\n"
+            "OG1\tsp1\tsp1_protein1\n"
+            "OG1\tsp2\tsp2_protein2\n",
+            encoding="utf-8",
+        )
+        self.plugin._last_summary = {
+            "output_dir": str(out), "species": 2, "cds": 2,
+            "orthogroups": 1, "single_copy_ogs": 1,
+        }
+        result = self.plugin._build_result_spec()
+        item = result.datasets[0].items[0]
+        self.assertEqual(item.loci_name, "OG1")
+        self.assertEqual([record.id for record in item.sequences], ["sp1", "sp2"])
+        self.assertEqual(
+            [record.description for record in item.sequences], ["sp1", "sp2"]
+        )
+
     def test_agent_contract_and_invoke(self):
         contract = self.plugin.agent_contract()
         self.assertEqual(contract["schema"], "yrmpe.ui.orthofinder.v1")
@@ -235,6 +266,7 @@ class OrthoFinderApiTests(unittest.TestCase):
         result = self.plugin.modify_options({"threads": 3})
         self.assertFalse(result["ok"])
         self.assertIn("running", result["errors"][0])
+        self.assertFalse(self.plugin.start_pipeline(show_dialogs=False))
 
 
 if __name__ == "__main__":

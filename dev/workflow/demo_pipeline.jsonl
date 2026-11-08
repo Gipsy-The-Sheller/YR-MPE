@@ -1,0 +1,7 @@
+# YPhylo Workbench workflow prototype
+# Drop this file onto the Workbench or use WORKSPACE -> Import Workflow...
+# Header declares the external input slots; each following line is one step.
+{"schema":"yrmpe.workflow.v1","kind":"workflow","name":"Demo: MAFFT -> ModelTest-NG -> RAxML-NG","inputs":{"raw":"raw.fas"}}
+{"id":"mafft","op":"mafft.run","outputs":{"alignment":"work/aligned.fas"},"params":{"input":"raw.fas","output":"work/aligned.fas","mode":"Auto mode (--auto)","threads":4}}
+{"id":"modeltest","op":"modeltest.run","outputs":{"model":"work/model.out"},"params":{"input":"work/aligned.fas","output":"work/model.out","data_type":"nt","criterion":"BIC","topology":"ml","schemes":"11","threads":4}}
+{"id":"raxml","op":"raxmlng.run","outputs":{"tree":"work/tree.nwk"},"params":{"msa":"work/aligned.fas","model_file":"work/model.out","model":"TrN+I","threads":4,"bootstrap":0}}
