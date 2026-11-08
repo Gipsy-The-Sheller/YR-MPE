@@ -1,84 +1,214 @@
-# YR-MPE - Molecular Phylogenetics & Evolution Plugins for YRTools
+# YR-MPE — a modular, agent-operable phylogenetics workbench
 
+[![Release](https://img.shields.io/github/v/release/Gipsy-The-Sheller/YR-MPE)](https://github.com/Gipsy-The-Sheller/YR-MPE/releases)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-GPL-green.svg)](LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Gipsy-The-Sheller/YR-MPE)
 
-<img src="/YR_MPE/icons/yr-mpea.svg" width="auto" height="50"/><img src="/YR_MPE/icons/software/clustalo.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/muscle.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mafft.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/macse.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/trimal.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/gblocks.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/iqtree.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/raxml.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mrbayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/phylobayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/caster.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/icytree.svg" width="auto" height="25"/>
+<img src="YR_MPE/icons/yr-mpea.svg" height="48" alt="YPhylo Workbench"> <img src="YR_MPE/icons/software/mafft.svg" height="24" alt="MAFFT"> <img src="YR_MPE/icons/software/iqtree.svg" height="24" alt="IQ-TREE"> <img src="YR_MPE/icons/software/mrbayes.svg" height="24" alt="MrBayes"> <img src="YR_MPE/icons/software/phylobayes.svg" height="24" alt="PhyloBayes"> <img src="YR_MPE/icons/software/astral.svg" height="24" alt="ASTER"> <img src="YR_MPE/icons/software/icytree.svg" height="24" alt="IcyTree">
 
-> [!NOTE]
-> 
-> If you find this repository useful for your research, please consider giving it a star! It helps me gauge interest. For any questions, please open an issue.
->
-> If you want a specific function, please describe it in detail in a new issue. I will consider implementing it in priority.
->
-> YR-MPE temporarily have no publications. If you need to cite it, please cite the repository.
+**YR-MPE** is a collection of molecular phylogenetics and evolution plugins
+for the [YRTools](https://github.com/Gipsy-The-Sheller/YRTools) host.
+**YPhylo Workbench** is the integrated environment inside YR-MPE: a typed
+workspace, a provenance graph, a plugin contract and a semantic action layer
+for both people and external agents.
 
-## Graphic Overview of all features
+The project targets a practical desktop workflow: import data, run a tool,
+inspect the intermediate result, change a parameter, and keep the whole
+analysis auditable. The same operation is available from the GUI, a JSONL
+workflow and a local agent bridge.
 
-|Analysis|Figure|Children|Figure|
-|:---|:---|:---|:---|
-| Data Management | <img src="/YR_MPE/icons/workspace.svg" width="auto" height="25"/> | SeqMatrix <br> SeqDBG <br> Sequence Concatenator <br> TreeMerger |<img src="/YR_MPE/icons/seqmatrix/seqmatrix.svg" width="auto" height="25"/><img src="/YR_MPE/icons/seqdbg/seqdbg.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/concatenator.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/treemerger.svg" width="auto" height="25"/>|
-| Align |<img src="/YR_MPE/icons/align.svg" width="auto" height="25"/><img src="/YR_MPE/icons/alignby.svg" width="auto" height="25"/>| Clustal Omega <br> MAFFT <br> Muscle 5 <br> MACSE | <span><img src="/YR_MPE/icons/software/clustalo.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/muscle.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mafft.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/macse.svg" width="auto" height="25"/> |
-| Trim |<img src="/YR_MPE/icons/align.svg" width="auto" height="25"/><img src="/YR_MPE/icons/trim.svg" width="auto" height="25"/></span>| TrimAl <br> GBlocks | <img src="/YR_MPE/icons/software/trimal.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/gblocks.svg" width="auto" height="25"/> |
-| Model |<img src="/YR_MPE/icons/model.svg" width="auto" height="25"/>| ModelFinder <br> ModelTest-NG | <img src="/YR_MPE/icons/find_model.svg" width="auto" height="25"/><img src="/YR_MPE/icons/find_model.svg" width="auto" height="25"/> |
-| Distance |<img src="/YR_MPE/icons/distance.svg" width="auto" height="25"/>| ML-distance (IQ-Tree 3) <br> Uncorrected distance | <img src="/YR_MPE/icons/dist.svg" width="auto" height="25"/><img src="/YR_MPE/icons/dist.svg" width="auto" height="25"/> |
-| Phylogeny |<img src="/YR_MPE/icons/phylogeny.svg" width="auto" height="25"/><img src="/YR_MPE/icons/coalescent.svg" width="auto" height="25"/>| IQ-Tree 3 <br> RAxML-NG <br> MrBayes3-MPI-BEAGLE3 <br> PhyloBayes-MPI <br> DecentTree (NJ methods) <br> MPBoot (Maximum Parsimony) <br> CASTER-site <br> ASTRAL|<img src="/YR_MPE/icons/software/iqtree.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/raxml.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mrbayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/phylobayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/bionj.svg" width="auto" height="25"/><img src="/YR_MPE/icons/mp.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/caster.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/astral.svg" width="auto" height="25"/>|
-| Visualizations ||Sequence Viewer <br> Distance Visualization <br> Calculate & Plot Substitution Satucation <br> MiniTracer <br> IcyTree|<img src="/YR_MPE/icons/file/sequence.svg" width="auto" height="25"/><img src="/YR_MPE/icons/dist.svg" width="auto" height="25"/><img src="/YR_MPE/icons/saturation.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/minitracer.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/icytree.svg" width="auto" height="25"/>|
-| Platform & Workflow | | YR-MPEA | <img src="/YR_MPE/icons/yr-mpea.svg" width="auto" height="25"/> |
+## What's new in v1.1.0
 
-## What is YR-MPE?
+- **YPhylo Workbench** with typed workspace objects, a provenance Inspector,
+  a Selected basket and type-aware tool recommendations.
+- **Local agent bridge and workflow compiler**: JSONL commands, responses and
+  events; workflow DAG preview; per-plugin skills and control bindings.
+- **Concordance and MSC diagnostics**: gCF, sCF, CASTER-site q1–q3,
+  gCF + ASTER coalescent units, simplex and bipartition views, TreeRecs
+  reconciliation.
+- **More inference and selection tools**: RAxML-NG, ModelTest-NG, ASTER
+  ASTRAL-IV/wASTRAL, codon Z-test, batch dN/dS and IQ-TREE codon MLE.
+- **Dual-source Windows Initializer**: GitHub, Gitee or a custom binary URL;
+  safe archive extraction; 20-tool `config.template.json`.
+- **Documentation**: complete LaTeX user manual, case studies, tool reference
+  and supplementary information.
 
-`YR-MPE` is originally a collection of plugins for `YRTools`, which is a plugin-based bioinformatic platform. `YR-MPE` is for its molecular phylogenetics and evolution analysis functions.
+## Why YR-MPE
 
-While other software also provides good experience, an inherent conflict is the gap between these integrative software's good experience and most up-to-date functions, since computational molecular evolution is developed at a rapid pace.
+Computational molecular evolution changes quickly, while an installed desktop
+package often lags behind. YR-MPE is pure Python plus bundled executables, so
+a repository update can be released without a compilation step. The workbench
+adds the parts that a collection of launchers usually lacks:
 
-Owing to a good architecture, the source codes of `YR-MPE` do not need any compilation or packaging, even without a global python environment. Thus, every new commit can be a new release, supporting speedy updates directly from Github repository. Also, it is open-sourced, which means you can modify it as you wish, and community can develop new functions in collaboration. As a result, I think `YR-MPE` is capable to keep up with the development of the discipline.
+- **typed hand-off** — an alignment, model, distance matrix, tree, tree set or
+  chain is an object, not a filename convention;
+- **provenance** — every run records its inputs, command, parameters and
+  artifacts;
+- **one contract for GUI, workflow and agent** — all three reach the same
+  plugin handler;
+- **Windows-native packaging** — verified x86_64 builds of tools that are
+  commonly distributed as UNIX-only binaries.
 
-> [!IMPORTANT]
->
-> Most users requiring a good graphic interface experience are not bioinformatic-backgrounded and linux CLI novices, as observed by the developers. However, most software are only with mature buuild support on UNIX-like systems and are hard to successfully compile on Windows, which is disturbing to the focus on biological questions. YR-MPE is with the concept that developers form a stable x86_64 Windows building support once and for all, and everyone share the benefits. Till now there are several tools with YR-MPE the only known support on x86_64 Windows system:
-> |Software|Feature|
-> |:---|:---|
-> | MrBayes-MPI-BEAGLE | The first stable MPI and BEAGLE3 support of MrBayes on Windows, speeding up 3x-7x for a 20 taxa, 1000 bp dataset (based on our benchmarks).|
-> | PhyloBayes-MPI | The first stable MPI support of PhyloBayes on Windows. |
-> | MPBoot | The first public release on Windows. |
-> | DecentTree | The first public release on Windows. |
-> | RAxML-NG | The first public release on Windows |
->
-> All binaries compiled by the authors, plus source codes, configuration and building files, are deposited in [this repository](https://github.com/Gipsy-The-Sheller/YR-MPE-Windows-x86_64-softwares) and distributed with their original licenses.
+## Screenshots
 
-## How to use it?
+| SeqMatrix: Sanger amplicons | gCF/qCF simplex and bipartition |
+|---|---|
+| <img src="docs/manual/figures/seqmatrix_sanger.png" width="100%" alt="SeqMatrix"> | <img src="docs/manual/figures/manual_msc_simplex.png" width="100%" alt="MSC diagnostics"> |
 
-You can invoke all or part of `YR-MPE` from any UI software (or even a python script) in `PyQt5` ecology.
+| MrBayes convergence (MiniTracer) | Case-study gallery |
+|---|---|
+| <img src="docs/cases/figures/case_mrbayes.png" width="100%" alt="MiniTracer PSRF"> | <img src="docs/cases/figures/case_single_gene.png" width="100%" alt="ITS2 case"> |
 
-The most convenient way is to use it in `YRTools` [Github](https://github.com/Gipsy-The-Sheller/YRTools) [Gitee-coming out soon](). You can get the up-to-date version direct from repository on click with its package manager `YR-Pacman`.
+More interface figures are in the [user manual](docs/manual/manual.pdf) and
+[case studies](docs/cases/cases.pdf).
 
-The wiki of `YR-MPE` provides detailed introduction and usage. You can access its [Github](https://github.com/Gipsy-The-Sheller/YR-MPE/wiki) or [Gitee](https://gitee.com/ZJXMolls/YR-MPE/wikis) source online.
+## Installation
 
-## The development plan for next versions
+### Windows: pre-built release
 
-- Integrate Terraphast for phylogenetic terrace analysis
-- Enable Robinson-Fould (RF) distance calculation
-- Enable general majority-rule consensus for raw tree sets
-- Integrate TreeRecs for gene tree confliction viz.
-- Implement a molecular clock diagnosis (based on 2-cluster test or beanch length test) plugin interface
-- Integrate MCMCTree and r8s
-- Implement a fast distance calculation (JC69; poisson; K2P) and distance tree construction plugin with Biopython
-- New dataset creator based on Orthofinder (for orthologs) and SibeliaZ (for collinear blocks)
+1. Download the [YRTools](https://github.com/Gipsy-The-Sheller/YRTools)
+   release and extract it to a writable folder.
+2. Download the YR-MPE **v1.1.0 source archive** from the
+   [release page](https://github.com/Gipsy-The-Sheller/YR-MPE/releases/tag/v1.1.0)
+   and extract it so that the repository root is
+   `<YRTools_root>/plugins/YR-MPE/`.
+3. Either extract `YR-MPE-bins-win64.zip` into `YR_MPE/bin`, or let the
+   **Initializer** download it from GitHub or Gitee.
+4. Run `launcher.vbs` in the YRTools root. If VBScript is blocked, run
+   `python main.py` instead.
+5. Open **YPhylo Workbench** from the YR-MPE sidebar.
 
-- Do you think it is a need to integrate TreeMix?
-- Or it is a need to implement a sequence simulator interface (based on AliSim implemented in IQ-Tree)?
+The Initializer writes `settings.json` and `YR_MPE/config.json`. A persistent
+workspace is required for MrBayes, PhyloBayes and other long-running analyses;
+choose it with **WORKSPACE → Select Workspace**.
 
-Inform developers of your opinion via issue or email: zjxmolls@outlook.com.
+### From source
 
-## Changelogs
+```bash
+git clone https://github.com/Gipsy-The-Sheller/YRTools.git
+git clone https://github.com/Gipsy-The-Sheller/YR-MPE.git YRTools/plugins/YR-MPE
+cd YRTools
+python main.py
+```
 
-> *First transplant release on x86_64 windows
+Python 3.8+ with PyQt5 (including QtWebEngine), Biopython, NumPy, pandas and
+matplotlib is required. The Windows binaries are optional for source-only
+use; configure external executables with the Initializer or
+`YR_MPE/config.json`.
 
-**Latest version: 2026.11.9 - v1.1.0 - Agent bridge and workflow compiler; YPhylo Workbench provenance/selection; gCF/sCF/CASTER/MSC diagnostics; RAxML-NG, ModelTest-NG, TreeRecs, ASTER/ASTRAL, selection tests; revised user manual and case studies; dual-source Windows binary initializer.**
+## The workbench in one minute
 
-2026.3.8 - v0.3.0 - Support for multigene phylogeny; distance methods (DecentTree\*); maximum parsimony (MPBoot\*); molecular dating (LSD2, MrBayes); nucleotide substitution saturation analysis (BaCoCa C-value reimplement); model parameter estimation (ModelFinder); dataset management (SeqDBG); uncalibrated distance (p-distance) calculation.
+The toolbar is grouped by analysis stage:
 
-2026.1.9 - v0.2.0 - Bayesian inference plugins (MrBayes-MPI-BEAGLE3\*, PhyloBayes-MPI\*), fixed IcyTree bugs, added console plugin.
+| Menu | What it contains |
+|---|---|
+| **WORKSPACE** | workspace selection; datasets; SeqMatrix; SeqDBG; Sequence Concatenator; TreeMerger; One-Step OrthoFinder; workflow import/preview |
+| **ALIGN** | open sequences; MAFFT; MUSCLE 5; Clustal Omega; MACSE 2; TrimAl; GBlocks; Sequence Viewer |
+| **MODEL** | ModelFinder; ModelTest-NG; model-parameter estimation |
+| **DISTANCE** | ML distance (IQ-TREE 3); uncorrected p-distance; substitution-saturation analysis |
+| **PHYLOGENY** | IQ-TREE 3; RAxML-NG; MrBayes; PhyloBayes; MPBoot; DecentTree; RF comparison; MiniTracer; IcyTree |
+| **SPECIES TREE** | ASTRAL-IV; wASTRAL; CASTER-site; TreeRecs; gCF; sCF; Site Diagnostics; MSC Diagnostics; BEST/MrBayes MSC |
+| **CLOCK** | LSD2; MrBayes dating mode |
+| **SELECTION** | codon-based Z-test (NG86/YN00); batch dN/dS; IQ-TREE codon MLE |
+
+`ASTRAL-Hybrid` is a wASTRAL preset (support + branch length weighting), not a
+separate method. `MCMCTree`/`IQ2MC` and CodeML/HyPhy are not wired in v1.1.0;
+the menu entries are explicit placeholders.
+
+## Agent and workflow support
+
+YPhylo Workbench exposes a local, token-protected file bridge. It opens no
+network port and exposes no arbitrary shell action. An agent appends JSON
+commands to `commands.jsonl`; the workbench executes them on the Qt main
+thread and writes `responses.jsonl` and `events.jsonl`.
+
+```json
+{"id":"open","op":"workbench.invoke_plugin","plugin":"mafft",
+ "input":{"item_id":"seq_001"}}
+{"id":"set","op":"plugin.modify_options",
+ "options":{"mode":"Auto mode (--auto)","direction":"--adjustdirection"}}
+{"id":"run","op":"plugin.run"}
+{"id":"export","op":"plugin.export_to_workspace"}
+```
+
+A recorded run can be compiled into a portable workflow:
+
+```json
+{"schema":"yrmpe.workflow.v1","kind":"workflow",
+ "name":"sanger-demo","inputs":{"raw":"raw.fas"}}
+{"id":"mafft","op":"mafft.run",
+ "outputs":{"alignment":"work/aligned.fas"},
+ "params":{"input":"raw.fas","output":"work/aligned.fas",
+           "direction":"--adjustdirection"}}
+```
+
+The compiler drops failed/read-only steps, assigns symbolic placeholders,
+rewrites inputs and validates the DAG. The preview is editable; clicking a
+tool node opens its plugin in workflow mode.
+
+Plugin authors should implement `control_bindings()` and ship a Markdown skill
+under `YR_MPE/skills/`. See [the manual](docs/manual/manual.pdf), Chapter 15,
+for the AI-readiness requirements.
+
+## Documentation
+
+- [User manual](docs/manual/manual.pdf) — installation, interface, every menu,
+  agent bridge and plugin development.
+- [Case studies](docs/cases/cases.pdf) — single-gene ITS2, Sanger multi-locus,
+  organelle genomics, distance methods, MrBayes, infinite CAT, species tree,
+  dating and selection.
+- [Tool reference](docs/manual/tool-reference.pdf) — plugin-by-plugin GUI/CLI/
+  agent reference generated from the skills.
+- [Supplementary information](https://github.com/Gipsy-The-Sheller/YR-MPE/releases/download/v1.1.0/YR-MPE-1.1.0-supplementary-information.pdf)
+  — benchmark notes and implementation details.
+- [Wiki](https://github.com/Gipsy-The-Sheller/YR-MPE/wiki) — older tutorials
+  and development notes; the PDF manual is the current reference.
+
+Example datasets used by the case studies are in
+[`examples/cases/`](examples/cases/), with provenance and reproduction notes.
+
+## Status and limitations
+
+YR-MPE is a research workbench, not a replacement for the individual analysis
+programs. Current boundaries:
+
+- Windows is the primary packaged platform; Linux/macOS can run the Python
+  plugins but not the bundled Windows executables.
+- The bundled ASTER reports **v1.24**; the ASTER2 migration is planned but not
+  part of this release.
+- The workflow compiler and preview are implemented; a general executor that
+  replays every step without review is still being completed.
+- CodeML/HyPhy, MCMCTree and IQ2MC are not wired.
+- Some bundled Windows builds (notably DecentTree) can fail on particular
+  matrices; the manual documents the fallback.
+- The controlled agent/CLI benchmark and workflow timing study are ongoing.
+
+## Citation
+
+The manuscript is in preparation. Until a DOI is available, cite the release:
+
+```bibtex
+@software{yrmpe2026,
+  title   = {YR-MPE: a modular desktop platform for agent-operable and
+             reproducible phylogenetic workflows},
+  author  = {Xu, Zhijie and Jia, Yiyang and Gu, Zhihan and Shang, Mingrui and
+             Cheng, Xinbo and Han, Shuo and Jin, Yang and Lei, Yitong and
+             Zhang, Rui and Zhang, Yunlong},
+  year    = {2026},
+  version = {1.1.0},
+  url     = {https://github.com/Gipsy-The-Sheller/YR-MPE/releases/tag/v1.1.0}
+}
+```
+
+## Contributing
+
+Issues and pull requests are welcome. For a new plugin, start from the
+developer guide in the manual and the plugin template; include a skill file,
+control bindings, a `ResultSpec` and tests. Do not commit local
+`config.json`/`settings.json` or agent-bridge tokens.
+
+## License
+
+GPL-3.0. Bundled programs retain their original licenses; see
+[`LICENSE`](LICENSE) and the individual binary directories.
