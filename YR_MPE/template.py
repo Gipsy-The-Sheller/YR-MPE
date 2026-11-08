@@ -12,6 +12,8 @@ import tempfile
 import platform
 import subprocess
 
+from YR_MPE.runtime.subprocess_utils import run_hidden
+
 class Wrapper(QWidget):
     def __init__(self, importfrom = None, importdata = None):
         super().__init__()
@@ -615,7 +617,7 @@ class CommandThread(QThread):
                 self.console_output.emit(cmd_str, "command")
                 
                 # Execute command
-                result = subprocess.run(
+                result = run_hidden(
                     cmd, 
                     capture_output=True, 
                     text=True, 

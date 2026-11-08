@@ -56,6 +56,7 @@ TYPE_LABELS = {
     "variant": "Variant",
     "coalescent": "Coalescent",
     "clock": "Clock",
+    "table": "Table",
 }
 
 TYPE_SHORT = {
@@ -69,6 +70,7 @@ TYPE_SHORT = {
     "variant": "Var",
     "coalescent": "Coal",
     "clock": "Clock",
+    "table": "Table",
 }
 
 PREVIEW_LABELS = {
@@ -77,6 +79,7 @@ PREVIEW_LABELS = {
     "model": "Preview model",
     "distance": "Preview distance matrix",
     "chain": "Preview chain",
+    "table": "Preview table",
 }
 
 ITEM_ICON_PATHS = {
@@ -87,6 +90,7 @@ ITEM_ICON_PATHS = {
     "phylogeny": "file/phylogeny.svg",
     "treeset": "file/treeset.svg",
     "chain": "file/chain.svg",
+    "table": "file/table.svg",
 }
 
 PREVIEW_ICON_PATHS = {
@@ -95,6 +99,7 @@ PREVIEW_ICON_PATHS = {
     "model": "file/model.svg",
     "distance": "file/distance.svg",
     "chain": "software/minitracer.svg",
+    "table": "file/table.svg",
 }
 
 # Ordered longest/specific first. Matched against method + tool + run name.
@@ -169,6 +174,7 @@ class InspectorPanel(QWidget):
         self.current_item_id: Optional[str] = None
         self.current_run_id: Optional[str] = None
         self.current_dataset_id: Optional[str] = None
+        self._operations: List[Dict[str, Any]] = []
         self._item_nodes: Dict[str, QTreeWidgetItem] = {}
         self._run_nodes: Dict[str, QTreeWidgetItem] = {}
         self._metadata_expanded = False
@@ -186,6 +192,21 @@ class InspectorPanel(QWidget):
     # ------------------------------------------------------------------
     # public API
     # ------------------------------------------------------------------
+    def operations(self):
+        """Return the visible Inspector operations as structured data."""
+        return list(self._operations)
+
+    def state(self):
+        """Return the current Details target and its supported operations."""
+        return {
+            "item_id": self.current_item_id or "",
+            "run_id": self.current_run_id or "",
+            "dataset_id": self.current_dataset_id or "",
+            "title": self.title_label.text(),
+            "subtitle": self.subtitle_label.text(),
+            "operations": self.operations(),
+        }
+
     def set_sources(self, manager=None, store=None):
         self.manager = manager if manager is not None else self.manager
         self.store = store if store is not None else self.store
@@ -202,7 +223,7 @@ class InspectorPanel(QWidget):
         self.current_item_id = None
         self.current_run_id = None
         self.current_dataset_id = None
-        self.title_label.setText("Inspector")
+        self.title_label.setText("Details")
         self.subtitle_label.setText("Select a data node or dataset")
         self._has_operations = False
         self._has_run = False
@@ -433,7 +454,7 @@ class InspectorPanel(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
 
-        self.title_label = QLabel("Inspector")
+        self.title_label = QLabel("Details")
         font = QFont(QApplication.font())
         font.setPointSize(font.pointSize() + 2)
         font.setBold(True)
@@ -494,6 +515,10 @@ class InspectorPanel(QWidget):
 
         # Workflow ----------------------------------------------------
         self.workflow_label = self._section_label("Workflow")
+        self.workflow_label.setToolTip(
+            "Forward provenance view. Runs are anchored under their first "
+            "input; fan-in inputs are listed in the run tooltip."
+        )
         layout.addWidget(self.workflow_label)
         self.workflow_tree = QTreeWidget()
         self.workflow_tree.setObjectName("inspector.workflow")
@@ -534,6 +559,36 @@ class InspectorPanel(QWidget):
         rename_row.addWidget(self.rename_button)
         run_layout.addLayout(rename_row)
         layout.addWidget(self.run_section)
+
+        # Keep the header outside a body container so one right-hand splitter
+        # section can collapse to a readable title while the other expands.
+        self._body_widget = QWidget()
+        body_layout = QVBoxLayout(self._body_widget)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(6)
+        while layout.count() > 2:
+            item = layout.takeAt(2)
+            widget = item.widget()
+            if widget is not None:
+                body_layout.addWidget(
+                    widget,
+                    1 if widget in (self.workflow_tree, self.metadata_scroll) else 0,
+                )
+        layout.addWidget(self._body_widget, 1)
+        self._collapsed = False
+
+    def set_collapsed(self, collapsed: bool):
+        self._collapsed = bool(collapsed)
+        self._body_widget.setVisible(not self._collapsed)
+
+    def collapsed_height(self) -> int:
+        margins = self.layout().contentsMargins()
+        spacing = self.layout().spacing()
+        return max(
+            48,
+            margins.top() + self.title_label.sizeHint().height() + spacing
+            + self.subtitle_label.sizeHint().height() + margins.bottom(),
+        )
 
     def _section_label(self, text):
         label = QLabel(text)
@@ -688,6 +743,8 @@ class InspectorPanel(QWidget):
             return "distance"
         if item_type == "chain":
             return "chain"
+        if item_type == "table":
+            return "table"
         return None
 
     def _fill_item_operations(self, item, item_type, run):
@@ -734,6 +791,7 @@ class InspectorPanel(QWidget):
         self.operations_widget.setVisible(bool(visible))
 
     def _clear_operations(self):
+        self._operations = []
         while self.operations_layout.count():
             item = self.operations_layout.takeAt(0)
             widget = item.widget()
@@ -749,6 +807,11 @@ class InspectorPanel(QWidget):
             button.setIconSize(QSize(16, 16))
         button.clicked.connect(slot)
         self.operations_layout.addWidget(button)
+        self._operations.append({
+            "id": object_name or "",
+            "label": text,
+            "enabled": bool(button.isEnabled()),
+        })
 
     def _emit_operation(self, operation, target_id=None):
         target_id = target_id or self.current_item_id or self.current_run_id
@@ -769,12 +832,23 @@ class InspectorPanel(QWidget):
             ("Created", _display_time(_attr(item, "created_at", default=""))),
         ]
         if run is not None:
+            if len(run.input_ids) > 1:
+                rows.append((
+                    "Run inputs",
+                    ", ".join(self._item_label(item_id)
+                              for item_id in run.input_ids),
+                ))
             link = self._link_button("Open edge: %s" % run.name, "inspector.metadata.edge")
             link.setIcon(self._icon(self._run_icon_path(run)))
             link.setIconSize(QSize(16, 16))
             link.clicked.connect(lambda: self.show_run(run.id))
             rows.append(("Edge", link))
         self._set_form_rows(rows)
+
+    def _item_label(self, item_id: str) -> str:
+        store = self._get_store()
+        record = store.index.items.get(item_id) if store is not None else None
+        return str(_attr(record, "loci_name", "name", default=item_id))
 
     def _fill_run_metadata(self, run, dataset_name: str):
         stream = self._stream_for_run(run)
@@ -872,6 +946,7 @@ class InspectorPanel(QWidget):
             return
 
         item_ids = {_attr(item, "id", default="") for item in items}
+        items_by_id = {_attr(item, "id", default=""): item for item in items}
         root = QTreeWidgetItem([
             _attr(dataset, "name", default="Dataset") if dataset else "Dataset",
             "DS",
@@ -925,9 +1000,22 @@ class InspectorPanel(QWidget):
                 ])
                 node.setData(0, Qt.UserRole, ("run", record.id))
                 node.setIcon(0, self._icon(self._run_icon_path(record)))
-                node.setToolTip(0, "Status: %s" % record.status)
+                lines = ["Status: %s" % record.status]
+                if len(record.input_ids) > 1:
+                    lines.append("Inputs (%d):" % len(record.input_ids))
+                    for input_id in record.input_ids:
+                        input_item = items_by_id.get(input_id)
+                        lines.append("  - %s" % _attr(
+                            input_item, "loci_name", "name", default=input_id
+                        ))
+                node.setToolTip(0, "\n".join(lines))
                 self._run_nodes[record.id] = node
 
+        # Provenance is a DAG: a run can fan in (several inputs) and fan out
+        # (several outputs).  Draw one forward spanning tree only: every item
+        # hangs under the run or import that produced it, and every run is
+        # anchored once under its first input.  Reverse edges are not drawn;
+        # additional inputs stay visible in the run tooltip.
         for item in items:
             record_id = _attr(item, "id", default="")
             node = self._item_nodes[record_id]

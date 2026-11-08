@@ -2,9 +2,9 @@
 数据项按钮组件
 支持颜色编码和单击/双击事件处理的QToolButton
 """
-from PyQt5.QtWidgets import QToolButton, QMenu, QAction
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QSize
-from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import QApplication, QToolButton, QMenu, QAction
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QSize, QMimeData
+from PyQt5.QtGui import QDrag, QIcon
 
 from .dataset_models import (
     DatasetItem, DatasetInfo,
@@ -40,6 +40,21 @@ BUTTON_STYLES = {
     """
 }
 
+# Transient chain feedback. These override the selection colour only while
+# the pointer is on the chain or the chain is the active one.
+CHAIN_HOVER_STYLE = """
+    QToolButton {
+        background-color: rgba(128, 128, 128, 105);
+        border-radius: 6px;
+    }
+"""
+CHAIN_ACTIVE_STYLE = """
+    QToolButton {
+        background-color: #87CEEB;
+        border-radius: 6px;
+    }
+"""
+
 # 图标映射（根据数据类型）
 ICON_MAPPING = {
     "sequence": "align.svg",
@@ -52,19 +67,29 @@ ICON_MAPPING = {
     "clock": "clock.svg"
 }
 
+# Shared between the workspace icons (drag source) and the Selected toolbar
+# button (drop target).
+ITEM_MIME_TYPE = "application/x-ypmpe-dataset-item"
+
 
 class DatasetItemButton(QToolButton):
     """数据项按钮 - 支持颜色编码和单击/双击事件"""
     
     # 信号定义
-    clicked_single = pyqtSignal(str)  # 单击事件，传递item_id
+    clicked_single = pyqtSignal(str)  # 延迟单击事件，传递item_id
+    activated = pyqtSignal(str)       # 立即激活（不受双击等待影响）
     clicked_double = pyqtSignal(str)  # 双击事件，传递item_id
     right_clicked = pyqtSignal(str)   # 右键点击事件，传递item_id
-    
+    hovered = pyqtSignal(str)         # 鼠标进入，传递item_id
+    hover_left = pyqtSignal(str)      # 鼠标离开，传递item_id
+    deselect_requested = pyqtSignal(str)
+    basket_requested = pyqtSignal(str)
+
     def __init__(self, item: DatasetItem, parent=None):
         super().__init__(parent)
-        
+
         self.item = item
+        self.chain_highlight = None  # None | "hover" | "active"
         self.click_timer = QTimer()
         self.click_timer.setSingleShot(True)
         self.click_timer.timeout.connect(self._on_single_click_delayed)
@@ -72,7 +97,11 @@ class DatasetItemButton(QToolButton):
         self.click_count = 0
         self.last_click_time = 0
         self.pending_single_click = False
-        
+
+        # Drag-to-Selected support
+        self._drag_start = None
+        self._suppress_next_click = False
+
         # 初始化按钮
         self._init_button()
         
@@ -120,8 +149,19 @@ class DatasetItemButton(QToolButton):
         
         return f"{type_label}\n{name}{extra_info}"
     
+    def set_chain_highlight(self, mode):
+        """Set the transient chain feedback: None, 'hover' or 'active'."""
+        self.chain_highlight = mode
+        self.update_style()
+
     def update_style(self):
         """更新按钮样式"""
+        if self.chain_highlight == "hover":
+            self.setStyleSheet(CHAIN_HOVER_STYLE)
+            return
+        if self.chain_highlight == "active":
+            self.setStyleSheet(CHAIN_ACTIVE_STYLE)
+            return
         style = BUTTON_STYLES.get(
             self.item.selection_state,
             BUTTON_STYLES[SELECTION_STATE_NONE]
@@ -133,13 +173,57 @@ class DatasetItemButton(QToolButton):
         self.item = item
         self.setText(self._get_button_text())
         self.update_style()
-    
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_start = event.pos()
+            self._suppress_next_click = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (not (event.buttons() & Qt.LeftButton)
+                or self._drag_start is None):
+            return super().mouseMoveEvent(event)
+        distance = (event.pos() - self._drag_start).manhattanLength()
+        if distance < QApplication.startDragDistance():
+            return super().mouseMoveEvent(event)
+
+        self._drag_start = None
+        self.click_timer.stop()
+        self.click_count = 0
+        self.pending_single_click = False
+        self._suppress_next_click = True
+        self.setDown(False)
+
+        mime = QMimeData()
+        mime.setData(ITEM_MIME_TYPE, self.item.id.encode("utf-8"))
+        mime.setText(self.item.get_name())
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        pixmap = self.icon().pixmap(self.iconSize())
+        if not pixmap.isNull():
+            drag.setPixmap(pixmap)
+        drag.exec_(Qt.CopyAction)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_start = None
+        super().mouseReleaseEvent(event)
+
     def _on_click(self):
         """处理点击事件"""
+        if self._suppress_next_click:
+            self._suppress_next_click = False
+            self.click_count = 0
+            self.pending_single_click = False
+            self.click_timer.stop()
+            return
         self.click_count += 1
-        
+
         if self.click_count == 1:
-            # 第一次点击，等待可能的第二次点击
+            # React immediately so selection and the inspector do not wait
+            # for the double-click window. The delayed signal remains for
+            # compatibility with callers that need single-click semantics.
+            self.activated.emit(self.item.id)
             self.pending_single_click = True
             self.click_timer.start(250)  # 等待250毫秒
         elif self.click_count == 2:
@@ -148,7 +232,7 @@ class DatasetItemButton(QToolButton):
             self.pending_single_click = False
             self.clicked_double.emit(self.item.id)
             self.click_count = 0
-    
+
     def _on_single_click_delayed(self):
         """延迟的单击事件处理"""
         if self.pending_single_click and self.click_count == 1:
@@ -160,12 +244,16 @@ class DatasetItemButton(QToolButton):
     def _show_context_menu(self, position):
         """显示右键菜单"""
         menu = QMenu(self)
-        
+
         # 查看详情
         view_action = QAction("View Details", self)
         view_action.triggered.connect(lambda: self.clicked_double.emit(self.item.id))
         menu.addAction(view_action)
-        
+
+        basket_action = QAction("Add to Selected", self)
+        basket_action.triggered.connect(lambda: self.basket_requested.emit(self.item.id))
+        menu.addAction(basket_action)
+
         # 如果是选中状态，添加取消选择选项
         if self.item.selection_state == SELECTION_STATE_GREEN:
             menu.addSeparator()
@@ -183,7 +271,7 @@ class DatasetItemButton(QToolButton):
     
     def _deselect(self):
         """取消选择"""
-        self.clicked_single.emit(self.item.id)
+        self.deselect_requested.emit(self.item.id)
     
     def _delete_item(self):
         """删除数据项"""
@@ -196,8 +284,13 @@ class DatasetItemButton(QToolButton):
     def enterEvent(self, event):
         """鼠标进入事件"""
         super().enterEvent(event)
-        # 可以在这里添加悬停效果
         self.setToolTip(self._get_tooltip())
+        self.hovered.emit(self.item.id)
+
+    def leaveEvent(self, event):
+        """鼠标离开事件"""
+        super().leaveEvent(event)
+        self.hover_left.emit(self.item.id)
     
     def _get_tooltip(self) -> str:
         """获取工具提示"""

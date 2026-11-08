@@ -10,7 +10,7 @@ from .dataset_models import (
     ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT, ITEM_TYPE_MODEL,
     ITEM_TYPE_DISTANCE, ITEM_TYPE_PHYLOGENY, ITEM_TYPE_TREESET,
     ITEM_TYPE_VARIANT, ITEM_TYPE_COALESCENT, ITEM_TYPE_CLOCK,
-    ITEM_TYPE_CHAIN, SELECTION_STATE_NONE, SELECTION_STATE_GREEN,
+    ITEM_TYPE_CHAIN, ITEM_TYPE_TABLE, SELECTION_STATE_NONE, SELECTION_STATE_GREEN,
     SELECTION_STATE_BLUE, SELECTION_STATE_RED,
     DATA_DEPENDENCIES, ITEM_TYPE_TO_GROUP, OWNERSHIP_GROUPS
 )
@@ -467,7 +467,7 @@ class SelectionEngine:
                 item_type: len([i for i in green_items if i.item_type == item_type])
                 for item_type in [ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT, ITEM_TYPE_MODEL,
                                  ITEM_TYPE_DISTANCE, ITEM_TYPE_PHYLOGENY, ITEM_TYPE_VARIANT,
-                                 ITEM_TYPE_COALESCENT, ITEM_TYPE_CLOCK]
+                                 ITEM_TYPE_COALESCENT, ITEM_TYPE_CLOCK, ITEM_TYPE_TABLE]
             },
             "datasets": list(set(item.dataset_id for item in green_items))
         }

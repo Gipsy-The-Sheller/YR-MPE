@@ -18,14 +18,21 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
+import glob
+import json
+import shutil
+import tempfile
+import time
 import uuid
 from typing import Optional, Dict, List, Any
 from Bio import SeqIO
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
-QMenuBar, QToolBar, QToolButton, QGroupBox, QLabel,
+QApplication, QMenuBar, QToolBar, QToolButton, QGroupBox, QLabel,
 QAction, QMenu, QSizePolicy, QGridLayout, QFileDialog, QMessageBox, QDialog, QPushButton,
-QSplitter)
-from PyQt5.QtCore import Qt, QSize, pyqtSignal
+QSplitter, QToolTip, QWIDGETSIZE_MAX)
+from PyQt5.QtCore import (
+    Qt, QSize, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve, pyqtProperty,
+)
 from PyQt5.QtGui import QIcon
 
 # 导入selection状态常量
@@ -41,16 +48,21 @@ from .methods.import_partitioned_nexus import import_partitioned_nexus
 # 导入数据集选择管理器和按钮组件
 from .methods.dataset_selection_manager import DatasetSelectionManager
 from .methods.dataset_item_button import DatasetItemButton, DatasetButton
+from .methods.hover_toolbar import install_hover_expand
+from .methods.feature_search import FeatureSearch
 from .methods.inspector_panel import InspectorPanel
+from .methods.selected_panel import SelectedDropButton, SelectedPanel
+from .methods.workspace_lock import WorkspaceLock, pid_is_alive
 from .methods.dataset_models import (
     DatasetItem, DatasetInfo,
     ITEM_TYPE_SEQUENCE, ITEM_TYPE_ALIGNMENT, ITEM_TYPE_MODEL,
     ITEM_TYPE_DISTANCE, ITEM_TYPE_PHYLOGENY, ITEM_TYPE_TREESET,
     ITEM_TYPE_CHAIN, ITEM_TYPE_VARIANT, ITEM_TYPE_COALESCENT,
-    ITEM_TYPE_CLOCK, SELECTION_STATE_NONE, SELECTION_STATE_GREEN,
+    ITEM_TYPE_CLOCK, ITEM_TYPE_TABLE, SELECTION_STATE_NONE, SELECTION_STATE_GREEN,
     SELECTION_STATE_BLUE, SELECTION_STATE_RED
 )
 from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
+from ..runtime.task_queue import TaskQueueManager
 
 # 导入工厂模式
 from ..factories import ResourceFactory, PluginFactory
@@ -63,6 +75,8 @@ class YR_MPEA_Widget(QWidget):
         
         # 初始化核心管理器
         self.workspace_manager = WorkspaceManager()
+        self.workspace_lock = WorkspaceLock()
+        self._temporary_workdir = self._create_temporary_workspace()
         self.plugin_manager = PluginManager(self.workspace_manager)
         self.plugin_executor = PluginExecutor(self.plugin_manager, self.workspace_manager)
         self.file_ops = FileOperations()
@@ -74,9 +88,14 @@ class YR_MPEA_Widget(QWidget):
         
         # 初始化数据集选择管理器
         self.dataset_selection_manager = DatasetSelectionManager()
-        
+
+        # One host-level queue owns long-running plugin jobs.  A closed tool
+        # window therefore does not destroy its worker thread.
+        self.task_queue = TaskQueueManager(parent=self, max_concurrent=1)
+
         # 注册所有插件
         self.plugin_manager.register_all_plugins()
+        self.setAcceptDrops(True)
         
         self.init_ui()
         
@@ -92,17 +111,35 @@ class YR_MPEA_Widget(QWidget):
     
     def _switch_workspace(self, new_workspace_path: str, is_new: bool = False):
         """切换工作区"""
+        new_workspace_path = os.path.abspath(new_workspace_path)
+        old_workspace_path = self.workspace_manager.workspace_path or ""
+        same_workspace = bool(old_workspace_path) and (
+            os.path.normcase(os.path.abspath(old_workspace_path))
+            == os.path.normcase(new_workspace_path)
+        )
+        candidate_lock = None
+        committed = False
+
+        # Reserve the target before any dialog or state mutation.  The old
+        # lock stays held if the user cancels the switch.
+        if not same_workspace:
+            candidate_lock = WorkspaceLock()
+            ok, message = candidate_lock.acquire(new_workspace_path)
+            if not ok:
+                QMessageBox.warning(self, "Workspace in use", message)
+                return
+
         try:
             # 检查当前工作区是否有数据
-            current_has_data = self.workspace_manager.has_data() if self.workspace_manager.workspace_path else False
-            
-            if current_has_data and self.workspace_manager.workspace_path != new_workspace_path:
+            current_has_data = self.workspace_manager.has_data() if old_workspace_path else False
+
+            if current_has_data and not same_workspace:
                 # 显示切换选项对话框
                 reply = QMessageBox.question(
                     self,
                     "Workspace Switch",
                     f"Current workspace contains data.\n\n"
-                    f"Current: {self.workspace_manager.workspace_path}\n"
+                    f"Current: {old_workspace_path}\n"
                     f"Target: {new_workspace_path}\n\n"
                     f"Choose an option:\n"
                     f"• Yes: Overwrite target workspace with current data\n"
@@ -111,55 +148,70 @@ class YR_MPEA_Widget(QWidget):
                     QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
                     QMessageBox.Cancel
                 )
-                
+
                 if reply == QMessageBox.Cancel:
-                    return  # 取消切换
-                elif reply == QMessageBox.Yes:
-                    # 选项1: 用当前数据覆盖目标工作区
+                    return
+                if reply == QMessageBox.Yes:
+                    # Use the current data in the target workspace.
                     self._save_current_data_to_workspace(new_workspace_path)
-                elif reply == QMessageBox.No:
-                    # 选项2: 清空当前数据并加载目标工作区
+                else:
+                    # Load the target workspace instead of current data.
                     self.workspace_manager.clear_current_state()
                     self.workspace_manager.workspace_path = new_workspace_path
                     self.workspace_manager._load_workspace_state()
-                    # 加载数据集选择管理器的状态
                     self.dataset_selection_manager.workspace_path = new_workspace_path
                     self.dataset_selection_manager._load_state()
-            
+
             # 设置新工作区
             self.workspace_manager.set_workspace_path(new_workspace_path)
-            
+
             # 设置数据集选择管理器的工作区路径
             self.dataset_selection_manager.set_workspace_path(new_workspace_path)
-            
+
             # 加载数据集选择管理器的状态（如果存在的话）
             self.dataset_selection_manager._load_state()
-            
+
             # 刷新UI
             self._update_workspace_display()
+            if hasattr(self, "workspace"):
+                self.workspace.rebuild_from_manager()
             if hasattr(self, "inspector"):
                 self.inspector.set_sources(
                     self.dataset_selection_manager,
                     self.dataset_selection_manager.store,
                 )
                 self.inspector.show_empty()
+            if hasattr(self, "selected_panel"):
+                self.selected_panel.set_sources(
+                    self.dataset_selection_manager,
+                    self.dataset_selection_manager.store,
+                )
+
+            committed = True
+            if candidate_lock is not None:
+                old_lock = self.workspace_lock
+                self.workspace_lock = candidate_lock
+                if old_workspace_path:
+                    old_lock.release()
 
             # 显示成功消息
-            display_name = self.workspace_manager.truncate_path(new_workspace_path)
             QMessageBox.information(
                 self,
                 "Workspace Selected",
                 f"Workspace set to:\n{new_workspace_path}\n\n"
                 f"History, temp, and results directories have been created."
             )
-            
+
         except Exception as e:
             QMessageBox.critical(
                 self,
                 "Error",
                 f"Failed to switch workspace:\n{str(e)}"
             )
-    
+        finally:
+            if candidate_lock is not None and not committed:
+                candidate_lock.release()
+
     def _save_current_data_to_workspace(self, workspace_path: str):
         """保存当前数据到指定工作区"""
         # 确保工作区目录存在
@@ -184,19 +236,96 @@ class YR_MPEA_Widget(QWidget):
         # 恢复原路径（因为set_workspace_path会再次调用）
         self.workspace_manager.workspace_path = temp_path
     
+    def _create_temporary_workspace(self):
+        """Create a session-scoped directory for temporary-mode work."""
+        root = tempfile.gettempdir()
+        prefix = "yrmpe-session-"
+        for old in glob.glob(os.path.join(root, prefix + "*")):
+            meta_path = os.path.join(old, "session.json")
+            try:
+                with open(meta_path, "r", encoding="utf-8") as handle:
+                    meta = json.load(handle)
+                pid = int(meta.get("pid", 0))
+            except (OSError, ValueError, TypeError):
+                pid = 0
+            if pid and not pid_is_alive(pid):
+                shutil.rmtree(old, ignore_errors=True)
+            elif not pid:
+                # A directory without a valid owner is not safe to keep.
+                try:
+                    age = time.time() - os.path.getmtime(old)
+                except OSError:
+                    age = 0
+                if age > 86400:
+                    shutil.rmtree(old, ignore_errors=True)
+        session_dir = tempfile.mkdtemp(prefix=prefix)
+        with open(os.path.join(session_dir, "session.json"), "w", encoding="utf-8") as handle:
+            json.dump({
+                "pid": os.getpid(),
+                "created_at": time.time(),
+                "application": "YPhylo Workbench",
+            }, handle, indent=2)
+        return session_dir
+
+    def _remove_temporary_workspace(self):
+        path = getattr(self, "_temporary_workdir", "")
+        if path and os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+        self._temporary_workdir = ""
+
+    def _build_workspace_status_bar(self, main_layout):
+        """Bottom strip showing the current workspace and its lifetime."""
+        bar = QWidget()
+        bar.setObjectName("workspaceStatusBar")
+        bar.setStyleSheet(
+            "QWidget#workspaceStatusBar { border-top: 1px solid palette(mid); }"
+        )
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(10, 3, 10, 3)
+        row.setSpacing(6)
+        self.workspace_status_dot = QLabel("●")
+        self.workspace_status_dot.setFixedWidth(14)
+        row.addWidget(self.workspace_status_dot)
+        self.workspace_status_label = QLabel("")
+        self.workspace_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        row.addWidget(self.workspace_status_label, 1)
+        self.workspace_change_button = QToolButton()
+        self.workspace_change_button.setText("Change")
+        self.workspace_change_button.setToolTip(
+            "Select a persistent workspace folder"
+        )
+        self.workspace_change_button.clicked.connect(self.select_workspace_folder)
+        row.addWidget(self.workspace_change_button)
+        self.workspace_status_bar = bar
+        main_layout.addWidget(bar)
+        self._update_workspace_display()
+
     def _update_workspace_display(self):
         """更新工作区显示"""
-        if self.workspace_manager.workspace_path:
-            display_name = self.workspace_manager.truncate_path(
-                self.workspace_manager.workspace_path
+        path = self.workspace_manager.workspace_path or ""
+        if path:
+            display_name = self.workspace_manager.truncate_path(path, 64)
+            self.workspace_status_dot.setStyleSheet("color: #2e7d32;")
+            self.workspace_status_label.setText(
+                "Workspace: %s" % display_name
             )
-            # 更新workspace按钮的工具提示
+            self.workspace_status_label.setToolTip(path)
+            self.workspace_status_label.setAccessibleName("Current workspace")
             if hasattr(self, 'workspace_button'):
-                self.workspace_button.setToolTip(f"Current Workspace: {self.workspace_manager.workspace_path}")
+                self.workspace_button.setToolTip(f"Current Workspace: {path}")
         else:
-            # 临时模式
+            self.workspace_status_dot.setStyleSheet("color: #b26a00;")
+            self.workspace_status_label.setText(
+                "Temporary workspace (this session only)"
+            )
+            self.workspace_status_label.setToolTip(
+                "Temporary files live in %s and are removed when the Workbench closes."
+                % getattr(self, "_temporary_workdir", "")
+            )
             if hasattr(self, 'workspace_button'):
-                self.workspace_button.setToolTip("Temporary Mode - No workspace selected")
+                self.workspace_button.setToolTip(
+                    "Temporary Mode - no workspace selected"
+                )
     
     def switch_to_temporary(self):
         """切换到临时模式（无工作区）"""
@@ -219,9 +348,16 @@ class YR_MPEA_Widget(QWidget):
                 if reply == QMessageBox.No:
                     return  # 用户取消
 
-            # 清空工作区路径和数据
+            # Release the persistent workspace and return to a disposable
+            # session directory.
+            self.workspace_lock.release()
+            self.workspace_lock = WorkspaceLock()
             self.workspace_manager.workspace_path = None
             self.workspace_manager.clear_current_state()
+            if not getattr(self, "_temporary_workdir", "") or not os.path.isdir(
+                self._temporary_workdir
+            ):
+                self._temporary_workdir = self._create_temporary_workspace()
 
             # 保存配置（清空current）
             self.workspace_manager._save_workspace_history()
@@ -249,14 +385,26 @@ class YR_MPEA_Widget(QWidget):
             )
 
     def get_workdir(self):
-        """获取工作区 temp 目录路径
+        """Return the directory used for transient analysis files.
 
-        Returns:
-            str: 工作区 temp 目录路径，如果没有工作区则返回 None
+        Persistent workspaces use ``<workspace>/temp``.  Temporary mode uses a
+        session directory that is removed when the Workbench closes.
         """
         if self.workspace_manager.workspace_path:
             return os.path.join(self.workspace_manager.workspace_path, "temp")
-        return None
+        return getattr(self, "_temporary_workdir", None) or None
+
+    def closeEvent(self, event):
+        """Release the workspace lock and remove the temporary session."""
+        try:
+            for job in list(self.task_queue.jobs()):
+                if not job.is_terminal:
+                    self.task_queue.cancel(job.job_id)
+        except Exception:
+            pass
+        self.workspace_lock.release()
+        self._remove_temporary_workspace()
+        super().closeEvent(event)
 
     def _prepare_import_data(self, workspace_item_types=None):
         """准备插件导入数据（抽象层，统一处理 dataset 和 SingleGeneWorkspace）
@@ -281,32 +429,50 @@ class YR_MPEA_Widget(QWidget):
                              if ds.selection_state == SELECTION_STATE_GREEN]
 
             
+            current_id = getattr(self.workspace, "current_dataset_id", None)
+            target_dataset = None
             if green_datasets:
-                # 获取第一个 green dataset
-                green_dataset = green_datasets[0]
+                # 优先使用当前正在查看的 green dataset；否则用第一个。
+                target_dataset = next(
+                    (ds for ds in green_datasets if ds.id == current_id),
+                    green_datasets[0],
+                )
+            elif current_id:
+                # ResultSpec imports set current_dataset_id but do not mark the
+                # dataset green. A user opening IQ-TREE right after an import
+                # still expects that dataset to be the input.
+                candidate = self.dataset_selection_manager.get_dataset(current_id)
+                if candidate is not None and candidate.items:
+                    target_dataset = candidate
 
+            if target_dataset is not None:
                 # 获取该 dataset 中所有 selected 的 items（使用 selected_items 集合）
                 selected_items = []
-                for item_id in green_dataset.items:
+                for item_id in target_dataset.items:
                     # 检查 item_id 是否在 selected_items 集合中
                     if item_id in self.dataset_selection_manager.selected_items:
                         item = self.dataset_selection_manager.get_item(item_id)
                         if item:
                             selected_items.append(item)
 
-                
+                if not selected_items:
+                    # A green dataset means "the whole dataset"; ResultSpec
+                    # imports have no per-item green flags, so use every item
+                    # in the dataset when none is individually selected.
+                    selected_items = self.dataset_selection_manager.get_items_by_dataset(
+                        target_dataset.id
+                    )
                 if selected_items:
                     import_from = "DATASET_MANAGER"
                     import_data = {
                         'dataset_items': selected_items,
                         'dataset_config': {
-                            'topo_linked': green_dataset.settings.get('topo_linked', False),
-                            'edge_linked': green_dataset.settings.get('edge_linked', False)
+                            'dataset_id': target_dataset.id,
+                            'topo_linked': target_dataset.settings.get('topo_linked', False),
+                            'edge_linked': target_dataset.settings.get('edge_linked', False)
                         }
                     }
                     return import_from, import_data
-            else:
-                pass
         
         # 2. 如果没有选中的 dataset items，则检查 SingleGeneWorkspace
         if workspace_item_types:
@@ -401,10 +567,232 @@ class YR_MPEA_Widget(QWidget):
         else:
             temporary_action.triggered.connect(self.switch_to_temporary)
         workspace_menu.addAction(temporary_action)
-        
+
+        workspace_menu.addSeparator()
+        import_workflow_action = QAction("Import Workflow...", workspace_menu)
+        import_workflow_action.setIcon(self.resource_factory.get_icon("workspace.svg"))
+        import_workflow_action.triggered.connect(self.import_workflow_dialog)
+        workspace_menu.addAction(import_workflow_action)
+
+        workflow_preview_action = QAction("Workflow Preview...", workspace_menu)
+        workflow_preview_action.setIcon(self.resource_factory.get_icon("workspace.svg"))
+        workflow_preview_action.triggered.connect(self.show_workflow_preview)
+        workspace_menu.addAction(workflow_preview_action)
+
+        about_action = QAction("About YPhylo Workbench", workspace_menu)
+        about_action.setIcon(self.resource_factory.get_icon("yphylow-about.svg"))
+        about_action.triggered.connect(self.show_about)
+        workspace_menu.addAction(about_action)
+
         select_workspace_action.setMenu(workspace_menu)
         workspace_button.addAction(select_workspace_action)
             
+    def open_workflow_step(self, step_context):
+        """Open a plugin in placeholder-locked workflow configuration mode."""
+        from PyQt5.QtWidgets import QDialog
+        from ..runtime.workflow_tools import create_plugin
+        op = step_context.get("op") or step_context.get("method")             or step_context.get("tool") or ""
+        if not op:
+            return None
+        plugin = create_plugin(op, workdir=self.get_workdir())
+        if not callable(getattr(plugin, "bind_workflow_step", None)):
+            return None
+        plugin.bind_workflow_step(step_context)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Configure workflow step - %s" % op)
+        dialog.setMinimumSize(860, 620)
+        dialog.setLayout(QVBoxLayout())
+        dialog.layout().addWidget(plugin)
+        captured = {}
+
+        def apply_config(config):
+            captured.update(config or {})
+            dialog.accept()
+
+        plugin.workflow_configured.connect(apply_config)
+        dialog.exec_()
+        return captured or None
+
+    def dragEnterEvent(self, event):
+        urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
+        if any(str(url.toLocalFile()).lower().endswith((".jsonl", ".json"))
+               for url in urls):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        for url in event.mimeData().urls() if event.mimeData().hasUrls() else []:
+            path = str(url.toLocalFile())
+            if path.lower().endswith((".jsonl", ".json")):
+                self.import_workflow_file(path)
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def import_workflow_dialog(self):
+        """Choose a .jsonl/.json workflow specification and preview it."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import workflow",
+            "",
+            "Workflow files (*.jsonl *.json);;All files (*)",
+        )
+        if path:
+            self.import_workflow_file(path)
+
+    def import_workflow_file(self, path):
+        """Compile a JSONL/JSON workflow and open its preview."""
+        import json
+        from ..runtime.workflow_compiler import (
+            WorkflowPlan, compile_jsonl, compile_workflow,
+        )
+        try:
+            if str(path).lower().endswith(".jsonl"):
+                plan = compile_jsonl(path)
+            else:
+                with open(path, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+                if (payload.get("schema") == "yrmpe.workflow.v1"
+                        and "steps" in payload and "artifacts" in payload):
+                    plan = WorkflowPlan.from_dict(payload)
+                else:
+                    plan = compile_workflow(payload)
+            self.current_workflow_plan = plan
+            self.current_workflow_path = str(path)
+            self.show_workflow_plan(plan.to_dict())
+            return plan
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Workflow import failed", str(exc)
+            )
+            return None
+
+    def show_workflow_plan(self, plan):
+        """Open a preview for a compiled placeholder workflow plan."""
+        from ..runtime.workflow_graph import graph_from_plan
+        from .methods.workflow_preview import WorkflowPreviewDialog
+        graph = graph_from_plan(plan)
+        dialog = WorkflowPreviewDialog(
+            graph, self, step_opener=self.open_workflow_step
+        )
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        self.workflow_preview_dialog = dialog
+        dialog.destroyed.connect(
+            lambda *_: setattr(self, "workflow_preview_dialog", None)
+        )
+        dialog.show()
+        return dialog
+
+    def show_workflow_preview(self):
+        """Open the graphical workflow preview for the current workspace."""
+        from ..runtime.workflow_graph import graph_from_workspace
+        from .methods.workflow_preview import WorkflowPreviewDialog
+        graph = graph_from_workspace(self.dataset_selection_manager)
+        dialog = WorkflowPreviewDialog(
+            graph, self, step_opener=self.open_workflow_step
+        )
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        self.workflow_preview_dialog = dialog
+        dialog.destroyed.connect(
+            lambda *_: setattr(self, "workflow_preview_dialog", None)
+        )
+        dialog.show()
+
+    def show_about(self):
+        from .about_dialog import AboutDialog
+        bridge = getattr(self, "agent_bridge", None)
+        if bridge is not None and getattr(bridge, "_closed", False):
+            bridge = None
+        dialog = AboutDialog(
+            self,
+            bridge=bridge,
+            workspace_path=self.workspace_manager.workspace_path or "",
+            repo_path=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            start_session=self.start_agent_session,
+        )
+        dialog.exec_()
+
+    # ------------------------------------------------------------------
+    # agent session lifecycle
+    # ------------------------------------------------------------------
+    def start_agent_session(self, session_dir=None, token=None, registry=None):
+        """Start (or reuse) a local file-bridge session for an external agent.
+
+        The About dialog calls this when the Workbench was started by a host
+        such as YRTools, which does not create a bridge itself.
+        """
+        bridge = getattr(self, "agent_bridge", None)
+        if bridge is not None and not getattr(bridge, "_closed", False):
+            return bridge
+
+        from ..runtime.agent_bridge import AgentBridge
+        from ..runtime.host_actions import build_workbench_registry
+
+        if registry is None:
+            registry = build_workbench_registry(self)
+        bridge = AgentBridge(
+            session_dir=session_dir,
+            registry=registry,
+            token=token,
+            heartbeat_interval=3.0,
+        )
+        self.agent_bridge = bridge
+
+        timer = QTimer(self)
+        timer.timeout.connect(self._poll_agent_bridge)
+        timer.start(150)
+        self._agent_bridge_timer = timer
+
+        app = QApplication.instance()
+        if app is not None and not getattr(self, "_agent_quit_connected", False):
+            app.aboutToQuit.connect(self.stop_agent_session)
+            self._agent_quit_connected = True
+        return bridge
+
+    def _poll_agent_bridge(self):
+        bridge = getattr(self, "agent_bridge", None)
+        if bridge is None:
+            return
+        try:
+            bridge.poll_once()
+        except Exception as exc:
+            try:
+                bridge.emit_stderr(
+                    "agent bridge poll failed: %s" % exc, source="bridge"
+                )
+            except Exception:
+                pass
+        if getattr(bridge, "_closed", False):
+            timer = getattr(self, "_agent_bridge_timer", None)
+            if timer is not None:
+                timer.stop()
+                timer.deleteLater()
+            self._agent_bridge_timer = None
+            self.agent_bridge = None
+
+    def stop_agent_session(self):
+        """Stop the session started from About and release its timer."""
+        timer = getattr(self, "_agent_bridge_timer", None)
+        if timer is not None:
+            timer.stop()
+            timer.deleteLater()
+            self._agent_bridge_timer = None
+        bridge = getattr(self, "agent_bridge", None)
+        if bridge is not None:
+            try:
+                bridge.close()
+            except Exception:
+                pass
+        self.agent_bridge = None
+        app = QApplication.instance()
+        if app is not None and getattr(self, "_agent_quit_connected", False):
+            try:
+                app.aboutToQuit.disconnect(self.stop_agent_session)
+            except (TypeError, RuntimeError):
+                pass
+            self._agent_quit_connected = False
+
     def init_ui(self):
         self.setWindowTitle("YR_MPEA")
         
@@ -419,7 +807,7 @@ class YR_MPEA_Widget(QWidget):
         main_layout.addWidget(main_toolbar, alignment = Qt.AlignTop)
         main_toolbar.setIconSize(QSize(45, 45))
         # vertically compact
-        main_toolbar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        main_toolbar.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
         # main_toolbar.layout.setSpacing(20)
 
         # 添加Workspace按钮（在所有其他按钮之前）
@@ -429,6 +817,7 @@ class YR_MPEA_Widget(QWidget):
         workspace_button.setPopupMode(QToolButton.InstantPopup)
         workspace_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         main_toolbar.addWidget(workspace_button)
+        install_hover_expand(workspace_button)
         
         # 保存workspace_button引用
         self.workspace_button = workspace_button
@@ -476,6 +865,7 @@ class YR_MPEA_Widget(QWidget):
         align_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         # align_button.setFixedSize(60, 60)
         main_toolbar.addWidget(align_button)
+        install_hover_expand(align_button)
 
 
         open_action = QAction("Open Sequence Files", align_button)
@@ -533,13 +923,19 @@ class YR_MPEA_Widget(QWidget):
         model_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         # model_button.setFixedSize(60, 60)
         main_toolbar.addWidget(model_button)
+        install_hover_expand(model_button)
 
         models_menu = QMenu()
         find_best_model_action = QAction("Find Best Substitution Model (ML)", model_button)
         find_best_model_action.setIcon(self.resource_factory.get_icon("find_model.svg"))
         find_best_model_action.triggered.connect(self.open_modelfinder_wrapper)
         models_menu.addAction(find_best_model_action)
-        
+
+        modeltest_action = QAction("Find Best Substitution Model (ModelTest-NG)", model_button)
+        modeltest_action.setIcon(self.resource_factory.get_icon("find_model.svg"))
+        modeltest_action.triggered.connect(self.open_modeltest_wrapper)
+        models_menu.addAction(modeltest_action)
+
         estimate_model_params_action = QAction("Estimate Model Parameters (DNA, ML)", model_button)
         estimate_model_params_action.setIcon(self.resource_factory.get_icon("find_model.svg"))
         estimate_model_params_action.triggered.connect(self.open_model_parameter_wrapper)
@@ -554,16 +950,19 @@ class YR_MPEA_Widget(QWidget):
         distance_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         # distance_button.setFixedSize(60, 60)
         main_toolbar.addWidget(distance_button)
+        install_hover_expand(distance_button)
 
         # 添加"Compute Pairwise Distances"动作
         self.comp_dist_action = QAction("Compute Pairwise Distances (ML)", self)
         self.comp_dist_action.setIcon(self.resource_factory.get_icon("dist.svg"))
+        self.comp_dist_action.setToolTip("maximum-likelihood pairwise distance matrix")
         self.comp_dist_action.triggered.connect(self.open_ml_distance_wrapper)
         distance_button.addAction(self.comp_dist_action)
         
         # 添加"Compute Uncorrected Distances"动作
         self.comp_uncorr_dist_action = QAction("Compute Uncorrected Distances (p-distance)", self)
         self.comp_uncorr_dist_action.setIcon(self.resource_factory.get_icon("dist.svg"))
+        self.comp_uncorr_dist_action.setToolTip("uncorrected p-distances")
         self.comp_uncorr_dist_action.triggered.connect(self.open_uncorrected_distance_wrapper)
         distance_button.addAction(self.comp_uncorr_dist_action)
         
@@ -574,6 +973,7 @@ class YR_MPEA_Widget(QWidget):
         # 添加"Calculate & Plot Substitution Saturation"动作
         self.saturation_action = QAction("Calculate && Plot Substitution Saturation", self)
         self.saturation_action.setIcon(self.resource_factory.get_icon("saturation.svg"))
+        self.saturation_action.setToolTip("test substitution saturation with simulated datasets")
         self.saturation_action.triggered.connect(self.open_substitution_saturation_wrapper)
         distance_button.addAction(self.saturation_action)
         
@@ -593,6 +993,7 @@ class YR_MPEA_Widget(QWidget):
         phylogeny_button.setMenu(phylogeny_button_menu)
         # phylogeny_button.setFixedSize(60, 60)
         main_toolbar.addWidget(phylogeny_button)
+        install_hover_expand(phylogeny_button)
 
         cons_ml_action = QAction("Maximum Likelihood (ML)", phylogeny_button)
         cons_ml_action.setIcon(self.resource_factory.get_icon("ml.svg"))
@@ -606,8 +1007,13 @@ class YR_MPEA_Widget(QWidget):
         iqtree_action.triggered.connect(self.open_iqtree_wrapper)
 
         ml_menu.addAction(iqtree_action)
-        
-        # TODO: ML Programs: IQ-TREE 3 / FastTree
+
+        raxmlng_action = QAction("RAxML-NG", phylogeny_button)
+        raxmlng_action.setIcon(self.resource_factory.get_icon("software/raxml.svg"))
+        raxmlng_action.triggered.connect(self.open_raxmlng_wrapper)
+        ml_menu.addAction(raxmlng_action)
+
+        # TODO: ML Programs: FastTree
 
         cons_bi_action = QAction("Bayesian Inference (BI)", phylogeny_button)
         cons_bi_action.setIcon(self.resource_factory.get_icon("bi.svg"))
@@ -660,6 +1066,18 @@ class YR_MPEA_Widget(QWidget):
         tree_viewer_action.setIcon(self.resource_factory.get_icon("software/icytree.svg"))
         tree_viewer_action.triggered.connect(self.open_icytree_wrapper)
 
+        tree_compare_action = QAction("Tree Comparison", phylogeny_button)
+        tree_compare_action.setIcon(self.resource_factory.get_icon("phylogeny.svg"))
+        tree_compare_menu = QMenu()
+        tree_compare_action.setMenu(tree_compare_menu)
+        rf_action = QAction("Pairwise Robinson-Foulds (IQ-TREE)", tree_compare_menu)
+        rf_action.setIcon(self.resource_factory.get_icon("software/robinsonfoluds.svg"))
+        rf_action.setToolTip(
+            "All-to-all Robinson-Foulds distances (-t --tree-dist-all)"
+        )
+        rf_action.triggered.connect(lambda checked=False: self.open_rf_wrapper())
+        tree_compare_menu.addAction(rf_action)
+
         phylogeny_button_menu.addAction(cons_ml_action)
         phylogeny_button_menu.addAction(cons_bi_action)
         phylogeny_button_menu.addSeparator()
@@ -672,6 +1090,8 @@ class YR_MPEA_Widget(QWidget):
         # phylogeny_button_menu.addAction(cons_seq_action)
         phylogeny_button_menu.addSeparator()
         phylogeny_button_menu.addAction(tree_viewer_action)
+        phylogeny_button_menu.addSeparator()
+        phylogeny_button_menu.addAction(tree_compare_action)
         # phylogeny_button_menu.addSeparator()
 
         # variants_button = QToolButton()
@@ -684,26 +1104,91 @@ class YR_MPEA_Widget(QWidget):
         # # phylogeny_button.setFixedSize(60, 60)
         # main_toolbar.addWidget(variants_button)
 
-        coalescent_button = QToolButton()
-        coalescent_button.setText("COALESCENCE")
-        coalescent_button.setIcon(self.resource_factory.get_icon("coalescent.svg"))
-        coalescent_button.setPopupMode(QToolButton.InstantPopup)
-        coalescent_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        coalescent_button_menu = QMenu()
-        coalescent_button.setMenu(coalescent_button_menu)
-        main_toolbar.addWidget(coalescent_button)
+        species_tree_button = QToolButton()
+        species_tree_button.setText("SPECIES TREE")
+        species_tree_button.setIcon(self.resource_factory.get_icon("coalescent.svg"))
+        species_tree_button.setPopupMode(QToolButton.InstantPopup)
+        species_tree_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        species_tree_menu = QMenu()
+        species_tree_button.setMenu(species_tree_menu)
+        main_toolbar.addWidget(species_tree_button)
+        install_hover_expand(species_tree_button)
 
-        # 添加CASTER-site功能到COALESCENT菜单
-        caster_site_action = QAction("CASTER-site", coalescent_button)
+        astral4_action = QAction("ASTRAL-IV", species_tree_button)
+        astral4_action.setIcon(self.resource_factory.get_icon("software/astral.svg"))
+        astral4_action.setToolTip("ASTRAL-IV with CASTLES-II SU branch lengths")
+        astral4_action.triggered.connect(lambda: self.open_astral_wrapper(version="astral4"))
+        species_tree_menu.addAction(astral4_action)
+
+        wastral_action = QAction("wASTRAL", species_tree_button)
+        wastral_action.setIcon(self.resource_factory.get_icon("software/astral.svg"))
+        wastral_action.setToolTip("Weighted ASTRAL; coalescent-unit branch lengths")
+        wastral_action.triggered.connect(lambda: self.open_astral_wrapper(version="wastral"))
+        species_tree_menu.addAction(wastral_action)
+
+        caster_site_action = QAction("CASTER-site", species_tree_button)
         caster_site_action.setIcon(self.resource_factory.get_icon("software/caster.svg"))
+        caster_site_action.setToolTip("Site-based coalescence-aware species tree")
         caster_site_action.triggered.connect(self.open_caster_site_wrapper)
-        coalescent_button_menu.addAction(caster_site_action)
+        species_tree_menu.addAction(caster_site_action)
 
-        # 添加ASTRAL功能到COALESCENT菜单
-        astral_action = QAction("ASTRAL", coalescent_button)
-        astral_action.setIcon(self.resource_factory.get_icon("software/astral.svg"))
-        astral_action.triggered.connect(self.open_astral_wrapper)
-        coalescent_button_menu.addAction(astral_action)
+        species_tree_menu.addSeparator()
+
+        treerecs_action = QAction("TreeRecs 1.2", species_tree_button)
+        treerecs_action.setIcon(self.resource_factory.get_icon("coalescent.svg"))
+        treerecs_action.setToolTip(
+            "Reconcile gene trees with a species tree (duplication/loss)"
+        )
+        treerecs_action.triggered.connect(self.open_treerecs_wrapper)
+        species_tree_menu.addAction(treerecs_action)
+
+        gcf_action = QAction("Gene Concordance (gCF)", species_tree_button)
+        gcf_action.setIcon(self.resource_factory.get_icon("coalescent.svg"))
+        gcf_action.setToolTip(
+            "Gene concordance factors on a fixed species tree (IQ-TREE 3)."
+        )
+        gcf_action.triggered.connect(self.open_gcf_wrapper)
+        species_tree_menu.addAction(gcf_action)
+
+        scf_action = QAction("Site Concordance (sCF)", species_tree_button)
+        scf_action.setIcon(self.resource_factory.get_icon("coalescent.svg"))
+        scf_action.setToolTip(
+            "Site concordance factors with likelihood quartets (IQ-TREE 3)."
+        )
+        scf_action.triggered.connect(self.open_scf_wrapper)
+        species_tree_menu.addAction(scf_action)
+
+        site_diag_action = QAction(
+            "Site Diagnostics (sCF + CASTER)", species_tree_button
+        )
+        site_diag_action.setIcon(
+            self.resource_factory.get_icon("software/caster.svg")
+        )
+        site_diag_action.setToolTip(
+            "Compare likelihood sCF with CASTER-site q1/q2/q3 on a fixed tree."
+        )
+        site_diag_action.triggered.connect(self.open_site_diagnostics_wrapper)
+        species_tree_menu.addAction(site_diag_action)
+
+        msc_diag_action = QAction("MSC Diagnostics (gCF + ASTER CU)", species_tree_button)
+        msc_diag_action.setIcon(self.resource_factory.get_icon("software/astral.svg"))
+        msc_diag_action.setToolTip(
+            "Compare gCF with ASTRAL-IV and weighted wASTRAL coalescent-unit lengths."
+        )
+        msc_diag_action.triggered.connect(self.open_msc_diagnostics_wrapper)
+        species_tree_menu.addAction(msc_diag_action)
+
+        species_tree_menu.addSeparator()
+
+        best_action = QAction("BEST / MrBayes MSC", species_tree_button)
+        best_action.setIcon(self.resource_factory.get_icon("software/mrbayes.svg"))
+        best_action.setToolTip(
+            "Full-likelihood multi-species coalescent through MrBayes: "
+            "ploidy, linked partitions, species partition, clock and "
+            "birth-death priors"
+        )
+        best_action.triggered.connect(self.open_best_wrapper)
+        species_tree_menu.addAction(best_action)
 
         clock_button = QToolButton()
         clock_button.setText("CLOCK")
@@ -713,6 +1198,7 @@ class YR_MPEA_Widget(QWidget):
         clock_button_menu = QMenu()
         clock_button.setMenu(clock_button_menu)
         main_toolbar.addWidget(clock_button)
+        install_hover_expand(clock_button)
 
         # TODO: Molecular Clock: LSD2 (IQ-TREE 3) / Bayesian Inference (MrBayes / PAML-mcmctree) / Penalized Likelihood (r8s)
 
@@ -726,15 +1212,90 @@ class YR_MPEA_Widget(QWidget):
         # MrBayes
         clock_button_menu.addAction(mrbayes_action)
 
+        # Selection menu
+        selection_button = QToolButton()
+        selection_button.setText("SELECTION")
+        selection_button.setIcon(self.resource_factory.get_icon("selection.svg"))
+        selection_button.setPopupMode(QToolButton.InstantPopup)
+        selection_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        selection_menu = QMenu()
+        selection_button.setMenu(selection_menu)
+        main_toolbar.addWidget(selection_button)
+        install_hover_expand(selection_button)
+
+        codon_ztest_action = QAction("Codon-based Z-test (NG86 / YN00)", selection_button)
+        codon_ztest_action.setIcon(self.resource_factory.get_icon("find_model.svg"))
+        codon_ztest_action.triggered.connect(self.open_codon_ztest_wrapper)
+        selection_menu.addAction(codon_ztest_action)
+
+        batch_dnds_action = QAction("Batch dN/dS (NG86 / YN00 / IQ-TREE)", selection_button)
+        batch_dnds_action.setIcon(self.resource_factory.get_icon("dist.svg"))
+        batch_dnds_action.triggered.connect(self.open_batch_dnds_wrapper)
+        selection_menu.addAction(batch_dnds_action)
+
+        selection_menu.addSeparator()
+        codeml_action = QAction("CodeML / HyPhy (planned)", selection_button)
+        codeml_action.setEnabled(False)
+        selection_menu.addAction(codeml_action)
+
+        # Feature search fills the free toolbar width.
+        self.feature_search = FeatureSearch(self)
+        main_toolbar.addWidget(self.feature_search)
+        self.feature_search.bind_buttons([
+            workspace_button, align_button, model_button, distance_button,
+            phylogeny_button, species_tree_button, clock_button,
+            selection_button,
+        ])
+
+        # Details/Selected live in one compact right-aligned container.
+        self.right_controls = QWidget()
+        self.right_controls.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        right_layout = QHBoxLayout(self.right_controls)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        main_toolbar.addWidget(self.right_controls)
+
         # Inspector visibility toggle
         self.inspector_button = QToolButton()
-        self.inspector_button.setText("Inspector")
+        self.inspector_button.setText("Details")
+        self.inspector_button.setIcon(self.resource_factory.get_icon("details.svg"))
+        self.inspector_button.setIconSize(QSize(45, 45))
         self.inspector_button.setCheckable(True)
-        self.inspector_button.setChecked(True)
-        self.inspector_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        self.inspector_button.setToolTip("Show or hide the provenance inspector")
-        self.inspector_button.toggled.connect(self._set_inspector_visible)
-        main_toolbar.addWidget(self.inspector_button)
+        self.inspector_button.setChecked(False)
+        self.inspector_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        self.inspector_button.setToolTip("Show the Details panel")
+        self.inspector_button.clicked.connect(
+            lambda checked: self._toggle_right_panel("details", checked)
+        )
+        right_layout.addWidget(self.inspector_button)
+        install_hover_expand(self.inspector_button)
+
+        self.selected_button = SelectedDropButton()
+        self.selected_button.setText("Selected\n&& Queue")
+        self.selected_button.setIcon(self.resource_factory.get_icon("selected.svg"))
+        self.selected_button.setIconSize(QSize(45, 45))
+        self.selected_button.setCheckable(True)
+        self.selected_button.setChecked(False)
+        self.selected_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        self.selected_button.setToolTip(
+            "Show Selected & Queue: input basket plus running, finished and "
+            "failed analyses. Drop an icon here to add it."
+        )
+        self.selected_button.clicked.connect(
+            lambda checked: self._toggle_right_panel("selected", checked)
+        )
+        self.selected_button.item_dropped.connect(self._on_selected_drop)
+        right_layout.addWidget(self.selected_button)
+        install_hover_expand(self.selected_button)
+
+        self.about_button = QToolButton()
+        self.about_button.setText("About")
+        self.about_button.setIcon(self.resource_factory.get_icon("yphylow-about.svg"))
+        self.about_button.setIconSize(QSize(45, 45))
+        self.about_button.setToolTip("About YPhylo Workbench and the agent bridge")
+        self.about_button.clicked.connect(self.show_about)
+        right_layout.addWidget(self.about_button)
+        install_hover_expand(self.about_button)
 
         # mainworkspace_group = QGroupBox("Workspace")
         # # mainworkspace_layout = QGridLayout(10,4)
@@ -761,22 +1322,58 @@ class YR_MPEA_Widget(QWidget):
             store=self.dataset_selection_manager.store,
             parent=self,
         )
-        self.workspace.item_selected.connect(self.inspector.show_item)
-        self.workspace.dataset_selected.connect(self.inspector.show_dataset)
+        self.selected_panel = SelectedPanel(
+            manager=self.dataset_selection_manager,
+            store=self.dataset_selection_manager.store,
+            parent=self,
+            task_queue=self.task_queue,
+        )
+        self.workspace.item_selected.connect(self._on_workspace_item_selected)
+        self.workspace.dataset_selected.connect(self._on_workspace_dataset_selected)
+        self.workspace.selected_changed.connect(self._on_selected_changed)
         self.inspector.item_activated.connect(self._select_workspace_item_from_inspector)
         self.inspector.dataset_activated.connect(self._show_dataset_from_inspector)
         self.inspector.preview_requested.connect(self._preview_inspector_item)
         self.inspector.action_requested.connect(self._on_inspector_action)
         self.inspector.run_renamed.connect(lambda *_: self.inspector.refresh())
+        self.selected_panel.item_activated.connect(self._select_workspace_item_from_inspector)
+        self.selected_panel.send_requested.connect(self._on_selected_send)
+        self.selected_panel.changed.connect(self._on_selected_basket_edited)
+        self.task_queue.job_finished.connect(self._on_task_finished)
+
+        # Details and Selected are stacked in a vertical splitter, not tabs.
+        # Exactly one section is expanded; the other keeps only its header.
+        self.right_splitter = QSplitter(Qt.Vertical)
+        self.right_splitter.setObjectName("rightPanels")
+        self.right_splitter.setChildrenCollapsible(True)
+        self.right_splitter.addWidget(self.inspector)
+        self.right_splitter.addWidget(self.selected_panel)
+        self.right_splitter.setStretchFactor(0, 1)
+        self.right_splitter.setStretchFactor(1, 1)
+        self._active_right_panel = "details"
+        self._right_splitter_guard = False
+        self.right_splitter.splitterMoved.connect(self._on_right_splitter_moved)
 
         self.main_splitter = QSplitter(Qt.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
         self.main_splitter.addWidget(self.workspace)
-        self.main_splitter.addWidget(self.inspector)
+        self.main_splitter.addWidget(self.right_splitter)
         self.main_splitter.setStretchFactor(0, 1)
         self.main_splitter.setStretchFactor(1, 0)
-        self.main_splitter.setSizes([900, 380])
-        main_layout.addWidget(self.main_splitter)
+        self.main_splitter.setSizes([1200, 0])
+        self.main_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.right_splitter.setVisible(False)
+        main_layout.addWidget(self.main_splitter, 1)
+        self._build_workspace_status_bar(main_layout)
+
+        self._inspector_target_width = 380
+        self._inspector_opening = False
+        self._inspector_animation = QPropertyAnimation(self, b"inspectorWidth", self)
+        self._inspector_animation.setDuration(220)
+        self._inspector_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._inspector_animation.finished.connect(self._on_inspector_animation_finished)
+        self.main_splitter.splitterMoved.connect(self._remember_inspector_width)
+        self._set_panel_expanded("details")
 
     def handle_dataset_click(self, button):
         """处理Dataset按钮点击事件"""
@@ -834,8 +1431,12 @@ class YR_MPEA_Widget(QWidget):
         
         # use QDialog to open the muscle5_wrapper
         muscle5_entry = self.plugin_factory.get_muscle5_plugin()
-        muscle5_wrapper = muscle5_entry.run(import_from=import_from, import_data=import_data)
-        muscle5_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        muscle5_wrapper = muscle5_entry.run(
+            import_from=import_from,
+            import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(muscle5_wrapper)
         dialog.layout().addWidget(muscle5_wrapper)
         dialog.exec_()
 
@@ -887,6 +1488,16 @@ class YR_MPEA_Widget(QWidget):
         """将MCMC链文件添加到工作区"""
         self.workspace.add_chain(chain_item)
 
+    def open_best_wrapper(self):
+        """Open the BEST / MrBayes multi-species coalescent configurator."""
+        from ..plugins.best_plugin import BestDialog
+        if getattr(self, "best_dialog", None) is not None:
+            self.best_dialog.close()
+            self.best_dialog.deleteLater()
+        self.best_dialog = BestDialog(self, workdir=self.get_workdir())
+        self._connect_plugin_result(self.best_dialog)
+        self.best_dialog.show()
+
     def open_caster_site_wrapper(self):
         """打开CASTER-site插件"""
         from PyQt5.QtWidgets import QDialog
@@ -907,36 +1518,175 @@ class YR_MPEA_Widget(QWidget):
 
         # use PluginFactory to get the plugin
         caster_site_entry = self.plugin_factory.get_caster_site_plugin()
-        caster_site_wrapper = caster_site_entry.run(import_from=import_from, import_data=import_data)
-        # 连接信号，如果插件发出新序列或结果，添加到工作区
-        # 注意：根据插件实际情况决定是否需要连接信号
+        caster_site_wrapper = caster_site_entry.run(
+            import_from=import_from, import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(caster_site_wrapper)
         dialog.layout().addWidget(caster_site_wrapper)
         dialog.exec_()
 
-    def open_astral_wrapper(self, import_data=None):
-        """打开ASTRAL插件
-        
-        Args:
-            import_data: 可选，包含多棵基因树的newick文件路径
-                        如果提供，将直接使用这个文件作为ASTRAL的输入
+    def open_rf_wrapper(self, import_data=None):
+        """Open the pairwise Robinson-Foulds comparison dialog.
+
+        ``import_data`` is either a Newick file path or a dict with
+        ``tree_file`` and optional ``labels`` (one label per tree).
         """
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("ASTRAL - YR-MPEA")
+        dialog.setWindowTitle("Tree Comparison - YR-MPEA")
+        dialog.setWindowIcon(
+            self.resource_factory.get_icon("software/robinsonfoluds.svg")
+        )
+        dialog.setMinimumSize(820, 620)
+        dialog.setLayout(QVBoxLayout())
+
+        rf_entry = self.plugin_factory.get_rf_plugin()
+        wrapper = rf_entry.run(
+            import_from="YR_MPEA" if import_data else None,
+            import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        dialog.layout().addWidget(wrapper)
+        dialog.exec_()
+
+    def _concordance_selected_payload(self, gene_trees=False, alignment=False):
+        """Build a best-effort import payload from the current green selection."""
+        if not self.dataset_selection_manager:
+            return None
+        items = self.dataset_selection_manager.get_selected_items()
+        if not items:
+            items = self.dataset_selection_manager.get_basket_items()
+        tree_item = next(
+            (item for item in items
+             if getattr(item, "item_type", "") == ITEM_TYPE_PHYLOGENY),
+            None,
+        )
+        payload = {}
+        if tree_item is not None:
+            path = self._selected_treeset_file([tree_item])
+            if path:
+                payload["species_tree"] = path
+        if gene_trees:
+            gene_item = next(
+                (item for item in items
+                 if getattr(item, "item_type", "") == ITEM_TYPE_TREESET),
+                None,
+            )
+            if gene_item is not None:
+                path = self._selected_treeset_file([gene_item])
+                if path:
+                    payload["gene_trees"] = path
+        if alignment:
+            alignment_item = next(
+                (item for item in items
+                 if getattr(item, "item_type", "") == ITEM_TYPE_ALIGNMENT),
+                None,
+            )
+            if alignment_item is not None and getattr(alignment_item, "file_path", ""):
+                payload["alignment"] = alignment_item.file_path
+        return payload or None
+
+    def _open_concordance_window(self, title, icon, entry_getter, import_data=None):
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle("%s - YR-MPEA" % title)
+        dialog.setWindowIcon(self.resource_factory.get_icon(icon))
+        dialog.setMinimumSize(900, 680)
+        dialog.setLayout(QVBoxLayout())
+        entry = entry_getter()
+        wrapper = entry.run(
+            import_from="YR_MPEA" if import_data else None,
+            import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(wrapper)
+        dialog.layout().addWidget(wrapper)
+        dialog.exec_()
+
+    def open_gcf_wrapper(self, import_data=None):
+        """Open the gene-concordance-factor plugin."""
+        payload = import_data or self._concordance_selected_payload(gene_trees=True)
+        self._open_concordance_window(
+            "Gene Concordance Factors (gCF)", "coalescent.svg",
+            self.plugin_factory.get_gcf_plugin, payload,
+        )
+
+    def open_scf_wrapper(self, import_data=None):
+        """Open the site-concordance-factor plugin."""
+        payload = import_data or self._concordance_selected_payload(alignment=True)
+        self._open_concordance_window(
+            "Site Concordance Factors (sCF)", "coalescent.svg",
+            self.plugin_factory.get_scf_plugin, payload,
+        )
+
+    def open_site_diagnostics_wrapper(self, import_data=None):
+        """Open the sCF + CASTER-site diagnostics plugin."""
+        payload = import_data or self._concordance_selected_payload(alignment=True)
+        self._open_concordance_window(
+            "Site Concordance Diagnostics (sCF + CASTER q1-q3)",
+            "software/caster.svg",
+            self.plugin_factory.get_site_diagnostics_plugin, payload,
+        )
+
+    def open_msc_diagnostics_wrapper(self, import_data=None):
+        """Open the gCF + ASTER coalescent-unit diagnostics plugin."""
+        payload = import_data or self._concordance_selected_payload(gene_trees=True)
+        self._open_concordance_window(
+            "MSC Branch Diagnostics (gCF + ASTER CU)", "software/astral.svg",
+            self.plugin_factory.get_msc_diagnostics_plugin, payload,
+        )
+
+    def open_astral_wrapper(self, import_data=None, version=None):
+        """打开ASTRAL插件
+
+        Args:
+            import_data: 可选，包含多棵基因树的 newick 文件路径
+            version: 可选，预选 astral4 / wastral / astral-hybrid
+        """
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        title = "ASTRAL - YR-MPEA"
+        if version == "astral4":
+            title = "ASTRAL-IV - YR-MPEA"
+        elif version == "wastral":
+            title = "wASTRAL - YR-MPEA"
+        dialog.setWindowTitle(title)
         dialog.setWindowIcon(self.resource_factory.get_icon("software/astral.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
 
         # use PluginFactory to get the plugin
         astral_entry = self.plugin_factory.get_astral_plugin()
-        
+
+        # No explicit path: preload the current green tree/tree-set selection.
+        if not import_data and self.dataset_selection_manager:
+            import_data = self._selected_treeset_file(
+                self.dataset_selection_manager.get_selected_items()
+            )
+
         # 如果提供了import_data（包含多棵基因树的newick文件），则直接使用
         if import_data and os.path.exists(import_data):
             import_from = "YR_MPEA"
-            astral_wrapper = astral_entry.run(import_from=import_from, import_data=import_data)
+            astral_wrapper = astral_entry.run(
+                import_from=import_from, import_data=import_data,
+                workdir=self.get_workdir(),
+            )
         else:
             # 否则打开空的ASTRAL插件
-            astral_wrapper = astral_entry.run()
+            astral_wrapper = astral_entry.run(workdir=self.get_workdir())
+        self._connect_plugin_result(astral_wrapper)
+
+        if version and hasattr(astral_wrapper, "version_combo"):
+            index = astral_wrapper.version_combo.findText(
+                {
+                    "astral4": "ASTRAL-IV (Standard species tree inference)",
+                    "wastral": "Weighted ASTRAL (wastral)",
+                    "astral-hybrid": "ASTRAL-Hybrid (Hybrid weighting)",
+                }.get(version, ""),
+            )
+            if index >= 0:
+                astral_wrapper.version_combo.setCurrentIndex(index)
         
         # 传递 dataset_selection_manager 给 ASTRAL 插件
         if hasattr(astral_wrapper, '_dataset_selection_manager') is False:
@@ -960,12 +1710,16 @@ class YR_MPEA_Widget(QWidget):
         
         # use PluginFactory to get the plugin
         clustal_omega_entry = self.plugin_factory.get_clustal_omega_plugin()
-        clustalo_wrapper = clustal_omega_entry.run(import_from=import_from, import_data=import_data)
-        clustalo_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        clustalo_wrapper = clustal_omega_entry.run(
+            import_from=import_from,
+            import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(clustalo_wrapper)
         dialog.layout().addWidget(clustalo_wrapper)
         dialog.exec_()
     
-    def open_mafft_wrapper(self):
+    def open_mafft_wrapper(self, modal=True):
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
         dialog.setWindowTitle("MAFFT - YR-MPEA")
@@ -978,11 +1732,56 @@ class YR_MPEA_Widget(QWidget):
         
         # use PluginFactory to get the plugin
         mafft_entry = self.plugin_factory.get_mafft_plugin()
-        mafft_wrapper = mafft_entry.run(import_from=import_from, import_data=import_data)
-        mafft_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        mafft_wrapper = mafft_entry.run(
+            import_from=import_from,
+            import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(mafft_wrapper)
         dialog.layout().addWidget(mafft_wrapper)
-        dialog.exec_()
-    
+        if modal:
+            dialog.exec_()
+        else:
+            dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+            self.mafft_dialog = dialog
+            dialog.show()
+            return dialog
+        return None
+
+    def import_sequence_files(self, paths, file_format=""):
+        """Import local sequence files without opening a file dialog."""
+        import os as _os
+        if isinstance(paths, str):
+            paths = [paths]
+        if not isinstance(paths, (list, tuple)) or not paths:
+            raise ValueError("paths must be a non-empty list")
+        formats = {
+            "fas": "fasta", "fasta": "fasta", "fa": "fasta",
+            "fna": "fasta", "phy": "phylip", "nex": "nexus",
+            "nexus": "nexus",
+        }
+        results = []
+        for path in paths:
+            path = str(path)
+            if not _os.path.isfile(path):
+                raise FileNotFoundError(path)
+            fmt = (file_format or "").lower().strip()
+            if not fmt or fmt == "auto":
+                ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+                fmt = formats.get(ext, "")
+            if not fmt:
+                raise ValueError("cannot infer sequence format for %s" % path)
+            sequences = list(SeqIO.parse(path, fmt))
+            if not sequences:
+                raise ValueError("no sequences found in %s" % path)
+            self.workspace.add_sequence(sequences)
+            results.append({
+                "path": path,
+                "format": fmt,
+                "sequences": len(sequences),
+            })
+        return results
+
     def open_macse_wrapper(self):
         """打开MACSE插件"""
         from PyQt5.QtWidgets import QDialog
@@ -997,8 +1796,12 @@ class YR_MPEA_Widget(QWidget):
         
         # use PluginFactory to get the plugin
         macse_entry = self.plugin_factory.get_macse_plugin()
-        macse_wrapper = macse_entry.run(import_from=import_from, import_data=import_data)
-        macse_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        macse_wrapper = macse_entry.run(
+            import_from=import_from,
+            import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(macse_wrapper)
         dialog.layout().addWidget(macse_wrapper)
         dialog.exec_()
     
@@ -1015,12 +1818,62 @@ class YR_MPEA_Widget(QWidget):
 
         # use PluginFactory to get the plugin
         model_finder_entry = self.plugin_factory.get_model_finder_plugin()
-        modelfinder_wrapper = model_finder_entry.run(import_from=import_from, import_data=import_data)
-        modelfinder_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
-        modelfinder_wrapper.export_model_result_signal.connect(self.add_model_to_workspace)
+        modelfinder_wrapper = model_finder_entry.run(
+            import_from=import_from, import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(modelfinder_wrapper)
         dialog.layout().addWidget(modelfinder_wrapper)
         dialog.exec_()
-    
+
+    def open_modeltest_wrapper(self):
+        """Open ModelTest-NG model selection."""
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle("ModelTest-NG - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("find_model.svg"))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        import_from, import_data = self._prepare_import_data(
+            workspace_item_types=["alignments"]
+        )
+        entry = self.plugin_factory.get_modeltest_plugin()
+        wrapper = entry.run(
+            import_from=import_from, import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(wrapper)
+        dialog.layout().addWidget(wrapper)
+        dialog.exec_()
+
+    def _selected_single_model_name(self):
+        """Return the best model from the green model item, if any."""
+        if not self.dataset_selection_manager:
+            return ""
+        for item in self.dataset_selection_manager.get_selected_items():
+            if item.item_type != ITEM_TYPE_MODEL:
+                continue
+            data = item.data if isinstance(item.data, dict) else {}
+            if data.get("partitioned") or data.get("type") == "partitioned":
+                continue
+            name = (
+                data.get("best_model")
+                or data.get("Model")
+                or data.get("model")
+            )
+            if not name and data.get("type") == "model_table":
+                rows = data.get("data") or []
+                if rows:
+                    name = rows[0].get("Model")
+            if not name and data.get("models"):
+                models = data.get("models") or []
+                if models:
+                    name = models[0].get("Model")
+            if name:
+                return str(name)
+        return ""
+
     def open_model_parameter_wrapper(self):
         """打开Model Parameter Estimation进行模型参数估计"""
         from PyQt5.QtWidgets import QDialog
@@ -1035,9 +1888,11 @@ class YR_MPEA_Widget(QWidget):
         
         # use PluginFactory to get the plugin
         model_parameter_entry = self.plugin_factory.get_model_parameter_plugin()
-        model_parameter_wrapper = model_parameter_entry.run(import_from=import_from, import_data=import_data)
-        model_parameter_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
-        model_parameter_wrapper.export_model_result_signal.connect(self.add_model_to_workspace)
+        model_parameter_wrapper = model_parameter_entry.run(
+            import_from=import_from, import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(model_parameter_wrapper)
         dialog.layout().addWidget(model_parameter_wrapper)
         dialog.exec_()
     
@@ -1063,6 +1918,18 @@ class YR_MPEA_Widget(QWidget):
             minitracer_wrapper = plugin_entry.run()
             
             # 如果提供了chain_item，自动加载该chain文件
+            if isinstance(chain_item, dict):
+                # ResultSpec chain items carry plain JSON, not a ChainItem.
+                from .methods.dataset_models import ChainItem
+                paths = list(chain_item.get("file_paths") or [])
+                if not paths and chain_item.get("file_path"):
+                    paths = [chain_item["file_path"]]
+                chain_item = ChainItem(
+                    file_paths=paths,
+                    run_number=int(chain_item.get("run_number") or 1),
+                    chain_count=int(chain_item.get("chain_count") or len(paths)),
+                    tool=str(chain_item.get("tool") or ""),
+                )
             if chain_item:
                 # 检查是旧的file_path还是新的file_paths
                 if hasattr(chain_item, 'file_paths') and chain_item.file_paths:
@@ -1131,16 +1998,23 @@ class YR_MPEA_Widget(QWidget):
             # 如果提供了phylogeny_data，自动加载该树文件
             if phylogeny_data and isinstance(phylogeny_data, dict):
                 tree_content = None
-                
-                # 方式1: 从 file_path 读取
+
+                # 方式1: 优先读取原始文件。IcyTree 能解析 NEXUS，并保留
+                # MrBayes 的 translate 表、[&prob=...] 等注释；转成 Newick
+                # 反而会丢失这些信息。
                 if 'file_path' in phylogeny_data:
                     try:
-                        with open(phylogeny_data['file_path'], 'r') as f:
+                        with open(phylogeny_data['file_path'], 'r',
+                                  encoding='utf-8', errors='replace') as f:
                             tree_content = f.read().strip()
                     except Exception as e:
                         QMessageBox.warning(dialog, "Error", f"Failed to load tree file: {str(e)}")
-                
-                # 方式2: 从 data[0]['content'] 读取（旧版platform_multigene兼容）
+
+                # 方式2: 插件 ResultSpec 提供的内联 Newick
+                elif phylogeny_data.get('newick'):
+                    tree_content = str(phylogeny_data['newick']).strip()
+
+                # 方式3: 从 data[0]['content'] 读取（旧版platform_multigene兼容）
                 elif 'data' in phylogeny_data and len(phylogeny_data['data']) > 0:
                     tree_data = phylogeny_data['data'][0]
                     if 'content' in tree_data:
@@ -1172,8 +2046,11 @@ class YR_MPEA_Widget(QWidget):
 
         # use PluginFactory to get the plugin
         trimal_entry = self.plugin_factory.get_trimal_plugin()
-        trimal_wrapper = trimal_entry.run(import_from=import_from, import_data=import_data)
-        trimal_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        trimal_wrapper = trimal_entry.run(
+            import_from=import_from, import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(trimal_wrapper)
         dialog.layout().addWidget(trimal_wrapper)
         dialog.exec_()
         
@@ -1190,8 +2067,11 @@ class YR_MPEA_Widget(QWidget):
 
         # use PluginFactory to get the plugin
         gblocks_entry = self.plugin_factory.get_gblocks_plugin()
-        gblocks_wrapper = gblocks_entry.run(import_from=import_from, import_data=import_data)
-        gblocks_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
+        gblocks_wrapper = gblocks_entry.run(
+            import_from=import_from, import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(gblocks_wrapper)
         dialog.layout().addWidget(gblocks_wrapper)
         dialog.exec_()
     
@@ -1266,9 +2146,11 @@ class YR_MPEA_Widget(QWidget):
     
         # Use PluginFactory to get the plugin
         ml_distance_entry = self.plugin_factory.get_ml_distance_plugin()
-        plugin_wrapper = ml_distance_entry.run(import_from=import_from, import_data=import_data)
-        plugin_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
-        plugin_wrapper.export_distance_result_signal.connect(self.add_distance_matrix_to_workspace)
+        plugin_wrapper = ml_distance_entry.run(
+            import_from=import_from, import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(plugin_wrapper)
     
         # parse model
         model_entries = best_model.split("+")
@@ -1333,9 +2215,11 @@ class YR_MPEA_Widget(QWidget):
 
         # Use PluginFactory to get the plugin
         p_distance_entry = self.plugin_factory.get_p_distance_plugin()
-        plugin_wrapper = p_distance_entry.run(import_from=import_from, import_data=import_data)
-        plugin_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
-        plugin_wrapper.export_distance_result_signal.connect(self.add_distance_matrix_to_workspace)
+        plugin_wrapper = p_distance_entry.run(
+            import_from=import_from, import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(plugin_wrapper)
 
         dialog.layout().addWidget(plugin_wrapper)
         dialog.exec_()
@@ -1358,6 +2242,66 @@ class YR_MPEA_Widget(QWidget):
         
         dialog.layout().addWidget(plugin_wrapper)
         dialog.exec_()
+
+    def open_codon_ztest_wrapper(self):
+        """打开 Codon-based Z-test 插件（非模态，允许后台运行）"""
+        from PyQt5.QtWidgets import QDialog
+        from PyQt5.QtCore import Qt
+
+        if getattr(self, "codon_ztest_dialog", None):
+            self.codon_ztest_dialog.close()
+            self.codon_ztest_dialog.deleteLater()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Codon-based Z-test (NG86 / YN00) - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("saturation.svg"))
+        dialog.setMinimumSize(900, 650)
+        dialog.setLayout(QVBoxLayout())
+        dialog.setWindowModality(Qt.NonModal)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, False)
+
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
+
+        entry = self.plugin_factory.get_codon_ztest_plugin()
+        wrapper = entry.run(
+            import_from=import_from,
+            import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+
+        dialog.layout().addWidget(wrapper)
+        self.codon_ztest_dialog = dialog
+        dialog.show()
+
+    def open_batch_dnds_wrapper(self):
+        """打开 Batch dN/dS 插件（非模态，允许后台运行）"""
+        from PyQt5.QtWidgets import QDialog
+        from PyQt5.QtCore import Qt
+
+        if getattr(self, "batch_dnds_dialog", None):
+            self.batch_dnds_dialog.close()
+            self.batch_dnds_dialog.deleteLater()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Batch dN/dS (NG86 / YN00 / IQ-TREE) - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("dist.svg"))
+        dialog.setMinimumSize(950, 680)
+        dialog.setLayout(QVBoxLayout())
+        dialog.setWindowModality(Qt.NonModal)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, False)
+
+        import_from, import_data = self._prepare_import_data(workspace_item_types=["alignments"])
+
+        entry = self.plugin_factory.get_batch_dnds_plugin()
+        wrapper = entry.run(
+            import_from=import_from,
+            import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+
+        dialog.layout().addWidget(wrapper)
+        self.batch_dnds_dialog = dialog
+        dialog.show()
 
     def _extract_partition_model_info(self, model_item):
         """
@@ -1441,9 +2385,7 @@ class YR_MPEA_Widget(QWidget):
             import_data=import_data,
             workdir=workdir  # 添加工作目录参数
         )
-        plugin_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
-        plugin_wrapper.export_model_result_signal.connect(self.add_model_to_workspace)
-        plugin_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
+        self._connect_plugin_result(plugin_wrapper)
 
         # 如果有分区模型配置，应用它
         if partition_model_config:
@@ -1499,7 +2441,31 @@ class YR_MPEA_Widget(QWidget):
         dialog.layout().addWidget(plugin_wrapper)
         dialog.exec_()
 
-    def open_decenttree_wrapper(self):
+    def open_raxmlng_wrapper(self):
+        """Open RAxML-NG maximum-likelihood inference."""
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog()
+        dialog.setWindowTitle("RAxML-NG - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("software/raxml.svg"))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+
+        import_from, import_data = self._prepare_import_data(
+            workspace_item_types=["alignments"]
+        )
+        entry = self.plugin_factory.get_raxmlng_plugin()
+        wrapper = entry.run(
+            import_from=import_from, import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(wrapper)
+        selected_model = self._selected_single_model_name()
+        if selected_model:
+            wrapper.set_model(selected_model)
+        dialog.layout().addWidget(wrapper)
+        dialog.exec_()
+
+    def open_decenttree_wrapper(self, import_data=None):
         """打开 DecentTree 插件"""
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
@@ -1509,11 +2475,10 @@ class YR_MPEA_Widget(QWidget):
         dialog.setLayout(QVBoxLayout())
 
         # Prepare import data
-        import_from = None
-        import_data = None
+        import_from = "YR_MPEA" if import_data else None
         workspace_type = type(self.workspace).__name__
-        
-        if workspace_type == "SingleGeneWorkspace":
+
+        if import_data is None and workspace_type == "SingleGeneWorkspace":
             # 优先导入距离矩阵数据
             if len(self.workspace.items["distances"]) >= 1:
                 import_from = "YR_MPEA"
@@ -1524,7 +2489,7 @@ class YR_MPEA_Widget(QWidget):
             # 如果没有距离矩阵，可以提示用户先计算距离
             else:
                 QMessageBox.information(
-                    self, 
+                    self,
                     "Distance Matrix Required",
                     "Please compute ML distances first using the DISTANCE menu before building a tree."
                 )
@@ -1532,8 +2497,11 @@ class YR_MPEA_Widget(QWidget):
 
         # Use PluginFactory to get the plugin
         decenttree_entry = self.plugin_factory.get_decenttree_plugin()
-        decenttree_wrapper = decenttree_entry.run(import_from=import_from, import_data=import_data)
-        decenttree_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
+        decenttree_wrapper = decenttree_entry.run(
+            import_from=import_from, import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(decenttree_wrapper)
 
         dialog.layout().addWidget(decenttree_wrapper)
         dialog.exec_()
@@ -1562,12 +2530,12 @@ class YR_MPEA_Widget(QWidget):
             workdir=workdir  # 添加工作目录参数
         )
         
-        mpboot_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
+        self._connect_plugin_result(mpboot_wrapper)
         
         dialog.layout().addWidget(mpboot_wrapper)
         dialog.exec_()
 
-    def open_lsd2_wrapper(self):
+    def open_lsd2_wrapper(self, tree_path=None):
         """Open LSD2 plugin wrapper - automatically imports green state phylogenies"""
         from PyQt5.QtWidgets import QDialog
         from ..plugins.lsd2_plugin import LSD2PluginEntry
@@ -1605,7 +2573,19 @@ class YR_MPEA_Widget(QWidget):
                 import_data = self.workspace.items["phylogenies"][0]
             
         plugin_entry = LSD2PluginEntry()
-        plugin_wrapper = plugin_entry.run(import_from=import_from, import_data=import_data)
+        plugin_wrapper = plugin_entry.run(
+            import_from=import_from, import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        if tree_path and os.path.exists(tree_path):
+            panel = getattr(plugin_wrapper, "control_panel", None)
+            if panel is not None:
+                panel.tree_file_path.setText(tree_path)
+                if callable(getattr(panel, "extract_otu_from_tree", None)):
+                    panel.extract_otu_from_tree(tree_path)
+                if callable(getattr(panel, "reset_rooting_status", None)):
+                    panel.reset_rooting_status()
+        self._connect_plugin_result(plugin_wrapper)
         dialog.layout().addWidget(plugin_wrapper)
         dialog.exec_()
 
@@ -1953,6 +2933,66 @@ class YR_MPEA_Widget(QWidget):
         """Wire the standard result channel, when the plugin provides it."""
         if hasattr(window, "result_ready"):
             window.result_ready.connect(self.receive_plugin_result)
+        queue = getattr(self, "task_queue", None)
+        if queue is not None and hasattr(window, "run_analysis"):
+            queue.attach_plugin(window)
+
+    def _on_task_finished(self, job_id):
+        """Keep a lightweight, non-blocking completion hint on the sidebar."""
+        job = self.task_queue.get_job(job_id)
+        if job is None or not hasattr(self, "selected_button"):
+            return
+        status = getattr(job, "status_label", "Finished")
+        title = getattr(job, "title", "Analysis")
+        message = "%s: %s" % (status, title)
+        self.selected_button.setToolTip(
+            "%s\nOpen Selected & Queue and use Inspect / Preview." % message
+        )
+        # When the sidebar is not showing the queue, leave a transient,
+        # non-modal hint near its button.  The job itself is never blocked.
+        try:
+            panel_visible = bool(
+                self.selected_panel.isVisible()
+                and self.right_splitter.isVisible()
+            )
+            if not panel_visible:
+                QToolTip.showText(
+                    self.selected_button.mapToGlobal(
+                        self.selected_button.rect().center()
+                    ),
+                    message,
+                    self.selected_button,
+                )
+        except Exception:
+            pass
+
+    def _reopen_active_tool_dialog(self, attribute):
+        """Keep a dialog alive when its job is still queued or running.
+
+        Several long-running tool wrappers replace their previous dialog when
+        reopened.  Deleting that dialog would also destroy the plugin and its
+        worker thread.  Return the existing dialog for active jobs; otherwise
+        remove it and return None.
+        """
+        dialog = getattr(self, attribute, None)
+        if dialog is None:
+            return None
+        queue = getattr(self, "task_queue", None)
+        if queue is not None and callable(getattr(queue, "jobs", None)):
+            for job in queue.jobs():
+                if getattr(job, "window", None) is dialog and getattr(
+                    job, "state", ""
+                ) in ("queued", "running"):
+                    dialog.show()
+                    dialog.raise_()
+                    dialog.activateWindow()
+                    return dialog
+        try:
+            dialog.close()
+            dialog.deleteLater()
+        except RuntimeError:
+            pass
+        return None
 
     def receive_plugin_result(self, result):
         """Import any plugin ResultSpec/DatasetSpec into the workspace."""
@@ -1972,6 +3012,12 @@ class YR_MPEA_Widget(QWidget):
             )
             return
 
+        # Keep the dataset for grouping, but restore the familiar typed
+        # workspace icons for small results (alignment/tree/model/distance).
+        for dataset_id in dataset_ids:
+            if hasattr(self.workspace, "materialize_dataset_items"):
+                self.workspace.materialize_dataset_items(dataset_id)
+
         self.workspace.current_dataset_id = dataset_ids[-1]
         if hasattr(self, "inspector"):
             self.inspector.set_sources(
@@ -1980,15 +3026,482 @@ class YR_MPEA_Widget(QWidget):
             )
             self.inspector.show_dataset(dataset_ids[-1])
 
-    def _set_inspector_visible(self, visible):
+    @pyqtProperty(int)
+    def inspectorWidth(self):
+        if not hasattr(self, "main_splitter"):
+            return 0
+        sizes = self.main_splitter.sizes()
+        return sizes[1] if len(sizes) > 1 else 0
+
+    @inspectorWidth.setter
+    def inspectorWidth(self, width):
+        if not hasattr(self, "main_splitter"):
+            return
+        width = max(0, int(width))
+        total = max(self.main_splitter.width(), sum(self.main_splitter.sizes()), 1)
+        if width:
+            width = min(width, max(1, total - 100))
+        self.main_splitter.setSizes([max(1, total - width), width])
+
+    def _remember_inspector_width(self, *args):
+        if hasattr(self, "right_splitter") and self.right_splitter.isVisible():
+            width = self.inspectorWidth
+            if width >= 300:
+                self._inspector_target_width = width
+
+    RIGHT_PANEL_HEADER_HEIGHT = 56
+
+    def _set_panel_buttons(self, active=None):
+        for button, name in ((self.inspector_button, "details"),
+                             (self.selected_button, "selected")):
+            button.blockSignals(True)
+            button.setChecked(active == name)
+            button.blockSignals(False)
+
+    def _set_panel_expanded(self, which):
+        """Expand one right panel; leave the other as a header strip."""
+        self._active_right_panel = which
+        details = which == "details"
+        self.inspector.set_collapsed(not details)
+        self.selected_panel.set_collapsed(details)
+        details_header = self.inspector.collapsed_height()
+        selected_header = self.selected_panel.collapsed_height()
+        self.inspector.setMinimumHeight(0)
+        self.selected_panel.setMinimumHeight(0)
+        self.inspector.setMaximumHeight(
+            QWIDGETSIZE_MAX if details else details_header
+        )
+        self.selected_panel.setMaximumHeight(
+            QWIDGETSIZE_MAX if not details else selected_header
+        )
+
+        total = max(self.right_splitter.height(),
+                    sum(self.right_splitter.sizes()), 1)
+        if details:
+            sizes = [max(1, total - selected_header), selected_header]
+        else:
+            sizes = [details_header, max(1, total - details_header)]
+        self.right_splitter.setSizes(sizes)
+
+    def _reset_right_splitter(self):
+        self._right_splitter_guard = False
+        self._set_panel_expanded(getattr(self, "_active_right_panel", "details"))
+
+    def _on_right_splitter_moved(self, *args):
+        if self._right_splitter_guard:
+            return
+        sizes = self.right_splitter.sizes()
+        header = max(self.inspector.collapsed_height(),
+                     self.selected_panel.collapsed_height())
+        if len(sizes) == 2 and min(sizes) > header + 8:
+            self._right_splitter_guard = True
+            QTimer.singleShot(0, self._reset_right_splitter)
+
+    def _open_details_panel(self):
+        self._set_panel_expanded("details")
+        self._set_panel_buttons("details")
+        self.open_inspector_animated()
+
+    def _open_selected_panel(self):
+        self.selected_panel.refresh()
+        self._set_panel_expanded("selected")
+        self._set_panel_buttons("selected")
+        self.open_inspector_animated()
+
+    def _toggle_right_panel(self, which, checked):
+        if not checked:
+            self._set_panel_buttons(None)
+            self.close_inspector_animated()
+            return
+        if which == "selected":
+            self._open_selected_panel()
+        else:
+            self._open_details_panel()
+
+    def open_inspector_animated(self, target_width=None):
+        """Slide the right panel open; no-op when it is already open."""
+        if not hasattr(self, "inspector") or not hasattr(self, "main_splitter"):
+            return
+        already_open = self.right_splitter.isVisible() and self.inspectorWidth >= 300
+        if already_open and target_width is None:
+            return
+
+        current = max(0, self.inspectorWidth)
+        target = int(target_width or self._inspector_target_width or 380)
+        total = max(self.main_splitter.width(), sum(self.main_splitter.sizes()), 1)
+        target = min(max(300, target), max(300, total - 100))
+
+        self._inspector_animation.stop()
+        self.right_splitter.setMinimumWidth(0)
+        self.inspector.setMinimumWidth(0)
+        self.main_splitter.setChildrenCollapsible(True)
+        self.right_splitter.setVisible(True)
+
+        if current >= target - 4:
+            self.inspectorWidth = target
+            self._inspector_opening = True
+            self._on_inspector_animation_finished()
+            return
+
+        self._inspector_opening = True
+        self._inspector_animation.setStartValue(current)
+        self._inspector_animation.setEndValue(target)
+        self._inspector_animation.start()
+
+    def close_inspector_animated(self):
+        if not hasattr(self, "inspector") or not hasattr(self, "main_splitter"):
+            return
+        current = max(0, self.inspectorWidth)
+        if current >= 300:
+            self._inspector_target_width = current
+        self._set_panel_buttons(None)
+        if not self.right_splitter.isVisible() or current <= 0:
+            self.right_splitter.setVisible(False)
+            self.inspectorWidth = 0
+            return
+
+        self._inspector_animation.stop()
+        self.right_splitter.setMinimumWidth(0)
+        self.inspector.setMinimumWidth(0)
+        self.main_splitter.setChildrenCollapsible(True)
+        self._inspector_opening = False
+        self._inspector_animation.setStartValue(current)
+        self._inspector_animation.setEndValue(0)
+        self._inspector_animation.start()
+
+    def _on_inspector_animation_finished(self):
         if not hasattr(self, "inspector"):
             return
-        self.inspector.setVisible(bool(visible))
-        if visible and hasattr(self, "main_splitter"):
-            sizes = self.main_splitter.sizes()
-            if len(sizes) == 2 and sizes[1] < 220:
-                total = sum(sizes) or self.width()
-                self.main_splitter.setSizes([max(400, total - 380), 380])
+        if self._inspector_opening:
+            self.right_splitter.setMinimumWidth(0)
+            self.inspector.setMinimumWidth(300)
+            self.main_splitter.setChildrenCollapsible(False)
+            self._inspector_target_width = max(300, self.inspectorWidth)
+            self._set_panel_expanded(getattr(self, "_active_right_panel", "details"))
+        else:
+            self.inspectorWidth = 0
+            self.right_splitter.setVisible(False)
+            self.inspector.setVisible(True)
+            self.right_splitter.setMinimumWidth(0)
+            self.inspector.setMinimumWidth(300)
+            self.main_splitter.setChildrenCollapsible(False)
+
+    def _on_selected_changed(self):
+        if not hasattr(self, "selected_panel"):
+            return
+        self.selected_panel.refresh()
+        self.workspace._update_all_button_styles()
+        if self.selected_panel._items:
+            self._open_selected_panel()
+
+    def _on_selected_drop(self, item_id):
+        if not item_id or not hasattr(self, "selected_panel"):
+            return
+        if self.dataset_selection_manager.add_to_basket(item_id):
+            self._on_selected_changed()
+
+    def _on_selected_basket_edited(self):
+        if not hasattr(self, "selected_panel"):
+            return
+        self.selected_panel.refresh()
+        self.workspace._update_all_button_styles()
+        if self.selected_panel._items:
+            self._open_selected_panel()
+        else:
+            self._set_panel_buttons("selected")
+
+    def _selected_concordance_payload(self, items, gene_trees=False, alignment=False):
+        tree_item = next(
+            (item for item in items
+             if getattr(item, "item_type", "") == ITEM_TYPE_PHYLOGENY),
+            None,
+        )
+        payload = {}
+        if tree_item is not None:
+            path = self._selected_treeset_file([tree_item])
+            if path:
+                payload["species_tree"] = path
+        if gene_trees:
+            gene_item = next(
+                (item for item in items
+                 if getattr(item, "item_type", "") == ITEM_TYPE_TREESET),
+                None,
+            )
+            if gene_item is not None:
+                path = self._selected_treeset_file([gene_item])
+                if path:
+                    payload["gene_trees"] = path
+        if alignment:
+            alignment_item = next(
+                (item for item in items
+                 if getattr(item, "item_type", "") == ITEM_TYPE_ALIGNMENT),
+                None,
+            )
+            if alignment_item is not None:
+                if getattr(alignment_item, "file_path", ""):
+                    payload["alignment"] = alignment_item.file_path
+                elif getattr(alignment_item, "sequences", None):
+                    import tempfile
+                    from Bio import SeqIO
+                    handle = tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".fasta", delete=False, encoding="utf-8"
+                    )
+                    SeqIO.write(alignment_item.sequences, handle, "fasta")
+                    handle.close()
+                    payload["alignment"] = handle.name
+        return payload or None
+
+    def _on_selected_send(self, tool_id, item_ids):
+        items = [self.dataset_selection_manager.get_item(item_id) for item_id in item_ids]
+        items = [item for item in items if item is not None]
+        if tool_id in ("astral4", "wastral"):
+            tree_path = self._selected_treeset_file(items)
+            if tree_path is None:
+                QMessageBox.information(
+                    self, "Selected",
+                    "ASTRAL needs gene trees. Add a Phylogeny or TreeSet to "
+                    "Selected first.",
+                )
+                return
+            self.open_astral_wrapper(import_data=tree_path, version=tool_id)
+        elif tool_id == "treerecs":
+            tree_item = next(
+                (item for item in items
+                 if getattr(item, "item_type", "") == ITEM_TYPE_PHYLOGENY),
+                None,
+            )
+            treeset_item = next(
+                (item for item in items
+                 if getattr(item, "item_type", "") == ITEM_TYPE_TREESET),
+                None,
+            )
+            if tree_item is None or treeset_item is None:
+                QMessageBox.information(
+                    self, "TreeRecs",
+                    "TreeRecs needs one species tree and one tree set of "
+                    "gene trees in Selected.",
+                )
+                return
+            species_file = self._selected_treeset_file([tree_item])
+            gene_file = self._selected_treeset_file([treeset_item])
+            if not species_file or not gene_file:
+                QMessageBox.information(
+                    self, "TreeRecs",
+                    "Could not read the selected tree and gene-tree set.",
+                )
+                return
+            self.open_treerecs_wrapper(import_data={
+                "gene_tree_file": gene_file,
+                "species_tree_file": species_file,
+            })
+        elif tool_id in ("gcf", "scf", "site_diagnostics", "msc_diagnostics"):
+            payload = self._selected_concordance_payload(
+                items,
+                gene_trees=tool_id in ("gcf", "msc_diagnostics"),
+                alignment=tool_id in ("scf", "site_diagnostics"),
+            )
+            if not payload:
+                QMessageBox.information(
+                    self, "Concordance",
+                    "Select the required species tree, gene trees or alignment first.",
+                )
+                return
+            if tool_id == "gcf":
+                self.open_gcf_wrapper(import_data=payload)
+            elif tool_id == "scf":
+                self.open_scf_wrapper(import_data=payload)
+            elif tool_id == "site_diagnostics":
+                self.open_site_diagnostics_wrapper(import_data=payload)
+            else:
+                self.open_msc_diagnostics_wrapper(import_data=payload)
+        elif tool_id == "rf":
+            payload = self._selected_trees_payload(items)
+            if payload is None or len(payload.get("labels", [])) < 2:
+                QMessageBox.information(
+                    self, "Tree comparison",
+                    "Select at least two trees (or a tree set with two trees).",
+                )
+                return
+            self.open_rf_wrapper(import_data=payload)
+        elif tool_id == "decenttree":
+            payload = self._selected_distance_payload(items)
+            if payload is None:
+                QMessageBox.information(
+                    self, "DecentTree",
+                    "Select at least one distance matrix in Selected first.",
+                )
+                return
+            self.open_decenttree_wrapper(import_data=payload)
+        elif tool_id == "lsd2":
+            tree_item = next(
+                (item for item in items
+                 if getattr(item, "item_type", "") == ITEM_TYPE_PHYLOGENY),
+                None,
+            )
+            tree_path = (self._selected_treeset_file([tree_item])
+                         if tree_item is not None else None)
+            if not tree_path:
+                QMessageBox.information(
+                    self, "LSD2", "Select a tree in Selected first."
+                )
+                return
+            self.open_lsd2_wrapper(tree_path=tree_path)
+        elif tool_id == "minitracer":
+            chain = next((item for item in items
+                          if getattr(item, "item_type", "") == ITEM_TYPE_CHAIN), None)
+            if chain is None:
+                QMessageBox.information(self, "Selected", "No chain object in Selected.")
+                return
+            self.open_minitracer_wrapper(chain_item=chain.data)
+        else:
+            openers = {
+                "mafft": self.open_mafft_wrapper,
+                "muscle5": self.open_muscle5_wrapper,
+                "clustal_omega": self.open_clustal_omega_wrapper,
+                "macse": self.open_macse_wrapper,
+                "trimal": self.open_trimal_wrapper,
+                "gblocks": self.open_gblocks_wrapper,
+                "iqtree": self.open_iqtree_wrapper,
+                "mrbayes": self.open_mrbayes_wrapper,
+                "raxmlng": self.open_raxmlng_wrapper,
+                "mpboot": self.open_mpboot_wrapper,
+                "phylobayes": self.open_phylobayes_wrapper,
+                "caster_site": self.open_caster_site_wrapper,
+                "best": self.open_best_wrapper,
+                "modelfinder": self.open_modelfinder_wrapper,
+                "modeltest_ng": self.open_modeltest_wrapper,
+                "model_parameter": self.open_model_parameter_wrapper,
+                "ml_distance": self.open_ml_distance_wrapper,
+                "uncorrected_distance": self.open_uncorrected_distance_wrapper,
+                "codon_ztest": self.open_codon_ztest_wrapper,
+                "saturation": self.open_substitution_saturation_wrapper,
+            }
+            opener = openers.get(tool_id)
+            if opener is None:
+                QMessageBox.information(
+                    self, "Selected", "No sender is wired for %s." % tool_id
+                )
+                return
+            opener()
+
+    def _selected_trees_payload(self, items):
+        """Collect selected phylogenies/tree sets into one Newick file."""
+        trees = []
+        labels = []
+        groups = []
+        for item in items:
+            item_type = getattr(item, "item_type", "")
+            item_name = getattr(item, "loci_name", "") or getattr(item, "name", "") or item.id
+            data = getattr(item, "data", {}) or {}
+            if item_type == ITEM_TYPE_TREESET:
+                entries = data.get("data", []) if isinstance(data, dict) else []
+                group = {
+                    "group_id": "treeset:%s" % item.id,
+                    "group_name": item_name,
+                    "kind": "treeset",
+                }
+                contents = []
+                for tree_data in entries:
+                    if isinstance(tree_data, str):
+                        content = tree_data
+                        tree_name = ""
+                    else:
+                        content = tree_data.get("content")
+                        tree_name = tree_data.get("name") or ""
+                        if not content and tree_data.get("file_path"):
+                            try:
+                                with open(tree_data["file_path"], "r", encoding="utf-8") as handle:
+                                    content = handle.read()
+                            except OSError:
+                                content = ""
+                    if not content:
+                        continue
+                    for line in content.splitlines():
+                        line = line.strip()
+                        if line:
+                            contents.append((line, tree_name))
+                for tree_index, (line, tree_name) in enumerate(contents, start=1):
+                    trees.append(line)
+                    base_label = tree_name or item_name
+                    suffix = " #%d" % tree_index if len(contents) > 1 else ""
+                    labels.append("%s%s" % (base_label, suffix))
+                    groups.append(dict(group))
+            elif item_type == ITEM_TYPE_PHYLOGENY:
+                content = ""
+                if isinstance(data, dict):
+                    content = (data.get("content") or data.get("newick")
+                               or data.get("tree") or "")
+                elif isinstance(data, str):
+                    content = data
+                if not content and getattr(item, "file_path", ""):
+                    try:
+                        with open(item.file_path, "r", encoding="utf-8") as handle:
+                            content = handle.read()
+                    except OSError:
+                        content = ""
+                if not content:
+                    continue
+                group = {
+                    "group_id": "tree:%s" % item.id,
+                    "group_name": item_name,
+                    "kind": "tree",
+                }
+                lines = [line.strip() for line in content.splitlines() if line.strip()]
+                for line_index, line in enumerate(lines, start=1):
+                    trees.append(line)
+                    suffix = " #%d" % line_index if len(lines) > 1 else ""
+                    labels.append("%s%s" % (item_name, suffix))
+                    groups.append(dict(group))
+        if not trees:
+            return None
+        import tempfile
+        handle = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".trees", delete=False, encoding="utf-8"
+        )
+        handle.write("\n".join(trees))
+        handle.close()
+        return {"tree_file": handle.name, "labels": labels, "groups": groups}
+
+    def _selected_treeset_file(self, items):
+        """Collect plain trees or TreeSets into one Newick tree file."""
+        payload = self._selected_trees_payload(items)
+        return payload["tree_file"] if payload else None
+
+    def _selected_distance_payload(self, items):
+        """Collect selected distance matrices into DecentTree's import dict."""
+        matrices = []
+        for item in items:
+            if getattr(item, "item_type", "") != ITEM_TYPE_DISTANCE:
+                continue
+            data = getattr(item, "data", {}) or {}
+            entry = {}
+            if isinstance(data, dict):
+                if data.get("content"):
+                    entry["content"] = str(data["content"])
+                file_path = (getattr(item, "file_path", "")
+                             or data.get("file_path")
+                             or data.get("filename"))
+                if file_path:
+                    entry["filename"] = str(file_path)
+            elif isinstance(data, str):
+                entry["content"] = data
+            elif getattr(item, "file_path", ""):
+                entry["filename"] = item.file_path
+            if entry:
+                matrices.append(entry)
+        if not matrices:
+            return None
+        return {"type": "distance_matrix", "data": matrices}
+
+    def _on_workspace_item_selected(self, item_id):
+        self.inspector.show_item(item_id)
+        self._open_details_panel()
+
+    def _on_workspace_dataset_selected(self, dataset_id):
+        self.workspace._clear_all_chain_highlights()
+        self.workspace._update_all_button_styles()
+        self.inspector.show_dataset(dataset_id)
+        self._open_details_panel()
 
     def _select_workspace_item_from_inspector(self, item_id):
         item = self.dataset_selection_manager.get_item(item_id)
@@ -1997,19 +3510,36 @@ class YR_MPEA_Widget(QWidget):
         self.workspace.current_dataset_id = item.dataset_id
         self.workspace._clear_dataset_highlights()
         self.dataset_selection_manager.selection_engine.select_item(item_id)
+        self.workspace._clear_all_chain_highlights()
+        chain_key = self.workspace._chain_key_for_item(item)
+        self.workspace._active_chain_key = chain_key
+        self.workspace._primary_item_id = item_id
+        self.workspace._apply_chain_mode(chain_key, "active")
         self.workspace._update_all_button_styles()
         self.inspector.show_item(item_id)
+        self._open_details_panel()
 
     def _show_dataset_from_inspector(self, dataset_id):
         self.workspace.current_dataset_id = dataset_id
+        dataset = self.dataset_selection_manager.get_dataset(dataset_id)
+        if dataset is not None:
+            # Clicking a dataset in the Inspector selects the whole dataset,
+            # matching the canvas dataset button.
+            dataset.selection_state = SELECTION_STATE_GREEN
+            self.dataset_selection_manager._save_state()
+            self.workspace._update_all_button_styles()
         self.inspector.show_dataset(dataset_id)
+        self._open_details_panel()
 
     def _preview_inspector_item(self, item_id, kind):
         item = self.dataset_selection_manager.get_item(item_id)
         if not item:
             return
         if kind == "tree":
-            self.workspace.view_phylogeny(item.data)
+            payload = dict(item.data) if isinstance(item.data, dict) else {}
+            if item.file_path:
+                payload.setdefault("file_path", item.file_path)
+            self.workspace.view_phylogeny(payload)
         elif kind == "alignment":
             self.workspace.view_alignment(item.sequences)
         elif kind == "model":
@@ -2022,6 +3552,8 @@ class YR_MPEA_Widget(QWidget):
                 "Chain preview",
                 "Open this chain from the workspace to use miniTracer.",
             )
+        elif kind == "table":
+            self.workspace.view_table(item.file_path)
 
     def _on_inspector_action(self, action_id, target_id, params):
         if action_id == "import_lsd2":
@@ -2079,17 +3611,16 @@ class YR_MPEA_Widget(QWidget):
         
         return True  # 已有工作区，可以继续
     
-    def open_mrbayes_wrapper(self):
-        """打开MrBayes插件"""
+    def open_mrbayes_wrapper(self, import_path=None):
+        """Open the MrBayes plugin, optionally preloaded with a NEXUS file."""
         # 检查工作区
         if not self._check_workspace_required("MrBayes"):
             return
         
-        # 如果已有对话框，先删除
-        if hasattr(self, 'mrbayes_dialog') and self.mrbayes_dialog:
-            self.mrbayes_dialog.close()
-            self.mrbayes_dialog.deleteLater()
-        
+        # A running Bayesian job owns its window; reopen instead of deleting.
+        if self._reopen_active_tool_dialog("mrbayes_dialog") is not None:
+            return
+
         # 创建MrBayes对话框（非模态窗口，允许后台运行）
         from PyQt5.QtWidgets import QDialog, QMessageBox
         from PyQt5.QtCore import Qt
@@ -2181,11 +3712,20 @@ class YR_MPEA_Widget(QWidget):
             model_conversion_result=model_conversion_result,
             seq_type=seq_type
         )
-        
-        # 连接信号
+
+        if import_path:
+            path = os.path.abspath(str(import_path))
+            if os.path.exists(path):
+                mrbayes_wrapper.import_file = path
+                mrbayes_wrapper.imported_files = [path]
+                if hasattr(mrbayes_wrapper, "file_path_edit"):
+                    mrbayes_wrapper.file_path_edit.setText(path)
+                if hasattr(mrbayes_wrapper, "run_data_block"):
+                    mrbayes_wrapper.run_data_block.setChecked(True)
+
+        # 标准结果通道：树和链通过 ResultSpec 导入
         mrbayes_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
-        mrbayes_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
-        mrbayes_wrapper.export_chain_result_signal.connect(self.add_chain_to_workspace)
+        self._connect_plugin_result(mrbayes_wrapper)
         
         # 如果有分区模型配置，应用它
         if partition_model_config:
@@ -2202,11 +3742,10 @@ class YR_MPEA_Widget(QWidget):
         if not self._check_workspace_required("PhyloBayes"):
             return
         
-        # 如果已有对话框，先删除
-        if hasattr(self, 'phylobayes_dialog') and self.phylobayes_dialog:
-            self.phylobayes_dialog.close()
-            self.phylobayes_dialog.deleteLater()
-        
+        # A running Bayesian job owns its window; reopen instead of deleting.
+        if self._reopen_active_tool_dialog("phylobayes_dialog") is not None:
+            return
+
         # 创建PhyloBayes对话框（非模态窗口，允许后台运行）
         from PyQt5.QtWidgets import QDialog
         from PyQt5.QtCore import Qt
@@ -2230,19 +3769,63 @@ class YR_MPEA_Widget(QWidget):
             workdir=workdir
         )
         
-        # 连接信号
+        # 标准结果通道：共识树和链通过 ResultSpec 导入
         phylobayes_wrapper.import_alignment_signal.connect(self.add_alignment_to_workspace)
-        phylobayes_wrapper.export_phylogeny_result_signal.connect(self.add_phylogeny_to_workspace)
-        phylobayes_wrapper.export_chain_result_signal.connect(self.add_chain_to_workspace)
+        self._connect_plugin_result(phylobayes_wrapper)
         
         dialog.layout().addWidget(phylobayes_wrapper)
         # 保存到实例变量，防止被垃圾回收
         self.phylobayes_dialog = dialog
         dialog.show()  # 使用show()而非exec_()，显示非模态窗口
 
+    def open_treerecs_wrapper(self, import_data=None):
+        """Open the TreeRecs gene/species tree reconciliation plugin."""
+        if not self._check_workspace_required("TreeRecs"):
+            return
+
+        if self._reopen_active_tool_dialog("treerecs_dialog") is not None:
+            return
+
+        from PyQt5.QtWidgets import QDialog
+        from PyQt5.QtCore import Qt
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("TreeRecs 1.2 - YR-MPEA")
+        dialog.setWindowIcon(self.resource_factory.get_icon("coalescent.svg"))
+        dialog.setMinimumSize(800, 600)
+        dialog.setLayout(QVBoxLayout())
+        dialog.setWindowModality(Qt.NonModal)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, False)
+
+        entry = self.plugin_factory.get_treerecs_plugin()
+        plugin = entry.run(
+            import_from="YR_MPEA" if import_data else None,
+            import_data=import_data,
+            workdir=self.get_workdir(),
+        )
+        self._connect_plugin_result(plugin)
+
+        # Prefill from the selected basket when no explicit import was given:
+        # the last tree is treated as the species tree and the preceding
+        # trees as gene trees; Swap is in the UI.
+        if import_data is None:
+            paths = []
+            if self.dataset_selection_manager:
+                for item in self.dataset_selection_manager.get_selected_items():
+                    if (item.item_type in (ITEM_TYPE_PHYLOGENY, ITEM_TYPE_TREESET)
+                            and item.file_path):
+                        paths.append(item.file_path)
+            if len(paths) >= 2:
+                plugin.set_input_trees(paths)
+
+        dialog.layout().addWidget(plugin)
+        self.treerecs_dialog = dialog
+        dialog.show()
+
 class SingleGeneWorkspace(QWidget):
     item_selected = pyqtSignal(str)
     dataset_selected = pyqtSignal(str)
+    selected_changed = pyqtSignal()
 
     def __init__(self, resource_factory=None, dataset_selection_manager=None, parent=None):
         super().__init__()
@@ -2276,7 +3859,18 @@ class SingleGeneWorkspace(QWidget):
         
         # 当前选中的数据集ID
         self.current_dataset_id = None
-        
+
+        # Chain feedback: items sharing (dataset_id, ownership_uuid) form one
+        # visual chain. Hover is transient; click promotes it to active blue.
+        self._active_chain_key = None
+        self._hover_chain_key = None
+        self._primary_item_id = None
+        self._materialized_item_ids = set()
+        self._hover_clear_timer = QTimer(self)
+        self._hover_clear_timer.setSingleShot(True)
+        self._hover_clear_timer.setInterval(35)
+        self._hover_clear_timer.timeout.connect(self._clear_hover_chain)
+
         self.plugin_path = os.path.dirname(os.path.abspath(__file__))
         self.init_ui()
 
@@ -2311,7 +3905,7 @@ class SingleGeneWorkspace(QWidget):
             self.grid_widget = QWidget()
             self.grid_layout = QGridLayout()
             self.grid_widget.setLayout(self.grid_layout)
-            self.main_layout.addWidget(self.grid_widget)
+            self.main_layout.addWidget(self.grid_widget, 1)
             self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         
         # 创建 DatasetItem
@@ -2354,9 +3948,13 @@ class SingleGeneWorkspace(QWidget):
         
         # 创建 DatasetItemButton
         item_button = DatasetItemButton(dataset_item, parent=self)
-        item_button.clicked_single.connect(self._on_item_single_click)
+        item_button.activated.connect(self._on_item_single_click)
         item_button.clicked_double.connect(self._on_item_double_click)
-        
+        item_button.hovered.connect(self._on_item_hovered)
+        item_button.hover_left.connect(self._on_item_hover_left)
+        item_button.deselect_requested.connect(self._on_item_deselect)
+        item_button.basket_requested.connect(self._on_item_basket_requested)
+
         # 设置图标
         if self.resource_factory:
             icon = self.resource_factory.get_icon("file/sequence.svg")
@@ -2366,14 +3964,12 @@ class SingleGeneWorkspace(QWidget):
         
         # 存储按钮引用
         self.item_buttons["alignments"].append(item_button)
-        
+        if self._active_chain_key == self._chain_key_for_item(dataset_item):
+            item_button.set_chain_highlight("active")
+
         # 添加到网格布局
         # alignments 总是从第 0 列开始，依次向右排列
         self.grid_layout.addWidget(item_button, 0, len(self.item_buttons["alignments"])-1)
-        
-        # 如果有 dataset 按钮，需要将它们向右移动以避免覆盖
-        if "datasets" in self.item_buttons and self.item_buttons["datasets"]:
-            self._rearrange_row_0_buttons()
         
         # 自动选中该数据项
         if self.dataset_selection_manager:
@@ -2381,27 +3977,135 @@ class SingleGeneWorkspace(QWidget):
             # 更新所有按钮的样式（select_item 会改变多个项目的状态）
             self._update_all_button_styles()
     
+    def _chain_key_for_item(self, item):
+        """Return the visual chain key for a data item."""
+        if item is None:
+            return None
+        return (item.dataset_id, item.ownership_uuid or item.id)
+
+    def _iter_item_buttons(self):
+        for buttons in self.item_buttons.values():
+            for button in buttons:
+                if isinstance(button, DatasetItemButton):
+                    yield button
+
+    def _apply_chain_mode(self, chain_key, mode):
+        """Apply a transient style to every icon on one chain."""
+        if chain_key is None:
+            return
+        for button in self._iter_item_buttons():
+            if self._chain_key_for_item(button.item) != chain_key:
+                continue
+            # Only the directly clicked item stays green. Ancestors and
+            # related items may also be green internally for plugin
+            # dependency resolution, but the workspace shows them as blue
+            # chain context.
+            if (button.item.id == self._primary_item_id
+                    or (self.dataset_selection_manager
+                        and self.dataset_selection_manager.is_basket_item(button.item.id))):
+                button.set_chain_highlight(None)
+                continue
+            button.set_chain_highlight(mode)
+
+    def _clear_chain_mode(self, mode):
+        for button in self._iter_item_buttons():
+            if button.chain_highlight == mode:
+                button.set_chain_highlight(None)
+
+    def _clear_all_chain_highlights(self):
+        for button in self._iter_item_buttons():
+            button.set_chain_highlight(None)
+        self._active_chain_key = None
+        self._hover_chain_key = None
+        self._primary_item_id = None
+        self._hover_clear_timer.stop()
+
+    def _on_item_hovered(self, item_id: str):
+        """Hover: grey-highlight the whole chain; active blue returns on leave."""
+        self._hover_clear_timer.stop()
+        item = self.dataset_selection_manager.get_item(item_id) if self.dataset_selection_manager else None
+        chain_key = self._chain_key_for_item(item)
+        if chain_key is None or chain_key == self._hover_chain_key:
+            return
+        self._clear_chain_mode("hover")
+        self._hover_chain_key = chain_key
+        self._apply_chain_mode(chain_key, "hover")
+        self._update_all_button_styles()
+
+    def _on_item_hover_left(self, item_id: str):
+        """Delay hover clearing so moving between chain icons does not flicker."""
+        self._hover_clear_timer.start()
+
+    def _clear_hover_chain(self):
+        self._clear_chain_mode("hover")
+        self._hover_chain_key = None
+        if self._active_chain_key is not None:
+            self._apply_chain_mode(self._active_chain_key, "active")
+        self._update_all_button_styles()
+
     def _on_item_single_click(self, item_id: str):
-        """处理数据项单击事件"""
+        """Click: clear the previous chain, select this chain in blue, open inspector."""
         if not self.dataset_selection_manager:
             return
-        
+
         # 清除所有数据集的高亮
         self._clear_dataset_highlights()
-        
-        # 切换选择状态
+
         item = self.dataset_selection_manager.get_item(item_id)
-        if item and item.selection_state == SELECTION_STATE_GREEN:
-            # 如果已经选中，只取消这个项目的选择，不影响其他项目
-            item.selection_state = SELECTION_STATE_NONE
-            item.selection_reason = ""
-        else:
-            # 否则选中该项（select_item会处理同一类型和不同UUID的deactivate逻辑）
-            self.dataset_selection_manager.select_item(item_id)
-        
-        # 更新所有按钮的样式
+        self._clear_all_chain_highlights()
+
+        # 选中该项（select_item 会处理同类型/不同 UUID 的 deactivate 逻辑）
+        self.dataset_selection_manager.select_item(item_id)
+        self.dataset_selection_manager.restore_basket_selection()
+
+        # 链级蓝色高亮覆盖除主选中项外的所有 icon，但保留 selection_state
+        # 供插件导入逻辑使用（祖先项仍可为绿色语义状态）。
+        chain_key = self._chain_key_for_item(item)
+        self._active_chain_key = chain_key
+        self._primary_item_id = item_id
+        self._apply_chain_mode(chain_key, "active")
+
         self._update_all_button_styles()
         self.item_selected.emit(item_id)
+
+    def _on_item_deselect(self, item_id: str):
+        """Clear a data item's selection from the context menu."""
+        if not self.dataset_selection_manager:
+            return
+        item = self.dataset_selection_manager.get_item(item_id)
+        if item is None:
+            return
+        chain_key = self._chain_key_for_item(item)
+        for other in self.dataset_selection_manager.items.values():
+            if self._chain_key_for_item(other) != chain_key:
+                continue
+            if other.selection_state in (SELECTION_STATE_GREEN, SELECTION_STATE_BLUE):
+                other.selection_state = SELECTION_STATE_NONE
+                other.selection_reason = ""
+            self.dataset_selection_manager.selected_items.discard(other.id)
+        if chain_key == self._active_chain_key:
+            self._clear_all_chain_highlights()
+        self._update_all_button_styles()
+        self.item_selected.emit("")
+
+    def _on_item_basket_requested(self, item_id: str):
+        """Toggle an item in the multi-object Selected basket."""
+        if not self.dataset_selection_manager:
+            return
+        if self.dataset_selection_manager.is_basket_item(item_id):
+            self.dataset_selection_manager.remove_from_basket(item_id)
+            if self._primary_item_id == item_id:
+                self._clear_all_chain_highlights()
+        else:
+            self.dataset_selection_manager.add_to_basket(item_id)
+            item = self.dataset_selection_manager.get_item(item_id)
+            if item is not None:
+                self._clear_all_chain_highlights()
+                self._active_chain_key = self._chain_key_for_item(item)
+                self._primary_item_id = item_id
+                self._apply_chain_mode(self._active_chain_key, "active")
+        self._update_all_button_styles()
+        self.selected_changed.emit()
 
     def _clear_dataset_highlights(self):
         """清除所有数据集的高亮"""
@@ -2431,7 +4135,10 @@ class SingleGeneWorkspace(QWidget):
         elif item.item_type == ITEM_TYPE_DISTANCE:
             self.view_distance_matrix(item.data)
         elif item.item_type == ITEM_TYPE_PHYLOGENY:
-            self.view_phylogeny(item.data)
+            payload = dict(item.data) if isinstance(item.data, dict) else {}
+            if item.file_path:
+                payload.setdefault("file_path", item.file_path)
+            self.view_phylogeny(payload)
         elif item.item_type == ITEM_TYPE_TREESET:
             # TreeSet 双击打开树集合查看器
             self._on_treeset_click(item.data)
@@ -2439,6 +4146,8 @@ class SingleGeneWorkspace(QWidget):
             # Chain 数据的特殊处理
             if self.parent_window:
                 self.parent_window.open_minitracer_wrapper(chain_item=item.data)
+        elif item.item_type == ITEM_TYPE_TABLE:
+            self.view_table(item.file_path)
     
     def _update_all_button_styles(self):
         """更新所有按钮的样式"""
@@ -2450,35 +4159,70 @@ class SingleGeneWorkspace(QWidget):
                     button.update_style()
     
     def _rearrange_row_0_buttons(self):
-        """重新排列第 0 行的所有按钮，确保 alignments 在左，datasets 在右"""
-        # 首先移除所有第 0 行的按钮
-        alignments_count = len(self.item_buttons.get("alignments", []))
-        datasets_count = len(self.item_buttons.get("datasets", []))
-        
-        # 从右向左移除，避免索引变化
-        for i in range(max(alignments_count, datasets_count) - 1, -1, -1):
-            # 移除 alignments
-            if i < alignments_count:
-                button = self.item_buttons["alignments"][i]
+        """Keep alignments on row 0 and datasets on their own row 6."""
+        for key, row in (("alignments", 0), ("datasets", 6)):
+            for button in self.item_buttons.get(key, []):
                 self.grid_layout.removeWidget(button)
-            # 移除 datasets
-            if i < datasets_count:
-                button = self.item_buttons["datasets"][i]
-                self.grid_layout.removeWidget(button)
-        
-        # 重新添加所有按钮，alignments 在左，datasets 在右
-        # alignments 从第 0 列开始
-        for i, button in enumerate(self.item_buttons.get("alignments", [])):
-            self.grid_layout.addWidget(button, 0, i)
-        
-        # datasets 从 alignments 的数量之后开始
-        start_col = len(self.item_buttons.get("alignments", []))
-        for i, button in enumerate(self.item_buttons.get("datasets", [])):
-            self.grid_layout.addWidget(button, 0, start_col + i)
-        
-        # 重新排列后更新所有按钮的样式
+            for column, button in enumerate(self.item_buttons.get(key, [])):
+                self.grid_layout.addWidget(button, row, column)
         self._update_all_button_styles()
     
+    def _clear_workspace_grid(self):
+        if hasattr(self, "grid_widget"):
+            self.main_layout.removeWidget(self.grid_widget)
+            self.grid_widget.deleteLater()
+            del self.grid_widget
+            del self.grid_layout
+        for key in self.item_buttons:
+            self.item_buttons[key] = []
+        self.workspace_hint.setVisible(True)
+
+    def rebuild_from_manager(self):
+        """Rebuild the icon grid from the persisted DatasetSelectionManager state."""
+        if not self.dataset_selection_manager:
+            return
+
+        datasets = self.dataset_selection_manager.get_all_datasets()
+        if not datasets:
+            self._clear_workspace_grid()
+            return
+        dataset_id = self.current_dataset_id
+        if dataset_id not in self.dataset_selection_manager.datasets:
+            dataset_id = datasets[0].id
+        self.current_dataset_id = dataset_id
+        items = self.dataset_selection_manager.get_items_by_dataset(dataset_id)
+        if not items:
+            self._clear_workspace_grid()
+            return
+
+        self._clear_workspace_grid()
+        self.workspace_hint.setVisible(False)
+        self.grid_widget = QWidget()
+        self.grid_layout = QGridLayout()
+        self.grid_widget.setLayout(self.grid_layout)
+        self.main_layout.addWidget(self.grid_widget, 1)
+        self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+
+        layout = {
+            ITEM_TYPE_SEQUENCE: ("alignments", 0, "file/sequence.svg"),
+            ITEM_TYPE_ALIGNMENT: ("alignments", 0, "file/sequence.svg"),
+            ITEM_TYPE_MODEL: ("models", 1, "file/model.svg"),
+            ITEM_TYPE_DISTANCE: ("distances", 2, "file/distance.svg"),
+            ITEM_TYPE_PHYLOGENY: ("phylogenies", 3, "file/phylogeny.svg"),
+            ITEM_TYPE_TREESET: ("treesets", 3, "file/treeset.svg"),
+            ITEM_TYPE_CHAIN: ("chains", 4, "file/chain.svg"),
+        }
+        row_counts = {}
+        for item in sorted(items, key=lambda record: record.created_at):
+            spec = layout.get(item.item_type)
+            if spec is None:
+                continue
+            key, row, icon = spec
+            col = row_counts.get(row, 0)
+            row_counts[row] = col + 1
+            self._create_item_button(item, key, row, col, icon)
+        self._update_all_button_styles()
+
     def _create_item_button(self, dataset_item: DatasetItem, item_type_key: str, row: int, col: int, icon_name: str):
         """创建数据项按钮的通用方法
         
@@ -2495,14 +4239,18 @@ class SingleGeneWorkspace(QWidget):
             self.grid_widget = QWidget()
             self.grid_layout = QGridLayout()
             self.grid_widget.setLayout(self.grid_layout)
-            self.main_layout.addWidget(self.grid_widget)
+            self.main_layout.addWidget(self.grid_widget, 1)
             self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         
         # 创建 DatasetItemButton
         item_button = DatasetItemButton(dataset_item, parent=self)
-        item_button.clicked_single.connect(self._on_item_single_click)
+        item_button.activated.connect(self._on_item_single_click)
         item_button.clicked_double.connect(self._on_item_double_click)
-        
+        item_button.hovered.connect(self._on_item_hovered)
+        item_button.hover_left.connect(self._on_item_hover_left)
+        item_button.deselect_requested.connect(self._on_item_deselect)
+        item_button.basket_requested.connect(self._on_item_basket_requested)
+
         # 设置图标
         if self.resource_factory:
             icon = self.resource_factory.get_icon(icon_name)
@@ -2514,7 +4262,9 @@ class SingleGeneWorkspace(QWidget):
         if item_type_key not in self.item_buttons:
             self.item_buttons[item_type_key] = []
         self.item_buttons[item_type_key].append(item_button)
-        
+        if self._active_chain_key == self._chain_key_for_item(dataset_item):
+            item_button.set_chain_highlight("active")
+
         # 添加到网格布局
         self.grid_layout.addWidget(item_button, row, col)
         
@@ -2529,7 +4279,57 @@ class SingleGeneWorkspace(QWidget):
                 item_button.update_style()
         
         return item_button
-    
+
+    def materialize_dataset_items(self, dataset_id, max_items=12):
+        """Expose imported ResultSpec items on the canvas by their own type.
+
+        A plugin result is stored as a dataset, but users still expect to see
+        alignments, trees, models and distances as type-specific workspace
+        icons. Small datasets (the usual single-run result) get one button per
+        item in addition to the dataset button; large batches such as
+        OrthoFinder's 62 OGs stay behind the dataset icon.
+        """
+        manager = self.dataset_selection_manager
+        if manager is None or not dataset_id:
+            return
+        items = manager.get_items_by_dataset(dataset_id)
+        if not items or len(items) > max_items:
+            return
+
+        type_map = {
+            ITEM_TYPE_SEQUENCE: ("alignments", 0, "file/sequence.svg"),
+            ITEM_TYPE_ALIGNMENT: ("alignments", 0, "file/sequence.svg"),
+            ITEM_TYPE_MODEL: ("models", 1, "file/model.svg"),
+            ITEM_TYPE_DISTANCE: ("distances", 2, "file/distance.svg"),
+            ITEM_TYPE_PHYLOGENY: ("phylogenies", 3, "file/phylogeny.svg"),
+            ITEM_TYPE_CHAIN: ("chains", 4, "file/chain.svg"),
+            ITEM_TYPE_TREESET: ("treesets", 5, "file/treeset.svg"),
+            ITEM_TYPE_TABLE: ("tables", 6, "file/table.svg"),
+        }
+        added_alignment = False
+        for item in items:
+            if item.id in self._materialized_item_ids:
+                continue
+            entry = type_map.get(item.item_type)
+            if entry is None:
+                continue
+            item_type_key, row, icon_name = entry
+            if item_type_key == "models" and (item.data or {}).get("partitioned"):
+                icon_name = "file/modelset-el.svg"
+            self._create_item_button(
+                dataset_item=item,
+                item_type_key=item_type_key,
+                row=row,
+                col=len(self.item_buttons.get(item_type_key, [])),
+                icon_name=icon_name,
+            )
+            self._materialized_item_ids.add(item.id)
+            if item_type_key == "alignments":
+                added_alignment = True
+
+        if added_alignment and hasattr(self, "grid_layout"):
+            self._rearrange_row_0_buttons()
+
     def _get_active_ownership_uuid(self) -> Optional[str]:
         """获取当前激活的序列/alignment 的 ownership_uuid"""
         if not self.dataset_selection_manager:
@@ -2887,7 +4687,7 @@ class SingleGeneWorkspace(QWidget):
             self.grid_widget = QWidget()
             self.grid_layout = QGridLayout()
             self.grid_widget.setLayout(self.grid_layout)
-            self.main_layout.addWidget(self.grid_widget)
+            self.main_layout.addWidget(self.grid_widget, 1)
             self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         
         # add a chain to items["chains"]
@@ -2960,6 +4760,7 @@ class SingleGeneWorkspace(QWidget):
             dataset_info = None
             if spec.dataset_id:
                 dataset_info = manager.get_dataset(spec.dataset_id)
+            created_new_dataset = dataset_info is None
 
             if dataset_info is None:
                 dataset_id = manager.create_dataset(
@@ -2991,8 +4792,75 @@ class SingleGeneWorkspace(QWidget):
                 except Exception:
                     import_record = None
 
+            from .methods.dataset_manager import sequence_file_stem
+
+            def path_key(value):
+                value = str(value or "")
+                return os.path.normcase(os.path.abspath(value)) if value else ""
+
+            def name_key(value):
+                return sequence_file_stem(str(value or "")).strip().lower()
+
+            existing_by_path = {}
+            existing_by_name = {}
+            for existing in manager.get_items_by_dataset(dataset_id):
+                if existing.file_path:
+                    existing_by_path.setdefault(
+                        path_key(existing.file_path), existing
+                    )
+                existing_by_name.setdefault(
+                    name_key(existing.loci_name), existing
+                )
+
             created = []
             for index, item_spec in enumerate(spec.items):
+                # A result that names an existing dataset updates the items it
+                # came from in place (for example MAFFT alignments replacing
+                # the OrthoFinder CDS loci), rather than appending duplicates.
+                match = None
+                input_path = (item_spec.metadata or {}).get("input")
+                if input_path:
+                    match = existing_by_path.pop(path_key(input_path), None)
+                if match is None:
+                    match = existing_by_name.pop(
+                        name_key(item_spec.loci_name), None
+                    )
+
+                if match is not None:
+                    item = match
+                    if match.file_path and match.file_path != item_spec.file_path:
+                        metadata = dict(match.metadata or {})
+                        metadata["previous_file_path"] = match.file_path
+                        metadata.update(item_spec.metadata or {})
+                        match.metadata = metadata
+                    else:
+                        match.metadata = {
+                            **dict(match.metadata or {}),
+                            **dict(item_spec.metadata or {}),
+                        }
+                    match.item_type = item_spec.item_type
+                    match.file_path = item_spec.file_path
+                    match.format = item_spec.format
+                    match.is_aligned = item_spec.is_aligned
+                    match.length = item_spec.length or match.length
+                    match.sequence_count = (
+                        item_spec.sequence_count or match.sequence_count
+                    )
+                    if item_spec.sequences:
+                        match.sequences = list(item_spec.sequences)
+                    match.data = {
+                        **dict(match.data or {}),
+                        **dict(item_spec.data or {}),
+                    }
+                    match.import_id = item_spec.import_id or (
+                        import_record.id if import_record is not None else match.import_id
+                    )
+                    match.run_id = item_spec.run_id or match.run_id
+                    if item_spec.selected:
+                        match.selection_state = SELECTION_STATE_GREEN
+                    created.append((index, item_spec, match, True))
+                    continue
+
                 item = DatasetItem(item_type=item_spec.item_type)
                 item.dataset_id = dataset_id
                 item.loci_name = item_spec.loci_name
@@ -3013,17 +4881,19 @@ class SingleGeneWorkspace(QWidget):
                 item.selection_state = (
                     SELECTION_STATE_GREEN if item_spec.selected else SELECTION_STATE_NONE
                 )
-                created.append((index, item_spec, item))
+                created.append((index, item_spec, item, False))
 
             # Parent links refer to positions in spec.items.
-            for index, item_spec, item in created:
+            for index, item_spec, item, _is_existing in created:
                 parent_index = item_spec.parent_index
                 if parent_index is not None and 0 <= parent_index < len(created):
                     item.parent_id = created[parent_index][2].id
 
             added = []
-            for index, item_spec, item in created:
-                if not item.sequences and item.file_path and os.path.exists(item.file_path):
+            for index, item_spec, item, is_existing in created:
+                if (item.item_type != ITEM_TYPE_TABLE
+                        and not item.sequences and item.file_path
+                        and os.path.exists(item.file_path)):
                     try:
                         item.sequences = list(SeqIO.parse(item.file_path, item.format or "fasta"))
                     except Exception:
@@ -3036,22 +4906,41 @@ class SingleGeneWorkspace(QWidget):
                     except Exception:
                         item.length = 0
 
-                if not manager.add_item(item, dataset_id):
+                if not is_existing and not manager.add_item(item, dataset_id):
                     continue
-                added.append((index, item_spec, item))
+                added.append((index, item_spec, item, is_existing))
 
             if not added:
-                manager.delete_dataset(dataset_id)
+                if created_new_dataset:
+                    manager.delete_dataset(dataset_id)
                 raise ValueError("No dataset item passed validation")
 
-            settings_items = []
-            for index, item_spec, item in added:
+            all_items = manager.get_items_by_dataset(dataset_id)
+            entry_by_id = {
+                entry.get("id"): entry
+                for entry in (dataset_info.settings.get("dataset_items") or [])
+                if isinstance(entry, dict) and entry.get("id")
+            }
+            for index, item_spec, item, _is_existing in added:
                 entry = item_spec.to_settings_dict()
+                entry["loci_name"] = item.loci_name
                 entry["id"] = item.id
                 entry["parent_id"] = item.parent_id or ""
                 entry["import_id"] = item.import_id
                 entry["run_id"] = item.run_id
-                settings_items.append(entry)
+                entry_by_id[item.id] = entry
+
+            settings_items = []
+            seen_ids = set()
+            for item in all_items:
+                entry = entry_by_id.get(item.id)
+                if entry is not None:
+                    settings_items.append(entry)
+                    seen_ids.add(item.id)
+            # Preserve legacy settings entries that have no live item object.
+            for entry_id, entry in entry_by_id.items():
+                if entry_id not in seen_ids:
+                    settings_items.append(entry)
 
             dataset_info.settings["dataset_items"] = settings_items
             dataset_info.settings["summary"] = dict(spec.summary)
@@ -3059,10 +4948,10 @@ class SingleGeneWorkspace(QWidget):
             dataset_info.settings["metadata"] = dict(spec.metadata)
             if spec.partition_scheme:
                 dataset_info.settings["partition_scheme"] = spec.partition_scheme
-            dataset_info.is_multigene = len(added) > 1
-            dataset_info.loci_count = len(added)
+            dataset_info.is_multigene = len(all_items) > 1
+            dataset_info.loci_count = len(all_items)
             dataset_info.taxa_count = max(
-                (item.sequence_count for _, _, item in added), default=0
+                (item.sequence_count for item in all_items), default=0
             )
         finally:
             manager.disable_auto_save = original_disable_auto_save
@@ -3158,7 +5047,7 @@ class SingleGeneWorkspace(QWidget):
             self.grid_widget = QWidget()
             self.grid_layout = QGridLayout()
             self.grid_widget.setLayout(self.grid_layout)
-            self.main_layout.addWidget(self.grid_widget)
+            self.main_layout.addWidget(self.grid_widget, 1)
             self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
 
         if not hasattr(self, "dataset_summary"):
@@ -3201,8 +5090,8 @@ class SingleGeneWorkspace(QWidget):
         self.item_buttons.setdefault("datasets", []).append(dataset_button)
         if dataset_info not in self.items["datasets"]:
             self.items["datasets"].append(dataset_info)
-        dataset_col = len(self.item_buttons.get("alignments", [])) + len(self.item_buttons["datasets"]) - 1
-        self.grid_layout.addWidget(dataset_button, 0, dataset_col)
+        dataset_col = len(self.item_buttons["datasets"]) - 1
+        self.grid_layout.addWidget(dataset_button, 6, dataset_col)
         dataset_button.dataset_ref = dataset_info
         self._update_dataset_summary(dataset_info)
         self.dataset_selected.emit(dataset_info.id)
@@ -3264,6 +5153,7 @@ class SingleGeneWorkspace(QWidget):
             return
 
         self._update_dataset_summary(dataset_info)
+        self.current_dataset_id = dataset_id
 
         # 切换数据集的选择状态
         if dataset_info.selection_state == SELECTION_STATE_GREEN:
@@ -3287,6 +5177,13 @@ class SingleGeneWorkspace(QWidget):
                                 break
             else:
                 # 如果没有保存的状态，才将所有数据项设置为蓝色
+                self.dataset_selection_manager.selection_engine.select_dataset(dataset_id)
+            # ResultSpec datasets carry only "selected=False" flags. Give the
+            # items a context highlight so the dataset reads as selected.
+            items = self.dataset_selection_manager.get_items_by_dataset(dataset_id)
+            if items and not any(
+                    item.selection_state in (SELECTION_STATE_GREEN, SELECTION_STATE_BLUE)
+                    for item in items):
                 self.dataset_selection_manager.selection_engine.select_dataset(dataset_id)
         
         # 保存状态
@@ -3329,7 +5226,7 @@ class SingleGeneWorkspace(QWidget):
         self.grid_widget = QWidget()
         self.grid_layout = QGridLayout()
         self.grid_widget.setLayout(self.grid_layout)
-        self.main_layout.addWidget(self.grid_widget)
+        self.main_layout.addWidget(self.grid_widget, 1)
         self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
 
         # Reset button references; the widgets above were deleted.
@@ -3806,6 +5703,18 @@ class SingleGeneWorkspace(QWidget):
         except Exception:
             return None
     
+    def view_table(self, path):
+        """Open a TSV result table in the shared read-only viewer."""
+        from ..plugins.components.table_preview import show_table
+        if not path:
+            QMessageBox.information(self, "Table", "This item has no table file.")
+            return None
+        dialog = show_table(self, path, title="Result table")
+        if not hasattr(self, "table_dialogs"):
+            self.table_dialogs = []
+        self.table_dialogs.append(dialog)
+        return dialog
+
     def view_distance_matrix(self, distance_matrix):
         """查看距离矩阵 - 增强版支持单元格着色和精确到小数点后三位"""
         try:

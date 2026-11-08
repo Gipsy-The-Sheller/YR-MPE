@@ -9,6 +9,8 @@ import queue
 import time
 import platform
 
+from YR_MPE.runtime.subprocess_utils import popen_hidden, run_hidden
+
 
 class BaseProcessThread(QThread):
     """
@@ -87,16 +89,10 @@ class BaseProcessThread(QThread):
         """
         self.console_output.emit(" ".join(cmd), "command")
         
-        # 准备启动参数，解决Windows命令行窗口问题
-        startupinfo = None
-        if platform.system().lower() == "windows":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-
         try:
-            # 使用Popen而非run，允许实时读取输出
-            self._process = subprocess.Popen(
+            # 使用Popen而非run，允许实时读取输出；popen_hidden 会加上
+            # CREATE_NO_WINDOW，避免 pythonw 启动时弹出终端窗口。
+            self._process = popen_hidden(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,  # 现在分别处理stdout和stderr
@@ -106,7 +102,6 @@ class BaseProcessThread(QThread):
                 env=env,
                 encoding="utf-8",
                 errors="replace",
-                startupinfo=startupinfo  # Windows隐藏控制台窗口
             )
 
             # 实时读取输出和错误
@@ -295,7 +290,7 @@ class BaseProcessThread(QThread):
             try:
                 # Windows下使用taskkill
                 if platform.system().lower() == "windows":
-                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(self._process.pid)], 
+                    run_hidden(['taskkill', '/F', '/T', '/PID', str(self._process.pid)], 
                                   stdout=subprocess.DEVNULL, 
                                   stderr=subprocess.DEVNULL)
                 else:

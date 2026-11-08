@@ -45,6 +45,9 @@ class DatasetSelectionManager:
         
         # 当前选中的数据项
         self.selected_items: Set[str] = set()
+
+        # 显式加入 "Selected" 面板的对象（可跨链、跨类型）
+        self.basket_items: Set[str] = set()
         
         # 管理器状态
         self.workspace_path: Optional[str] = None
@@ -238,11 +241,59 @@ class DatasetSelectionManager:
         """选中数据项（直接选择）"""
         if item_id not in self.items:
             return False
-        
+
         item = self.items[item_id]
-        
+
         # 使用 selection_engine 进行选择（包含所有权 UUID 机制）
         return self.selection_engine.select_item(item_id, append)
+
+    # ========== Selected basket ==========
+
+    def add_to_basket(self, item_id: str) -> bool:
+        """Add an item to the multi-object Selected panel."""
+        item = self.items.get(item_id)
+        if item is None:
+            return False
+        self.basket_items.add(item_id)
+        item.selection_state = SELECTION_STATE_GREEN
+        item.selection_reason = "Selected for workflow"
+        self.selected_items.add(item_id)
+        self._save_state()
+        return True
+
+    def remove_from_basket(self, item_id: str) -> bool:
+        item = self.items.get(item_id)
+        if item is None:
+            return False
+        self.basket_items.discard(item_id)
+        if item.selection_state == SELECTION_STATE_GREEN:
+            item.selection_state = SELECTION_STATE_NONE
+            item.selection_reason = ""
+            self.selected_items.discard(item_id)
+        self._save_state()
+        return True
+
+    def clear_basket(self):
+        for item_id in list(self.basket_items):
+            self.remove_from_basket(item_id)
+        self.basket_items.clear()
+
+    def get_basket_items(self) -> List[DatasetItem]:
+        return [self.items[item_id] for item_id in self.basket_items
+                if item_id in self.items]
+
+    def is_basket_item(self, item_id: str) -> bool:
+        return item_id in self.basket_items
+
+    def restore_basket_selection(self):
+        """Keep basket objects green after ordinary single-item selection."""
+        for item_id in self.basket_items:
+            item = self.items.get(item_id)
+            if item is None:
+                continue
+            item.selection_state = SELECTION_STATE_GREEN
+            item.selection_reason = "Selected for workflow"
+            self.selected_items.add(item_id)
     
     def _perform_auto_selection(self, item: DatasetItem):
         """执行自动关联选择"""
@@ -632,7 +683,8 @@ class DatasetSelectionManager:
                         for dataset_id, dataset in self.datasets.items()},
             "items": {item_id: item.to_dict()
                      for item_id, item in self.items.items()},
-            "selected_items": list(self.selected_items)
+            "selected_items": list(self.selected_items),
+            "basket_items": list(self.basket_items),
         }
 
         with open(state_file, 'w', encoding='utf-8') as f:
@@ -737,6 +789,11 @@ class DatasetSelectionManager:
             if "selected_items" in state:
                 loaded_selected = state.get("selected_items", [])
                 self.selected_items = set(loaded_selected)
+            if "basket_items" in state:
+                self.basket_items = {
+                    item_id for item_id in state.get("basket_items", [])
+                    if item_id in self.items
+                }
 
             # 重建选择树
             for dataset_id in self.datasets.keys():
@@ -754,9 +811,10 @@ class DatasetSelectionManager:
                         for dataset_id, dataset in self.datasets.items()},
             "items": {item_id: item.to_dict() 
                      for item_id, item in self.items.items()},
-            "selected_items": list(self.selected_items)
+            "selected_items": list(self.selected_items),
+            "basket_items": list(self.basket_items),
         }
-    
+
     def import_from_dict(self, data: Dict[str, Any]):
         """从字典格式导入"""
         self.version = data.get("version", "2.0")
@@ -771,7 +829,11 @@ class DatasetSelectionManager:
         
         # 导入选中项
         self.selected_items = set(data.get("selected_items", []))
-        
+        self.basket_items = {
+            item_id for item_id in data.get("basket_items", [])
+            if item_id in self.items
+        }
+
         # 重建选择树
         for dataset_id in self.datasets.keys():
             self._build_selection_tree(dataset_id)

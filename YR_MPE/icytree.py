@@ -295,14 +295,15 @@ class IcyTreePlugin(QWidget, BasePlugin):
             print(f"Error in delayed tree injection: {e}")
     
     def validate_newick(self, nwk_string):
-        """Simple Newick format validation"""
+        """Simple format validation for Newick or NEXUS input."""
         if not nwk_string:
             return False
-        
-        # # Basic check: should end with semicolon
-        # if not nwk_string.endswith(';'):
-        #     return False
-        
+
+        # IcyTree auto-detects #NEXUS and parses its translate table and
+        # [&...] annotations. Parenthesis counting is not meaningful there.
+        if nwk_string.lstrip().lower().startswith("#nexus"):
+            return True
+
         # Check bracket matching
         open_count = nwk_string.count('(')
         close_count = nwk_string.count(')')

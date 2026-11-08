@@ -32,6 +32,7 @@ class BasePlugin(QWidget):
 
     # Standard channel for exporting structured results to the host.
     result_ready = pyqtSignal(object)
+    workflow_configured = pyqtSignal(object)
     
     def __init__(self, import_from=None, import_data=None, **kwargs):
         """
@@ -57,6 +58,12 @@ class BasePlugin(QWidget):
 
         # 运行状态
         self.is_running = False
+        self.workflow_mode = False
+        self.workflow_context = {}
+        self.workflow_locked_inputs = []
+        self.task_queue = None
+        self.task_window = None
+        self.queue_job_id = ""
         self.tool_path = None
         self.plugin_config = None
         self.citation_keys = []
@@ -94,6 +101,51 @@ class BasePlugin(QWidget):
         self.citation = ["No citation available"]
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"]}
         self.output_types = {"FASTA": ".fas"}
+
+    def control_bindings(self):
+        """Declare GUI control to CLI option mappings for agent skills.
+
+        Subclasses should return a list of dictionaries such as::
+
+            {"id": "threads", "widget": "threads_spinbox",
+             "label": "Threads", "kind": "int", "cli": ["-p", "{value}"]}
+
+        A control with no CLI equivalent uses ``"cli": []`` and a note.
+        """
+        return []
+
+    def cli_preview(self):
+        """Return a command-line preview built from the current controls."""
+        return []
+
+    def help_doc(self):
+        """Return the plugin's agent skill document (Markdown + control map)."""
+        from ..runtime.skills import build_plugin_help_doc
+        return build_plugin_help_doc(self)
+
+    def agent_status(self):
+        from ..runtime.plugin_agent import agent_status
+        return agent_status(self)
+
+    def agent_contract(self):
+        from ..runtime.plugin_agent import agent_contract
+        return agent_contract(self)
+
+    def agent_invoke(self, action_id, params=None):
+        from ..runtime.plugin_agent import agent_invoke
+        return agent_invoke(self, action_id, params)
+
+    def bind_workflow_step(self, step):
+        from ..runtime.plugin_workflow import bind_workflow_step
+        return bind_workflow_step(self, step)
+
+    def workflow_step_config(self):
+        from ..runtime.plugin_workflow import workflow_step_config
+        return workflow_step_config(self)
+
+    def _apply_workflow_step(self):
+        from ..runtime.plugin_workflow import apply_workflow_step
+        return apply_workflow_step(self)
 
     def info(self):
         """
@@ -171,7 +223,12 @@ class BasePlugin(QWidget):
                 # still valid config.
                 return bool(plugin_config.get("builtin"))
 
-            self.tool_path = os.path.join(self.plugin_path, tool_path.lstrip("/").lstrip("\\"))
+            if os.path.isabs(tool_path):
+                self.tool_path = tool_path
+            else:
+                self.tool_path = os.path.join(
+                    self.plugin_path, tool_path.lstrip("/").lstrip("\\")
+                )
             return os.path.exists(self.tool_path)
 
         except Exception as e:
@@ -498,15 +555,15 @@ class BasePlugin(QWidget):
         self.progress_bar.setVisible(False)
         self.control_layout.addWidget(self.progress_bar)
         
-        # 运行按钮
+        # 运行按钮：有任务队列时由队列调度，否则直接运行。
         self.run_button = QPushButton(f"Run {self.tool_name}")
-        self.run_button.clicked.connect(self.run_analysis)
+        self.run_button.clicked.connect(self._request_run)
         self.control_layout.addWidget(self.run_button)
         
         # 停止按钮
         self.stop_button = QPushButton("Stop")
 
-        self.stop_button.clicked.connect(self.stop_analysis)
+        self.stop_button.clicked.connect(self._request_stop)
         self.stop_button.setEnabled(False)
         self.control_layout.addWidget(self.stop_button)
         
@@ -570,6 +627,49 @@ class BasePlugin(QWidget):
             'type': msg_type,
             'formatted': formatted_msg
         })
+
+    def set_task_queue(self, queue, window=None):
+        """Attach the workbench queue used by the Run button."""
+        self.task_queue = queue
+        self.task_window = window
+        if getattr(self, "run_button", None) is not None:
+            self.run_button.setToolTip(
+                "Run now, or queue while another analysis is active."
+            )
+
+    def _request_run(self):
+        """Submit to the host queue when present, otherwise run directly."""
+        if getattr(self, "workflow_mode", False):
+            return self._apply_workflow_step()
+        if getattr(self, "is_running", False):
+            return None
+        queue = getattr(self, "task_queue", None)
+        if queue is not None and callable(getattr(queue, "submit", None)):
+            try:
+                self.queue_job_id = queue.submit(
+                    self, window=self.task_window
+                )
+                return self.queue_job_id
+            except Exception as exc:
+                self.add_console_message(
+                    "Could not queue analysis: %s" % exc, "error"
+                )
+                return None
+        return self.run_analysis()
+
+    def _request_stop(self):
+        """Cancel the queue job that owns this run, when there is one."""
+        queue = getattr(self, "task_queue", None)
+        job_id = getattr(self, "queue_job_id", "")
+        if queue is not None and job_id and callable(getattr(queue, "cancel", None)):
+            job = None
+            getter = getattr(queue, "get_job", None)
+            if callable(getter):
+                job = getter(job_id)
+            if job is not None and getattr(job, "state", "") in ("queued", "running"):
+                queue.cancel(job_id)
+                return
+        return self.stop_analysis()
 
     def run_analysis(self):
         """

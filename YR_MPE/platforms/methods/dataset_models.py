@@ -19,6 +19,7 @@ ITEM_TYPE_COALESCENT = "coalescent"
 ITEM_TYPE_CLOCK = "clock"
 ITEM_TYPE_CHAIN = "chain"
 ITEM_TYPE_TREESET = "treeset"
+ITEM_TYPE_TABLE = "table"
 
 ALL_ITEM_TYPES = [
     ITEM_TYPE_SEQUENCE,
@@ -30,7 +31,8 @@ ALL_ITEM_TYPES = [
     ITEM_TYPE_COALESCENT,
     ITEM_TYPE_CLOCK,
     ITEM_TYPE_CHAIN,
-    ITEM_TYPE_TREESET
+    ITEM_TYPE_TREESET,
+    ITEM_TYPE_TABLE
 ]
 
 # 选择状态常量
@@ -57,7 +59,8 @@ DATA_DEPENDENCIES = {
     ITEM_TYPE_COALESCENT: [ITEM_TYPE_PHYLOGENY],
     ITEM_TYPE_CLOCK: [ITEM_TYPE_PHYLOGENY],
     ITEM_TYPE_CHAIN: [ITEM_TYPE_ALIGNMENT],
-    ITEM_TYPE_TREESET: [ITEM_TYPE_PHYLOGENY]  # treeset 依赖于 phylogeny
+    ITEM_TYPE_TREESET: [ITEM_TYPE_PHYLOGENY],  # treeset 依赖于 phylogeny
+    ITEM_TYPE_TABLE: []
 }
 
 # 所有权分组（同一组内只能同时激活一个项目）
@@ -75,7 +78,8 @@ OWNERSHIP_GROUPS = {
     "chain_group": [ITEM_TYPE_CHAIN],
     "variant_group": [ITEM_TYPE_VARIANT],
     "coalescent_group": [ITEM_TYPE_COALESCENT],
-    "clock_group": [ITEM_TYPE_CLOCK]
+    "clock_group": [ITEM_TYPE_CLOCK],
+    "table_group": [ITEM_TYPE_TABLE]
 }
 
 # 反向映射：item_type -> group_name

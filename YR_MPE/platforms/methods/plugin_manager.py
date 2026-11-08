@@ -83,6 +83,12 @@ class PluginManager:
             self.register_plugin("model_finder", ModelFinderPluginEntry)
         except ImportError:
             pass
+
+        try:
+            from YR_MPE.plugins.modeltest_ng_plugin import ModelTestNGPluginEntry
+            self.register_plugin("modeltest_ng", ModelTestNGPluginEntry)
+        except ImportError:
+            pass
         
     def _register_distance_plugins(self):
         """注册距离计算插件"""
@@ -97,6 +103,12 @@ class PluginManager:
         try:
             from YR_MPE.plugins.iqtree_plugin import IQTreePluginEntry
             self.register_plugin("iqtree", IQTreePluginEntry)
+        except ImportError:
+            pass
+
+        try:
+            from YR_MPE.plugins.raxmlng_plugin import RAxMLNGPluginEntry
+            self.register_plugin("raxmlng", RAxMLNGPluginEntry)
         except ImportError:
             pass
             

@@ -4,6 +4,7 @@ Dataset Manager Module
 """
 import os
 import csv
+import tempfile
 from typing import List, Dict, Optional
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
                             QTableWidgetItem, QPushButton, QCheckBox, QLabel,
@@ -52,6 +53,25 @@ class DatasetItem:
     def get_name(self):
         """获取name属性"""
         return self.name
+
+
+def sequence_file_stem(file_path: str) -> str:
+    """Return a locus name without compound FASTA/CDS suffixes.
+
+    ``os.path.splitext`` only removes the final suffix, so an OrthoFinder
+    file such as ``OG0000008.cds.fna`` would become ``OG0000008.cds`` and
+    break matching against the OG name used by the concatenator.
+    """
+    name = os.path.basename(str(file_path))
+    lower = name.lower()
+    for suffix in (
+        ".cds.fna", ".cds.fasta", ".cds.fa",
+        ".fna", ".fasta", ".fas", ".fa",
+        ".phy", ".nex", ".nexus",
+    ):
+        if lower.endswith(suffix):
+            return name[:-len(suffix)]
+    return os.path.splitext(name)[0]
 
 
 class DatasetManager(QDialog):
@@ -186,11 +206,25 @@ class DatasetManager(QDialog):
         # 表格区域
         table_layout = QVBoxLayout()
         
-        # "+"按钮
+        # 工具栏：添加 / 全选 / 全部取消
+        table_toolbar = QHBoxLayout()
         add_button = QPushButton("+")
+        add_button.setToolTip("Add sequence files")
         add_button.clicked.connect(self.add_datasets)
-        table_layout.addWidget(add_button)
-        
+        table_toolbar.addWidget(add_button)
+
+        select_all_button = QPushButton("Select All")
+        select_all_button.setToolTip("Check every dataset item")
+        select_all_button.clicked.connect(self.select_all_datasets)
+        table_toolbar.addWidget(select_all_button)
+
+        deselect_all_button = QPushButton("Deselect All")
+        deselect_all_button.setToolTip("Uncheck every dataset item")
+        deselect_all_button.clicked.connect(self.deselect_all_datasets)
+        table_toolbar.addWidget(deselect_all_button)
+        table_toolbar.addStretch()
+        table_layout.addLayout(table_toolbar)
+
         # 数据表格
         self.table = QTableWidget()
         self.table.setColumnCount(6)
@@ -301,7 +335,18 @@ class DatasetManager(QDialog):
                         break
                 
                 if existing_item:
-                    # 更新现有item的selection_state
+                    # Settings are the persisted truth after a Dataset Manager
+                    # run; refresh the in-memory item as well as its selection.
+                    existing_item.item_type = item.item_type
+                    existing_item.file_path = item.file_path
+                    existing_item.format = item.format
+                    existing_item.is_aligned = item.is_aligned
+                    existing_item.length = item.length
+                    existing_item.sequence_count = item.sequence_count
+                    existing_item.data = dict(item.data or {})
+                    existing_item.metadata = dict(item.metadata or {})
+                    if item.sequences:
+                        existing_item.sequences = item.sequences
                     existing_item.selection_state = SELECTION_STATE_GREEN if item.selected else SELECTION_STATE_NONE
                     if item.selected:
                         self.workspace.dataset_selection_manager.selected_items.add(existing_item.id)
@@ -413,7 +458,7 @@ class DatasetManager(QDialog):
         # 创建DatasetItem
         item = DatasetItem()
         item.file_path = file_path
-        item.loci_name = os.path.splitext(os.path.basename(file_path))[0]
+        item.loci_name = sequence_file_stem(file_path)
         item.sequences = sequences
         item.sequence_count = len(sequences)
         item.length = len(str(sequences[0].seq))
@@ -453,7 +498,8 @@ class DatasetManager(QDialog):
         selected_checkbox = QCheckBox()
         selected_checkbox.setChecked(item.selected)
         selected_checkbox.stateChanged.connect(
-            lambda state, r=row: self.on_selected_changed(r, state)
+            lambda state, cb=selected_checkbox:
+                self.on_selected_changed_for_checkbox(cb, state)
         )
         self.table.setCellWidget(row, 0, selected_checkbox)
         
@@ -515,6 +561,36 @@ class DatasetManager(QDialog):
             # 正常范围
             label.setStyleSheet("color: black;")
             
+    def _row_for_checkbox(self, checkbox) -> int:
+        """Find the current table row owning a selection checkbox.
+
+        Row indices captured in lambdas go stale after a row is removed, so
+        resolve the row from the live table instead.
+        """
+        for row in range(self.table.rowCount()):
+            if self.table.cellWidget(row, 0) is checkbox:
+                return row
+        return -1
+
+    def on_selected_changed_for_checkbox(self, checkbox, state: int):
+        row = self._row_for_checkbox(checkbox)
+        if row >= 0:
+            self.on_selected_changed(row, state)
+
+    def _set_all_selected(self, selected: bool):
+        for row in range(self.table.rowCount()):
+            checkbox = self.table.cellWidget(row, 0)
+            if isinstance(checkbox, QCheckBox):
+                checkbox.setChecked(selected)
+
+    def select_all_datasets(self):
+        """Check every dataset item in the table."""
+        self._set_all_selected(True)
+
+    def deselect_all_datasets(self):
+        """Uncheck every dataset item in the table."""
+        self._set_all_selected(False)
+
     def on_selected_changed(self, row: int, state: int):
         """选中状态改变时的处理"""
         if 0 <= row < len(self.dataset_items):
@@ -848,10 +924,11 @@ class DatasetManager(QDialog):
             
             # 运行插件（关键：传递批量数据，来源标识为DATASET_MANAGER）
             plugin_widget = plugin_instance.run(
-                import_from="DATASET_MANAGER", 
+                import_from="DATASET_MANAGER",
                 import_data=batch_input_data
             )
-            
+            self._active_alignment_plugin = plugin_widget
+
             # 连接批量信号（关键：连接到Dataset Manager自身的方法）
             if hasattr(plugin_widget, 'batch_import_alignment_signal'):
                 plugin_widget.batch_import_alignment_signal.connect(
@@ -881,13 +958,31 @@ class DatasetManager(QDialog):
                 QMessageBox.warning(self, "Warning", "Result count mismatch!")
                 return
                 
+            outputs = list(getattr(
+                getattr(self, "_active_alignment_plugin", None),
+                "alignment_output_files", [],
+            ) or [])
+            use_outputs = len(outputs) == len(selected_items)
+
             for i, (item, result_sequences) in enumerate(zip(selected_items, batch_results)):
                 # 更新序列数据
                 item.sequences = result_sequences
                 item.is_aligned = True
+                item.item_type = ITEM_TYPE_ALIGNMENT
                 item.length = len(result_sequences[0].seq) if result_sequences else 0
                 item.sequence_count = len(result_sequences)
-                
+
+                output_path = outputs[i] if use_outputs else ""
+                if not output_path or not os.path.exists(output_path):
+                    output_path = self._write_alignment_file(item, result_sequences)
+                item.file_path = output_path
+                item.format = "fasta"
+
+                # The Dataset Manager works on local copies. Push the aligned
+                # item back into the workspace selection manager so that
+                # downstream plugins (IQ-TREE, ModelFinder, ...) see it.
+                self._sync_alignment_to_manager(item, output_path)
+
             # 刷新表格显示
             self.refresh_table_display()
             
@@ -905,7 +1000,54 @@ class DatasetManager(QDialog):
     def handle_single_alignment_result(self, single_result):
         """处理单文件比对结果（向后兼容，但批量场景不会调用）"""
         pass
-    
+
+    def _write_alignment_file(self, item, sequences):
+        """Persist an in-memory alignment so downstream tools get a file."""
+        if not sequences:
+            return ""
+        base = getattr(item, "file_path", "") or ""
+        if base and os.path.exists(base):
+            root, _ext = os.path.splitext(base)
+            output_path = root + ".aligned.fas"
+        else:
+            handle, output_path = tempfile.mkstemp(suffix=".fas")
+            os.close(handle)
+        SeqIO.write(list(sequences), output_path, "fasta")
+        return output_path
+
+    def _sync_alignment_to_manager(self, item, output_path):
+        """Update the workspace DatasetItem behind a Dataset Manager row."""
+        workspace = self.workspace
+        manager = getattr(workspace, "dataset_selection_manager", None)
+        dataset_id = getattr(workspace, "current_dataset_id", None)
+        if manager is None or not dataset_id:
+            return
+
+        target = None
+        for candidate in manager.get_items_by_dataset(dataset_id):
+            if candidate.loci_name == item.loci_name:
+                target = candidate
+                break
+        if target is None:
+            return
+
+        target.item_type = ITEM_TYPE_ALIGNMENT
+        target.is_aligned = True
+        target.sequences = list(getattr(item, "sequences", []) or [])
+        target.sequence_count = item.sequence_count
+        target.length = item.length
+        target.format = "fasta"
+        if output_path:
+            target.file_path = output_path
+        target.data = {**dict(target.data or {}), "tool": "MAFFT"}
+        target.metadata = {**dict(target.metadata or {}), "source": "mafft"}
+        target.selection_state = SELECTION_STATE_GREEN
+        manager.selected_items.add(target.id)
+        try:
+            manager._build_selection_tree(dataset_id)
+        except Exception:
+            pass
+
     def refresh_table_display(self):
         """刷新表格显示"""
         # 清空现有行

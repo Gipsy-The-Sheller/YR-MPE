@@ -5,6 +5,8 @@ import tempfile
 import json
 from typing import List, Dict, Any, Optional
 
+from YR_MPE.runtime.subprocess_utils import run_hidden
+
 
 class BaseProcessThread(QThread):
     """
@@ -76,10 +78,10 @@ class BaseProcessThread(QThread):
         self.console_output.emit(" ".join(cmd), "command")
         
         # 执行命令
-        result = subprocess.run(
-            cmd, 
-            capture_output=True, 
-            text=True, 
+        result = run_hidden(
+            cmd,
+            capture_output=True,
+            text=True,
             cwd=cwd,
             timeout=3600  # 1小时超时
         )

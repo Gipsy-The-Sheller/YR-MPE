@@ -60,6 +60,18 @@ class PluginFactory:
     def get_model_finder_plugin(self):
         """获取ModelFinder插件"""
         return self.load_plugin("YR_MPE.plugins.model_finder_plugin", "ModelFinderPluginEntry")
+
+    def get_modeltest_plugin(self):
+        """获取 ModelTest-NG 插件"""
+        return self.load_plugin(
+            "YR_MPE.plugins.modeltest_ng_plugin", "ModelTestNGPluginEntry"
+        )
+
+    def get_raxmlng_plugin(self):
+        """获取 RAxML-NG 插件"""
+        return self.load_plugin(
+            "YR_MPE.plugins.raxmlng_plugin", "RAxMLNGPluginEntry"
+        )
     
     def get_ml_distance_plugin(self):
         """获取ML距离计算插件"""
@@ -104,6 +116,14 @@ class PluginFactory:
     def get_orthofinder_plugin(self):
         """获取 OrthoFinder 基因组数据集插件"""
         return self.load_plugin("YR_MPE.plugins.orthofinder_plugin", "OrthoFinderPluginEntry")
+
+    def get_codon_ztest_plugin(self):
+        """获取 Codon-based Z-test 插件"""
+        return self.load_plugin("YR_MPE.plugins.codon_ztest_plugin", "CodonZTestPluginEntry")
+
+    def get_batch_dnds_plugin(self):
+        """获取 Batch dN/dS 插件"""
+        return self.load_plugin("YR_MPE.plugins.batch_dnds_plugin", "BatchDnDsPluginEntry")
     
     def get_model_parameter_plugin(self):
         """获取Model Parameter Estimation插件"""
@@ -120,7 +140,34 @@ class PluginFactory:
     def get_astral_plugin(self):
         """获取ASTRAL插件"""
         return self.load_plugin("YR_MPE.plugins.astral_plugin", "AstralPluginEntry")
+
+    def get_rf_plugin(self):
+        """获取 Robinson-Foulds 树比较插件"""
+        return self.load_plugin("YR_MPE.plugins.rf_plugin", "RFComparisonPluginEntry")
     
     def get_mpboot_plugin(self):
         """获取MPBoot插件"""
         return self.load_plugin("YR_MPE.plugins.mpboot_plugin", "MPBootPluginEntry")
+
+    def get_treerecs_plugin(self):
+        """获取 TreeRecs 基因树/物种树调和插件"""
+        return self.load_plugin("YR_MPE.plugins.treerecs_plugin", "TreeRecsPluginEntry")
+
+    def get_gcf_plugin(self):
+        """Gene concordance factor plugin."""
+        return self.load_plugin("YR_MPE.plugins.gcf_plugin", "GeneConcordancePluginEntry")
+
+    def get_scf_plugin(self):
+        """Site concordance factor plugin."""
+        return self.load_plugin("YR_MPE.plugins.scf_plugin", "SiteConcordancePluginEntry")
+
+    def get_msc_diagnostics_plugin(self):
+        """gCF + ASTER coalescent-unit diagnostics plugin."""
+        return self.load_plugin("YR_MPE.plugins.msc_diagnostics_plugin", "MSCDiagnosticsPluginEntry")
+
+    def get_site_diagnostics_plugin(self):
+        """sCF + CASTER-site q1/q2/q3 diagnostics plugin."""
+        return self.load_plugin(
+            "YR_MPE.plugins.site_diagnostics_plugin",
+            "SiteDiagnosticsPluginEntry",
+        )
