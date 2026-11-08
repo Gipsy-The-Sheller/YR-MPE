@@ -38,3 +38,7 @@ docs/manual.toc
 docs/manual.fls
 docs/manual.fdb_latexmk
 docs/manual.run.xml
+
+# Release/build outputs
+dist/
+.ipynb_checkpoints/
