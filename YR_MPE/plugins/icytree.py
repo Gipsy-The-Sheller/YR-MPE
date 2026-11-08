@@ -141,6 +141,10 @@ class CustomWebEnginePage(QWebEnginePage):
         return True
 
 class IcyTreePlugin(QWidget, BasePlugin):
+    def help_doc(self):
+        from ..runtime.skills import SkillLibrary
+        return SkillLibrary().get_skill("icytree") or {}
+
     """QWebEngine-based IcyTree plugin for phylogenetic tree visualization"""
     
     # Redefine signals

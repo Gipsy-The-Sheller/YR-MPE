@@ -28,74 +28,72 @@ import os
 from typing import List, Optional
 
 from Bio import SeqIO
+from io import StringIO
+from pathlib import Path
 
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
-import subprocess
+from .components.alignment_common import (
+    build_result, prepare_import, records_temp, setup_preview, show_preview,
+)
 
 
 class TrimAlThread(BaseProcessThread):
-    """TrimAl修剪线程类"""
-    
-    def __init__(self, tool_path, input_files, parameters, imported_files=None, suffix=None):
-        super().__init__(tool_path, input_files, parameters, imported_files)
-        if suffix:
-            self.output_suffix = suffix
-    
+    """Run TrimAl and return validated trimmed alignments."""
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, input_files, parameters,
+                 imported_files=None, suffix=None, workdir=None):
+        super().__init__(
+            tool_path, input_files, parameters, imported_files, workdir=workdir
+        )
+        self.output_suffix = suffix or ""
+
     def get_tool_name(self):
-        """返回工具名称"""
         return "TrimAl"
-        
+
+    def _output_path(self, input_file):
+        if self.output_suffix:
+            return Path("%s%s.fas" % (input_file, self.output_suffix))
+        return Path(self.create_temp_file(suffix=".fas"))
+
     def execute_commands(self):
-        """执行TrimAl修剪命令"""
         try:
             output_files = []
-            html_files = []
-            
-            # 分别处理每个输入文件
-            total_files = len(self.input_files)
-            for i, input_file in enumerate(self.input_files):
+            total = len(self.input_files)
+            for index, input_file in enumerate(self.input_files):
                 if not self.is_running:
                     break
-                    
-                self.progress.emit(f"Processing file {i+1}/{total_files}...")
-                self.console_output.emit(f"Processing file {i+1}/{total_files}: {os.path.basename(input_file)}", "info")
-                
-                # 创建输出文件
-                # 如果是从UI传递过来的suffix参数，则使用它来构造输出文件名
-                if self.output_suffix:
-                    # 构造带后缀的输出文件名
-                    output_file = f"{input_file}{self.output_suffix}.fas"
-                else:
-                    output_file = self.create_temp_file(suffix='.fas')
-                
-                # 创建HTML输出文件
-                html_file = self.create_temp_file(suffix='.html')
-                
-                # 构建命令
+                self.progress.emit("Processing file %d/%d..." % (index + 1, total))
+                self.console_output.emit(
+                    "Processing file %d/%d: %s"
+                    % (index + 1, total, os.path.basename(input_file)),
+                    "info",
+                )
+                output_file = self._output_path(input_file)
+                output_file.parent.mkdir(parents=True, exist_ok=True)
                 cmd = [
-                    self.tool_path,
-                    "-in", input_file,
-                    "-out", output_file,
-                    "-htmlout", html_file,
-                    *self.parameters
+                    self.tool_path, "-in", input_file, "-out", str(output_file),
+                    *self.parameters,
                 ]
-                
-                # 执行命令
-                result = self.execute_command(cmd)
-                
+                result = self.execute_command(cmd, cwd=str(output_file.parent))
+                detail = (result.stderr or "").strip()
                 if result.returncode != 0:
-                    self.error.emit(f"TrimAl execution failed for file {i+1}: {result.stderr}")
-                    return
-                
-                output_files.append(output_file)
-                html_files.append(html_file)
-            
+                    raise RuntimeError(
+                        "TrimAl failed for %s%s"
+                        % (os.path.basename(input_file),
+                           ": " + detail if detail else "")
+                    )
+                if not output_file.is_file() or output_file.stat().st_size == 0:
+                    raise RuntimeError("TrimAl did not write %s" % output_file)
+                output_files.append(str(output_file))
+
             self.progress.emit("All trimming completed")
-            self.finished.emit(output_files, html_files)
-            
-        except Exception as e:
-            self.error.emit(f"Trimming exception: {str(e)}")
+            self.result_ready.emit({"output_files": output_files})
+            self.finished.emit(output_files, [])
+        except Exception as exc:
+            self.error.emit("Trimming exception: %s" % exc)
 
 
 class TrimAlPlugin(BasePlugin):
@@ -103,70 +101,76 @@ class TrimAlPlugin(BasePlugin):
     import_alignment_signal = pyqtSignal(list)
     batch_import_alignment_signal = pyqtSignal(list)
     
-    def __init__(self, import_from=None, import_data=None):
-        """初始化TrimAl插件"""
-        super().__init__(import_from, import_data)
-        # 初始化插件信息
-        self.init_plugin_info()
+    def __init__(self, import_from=None, import_data=None, **kwargs):
         self.batch_mode = False
-        
-        # 特别处理YR-MPEA、seq_viewer或DATASET_MANAGER导入的数据
-        if import_from in ["YR_MPEA", "seq_viewer", "DATASET_MANAGER"] and import_data is not None:
+        self._payload = None
+        super().__init__(import_from, import_data, **kwargs)
+        if import_data is not None and (
+            not isinstance(import_data, list) or import_from != "YR_MPEA"
+        ):
             self.handle_import_data(import_data)
-        
+        self.run_button.setText("Run TrimAl")
+
     def init_plugin_info(self):
-        """初始化插件信息"""
         self.plugin_name = "TrimAl Trimmer"
         self.tool_name = "TrimAl"
-        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
-        self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], 
-                           "CLUSTAL": ["aln"], 
-                           "PHYLIP": ["phy"],
-                           "NEXUS": ["nex", "nexus"]}
-        self.output_types = {"FASTA": ".fas"}
-        self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
-    
+        self.citation = []
+        self.citation_keys = ["capellagutierrez2009trimal"]
+        self.input_types = {
+            "FASTA": ["fas", "fna", "fa", "fasta"],
+            "CLUSTAL": ["aln"],
+            "PHYLIP": ["phy"],
+            "NEXUS": ["nex", "nexus"],
+        }
+        self.output_types = {"Trimmed alignment FASTA": ["fas"]}
+        self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+
     def handle_import_data(self, import_data):
-        """处理从YR-MPEA或Dataset Manager导入的数据"""
-        if isinstance(import_data, list):
-            # 判断是否为批量模式：[[SeqRecord, ...], [SeqRecord, ...]]
-            if len(import_data) > 0 and isinstance(import_data[0], list):
-                # 批量模式
-                self.batch_mode = True
-                self.temp_files = []
-                self.imported_files = []
-                
-                for i, seq_list in enumerate(import_data):
-                    temp_file = self.create_temp_file(suffix=f'_batch_{i}.fas')
-                    with open(temp_file, 'w') as f:
-                        for seq in seq_list:
-                            f.write(f">{seq.id}\n{seq.seq}\n")
-                    self.temp_files.append(temp_file)
-                    self.imported_files.append(temp_file)
-                    
-                # 更新UI显示
-                if hasattr(self, 'file_path_edit') and self.file_path_edit:
-                    self.file_path_edit.setText(f"{len(import_data)} files selected")
-                    self.file_path_edit.setEnabled(False)
-                    
+        files, batch = prepare_import(self, import_data)
+        self.batch_mode = batch
+        self.imported_files = files
+        self.import_file = files[0] if len(files) == 1 else None
+        if hasattr(self, "file_path_edit"):
+            if not files:
+                self.file_path_edit.clear()
+            elif len(files) == 1:
+                self.file_path_edit.setText(files[0])
             else:
-                # 单文件模式
-                self.batch_mode = False
-                # 创建临时文件来存储导入的序列数据
-                temp_file = self.create_temp_file(suffix='.fas')
-                with open(temp_file, 'w') as f:
-                    for seq in import_data:
-                        f.write(f">{seq.id}\n{seq.seq}\n")
-                self.temp_files.append(temp_file)
-                self.import_file = temp_file
-                self.imported_files = [temp_file]
-                
-                # 更新UI显示导入的文件
-                if hasattr(self, 'file_path_edit') and self.file_path_edit:
-                    self.file_path_edit.setText(temp_file)
-        else:
-            self.import_file = None
-            self.imported_files = []
+                self.file_path_edit.setText("%d files selected" % len(files))
+                self.file_path_edit.setEnabled(False)
+
+    def control_bindings(self):
+        """GUI controls mapped to the TrimAl command line."""
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input alignment", "kind": "path",
+             "cli": ["-in", "{value}"],
+             "notes": "Batch mode runs one TrimAl process per file."},
+            {"id": "mode", "widget": "mode_combo",
+             "label": "Trimming mode", "kind": "choice",
+             "choices": {
+                 "Gappyout (-gappyout)": "-gappyout",
+                 "Strict (-strict)": "-strict",
+                 "Strict Plus (-strictplus)": "-strictplus",
+                 "Automated 1 (-automated1)": "-automated1",
+             },
+             "cli": ["{value}"]},
+            {"id": "format", "widget": "output_format_combo",
+             "label": "Output format", "kind": "choice",
+             "choices": {
+                 "FASTA (-fasta)": "",
+                 "CLUSTAL (-clustal)": "-clustal",
+                 "NEXUS (-nexus)": "-nexus",
+                 "PHYLIP (-phylip)": "-phylip",
+                 "PHYLIP3.2 (-phylip3.2)": "-phylip3.2",
+                 "MEGA (-mega)": "-mega",
+                 "NBRF (-nbrf)": "-nbrf",
+             },
+             "cli": ["{value}"]},
+            {"id": "output_suffix", "widget": "output_suffix_edit",
+             "label": "Output suffix", "kind": "text", "cli": [],
+             "notes": "GUI-only; output is written beside the input."},
+        ]
 
     def setup_input_tab(self):
         """设置输入标签页"""
@@ -433,42 +437,14 @@ class TrimAlPlugin(BasePlugin):
         self.file_tags_container.setVisible(False)
 
     def setup_output_tab(self):
-        """设置输出预览标签页"""
-        layout = QVBoxLayout()
-        self.output_tab.setLayout(layout)
-        
-        # 说明文字
-        info_label = QLabel("Trimmed alignment results will be displayed here after analysis completes.")
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
-        
-        # 报告选择下拉框（用于批量处理）
-        report_layout = QHBoxLayout()
-        report_label = QLabel("Select Report:")
-        self.report_combo = QComboBox()
-        self.report_combo.setEnabled(False)
-        self.report_combo.currentIndexChanged.connect(self.on_report_changed)
-        report_layout.addWidget(report_label)
-        report_layout.addWidget(self.report_combo)
-        report_layout.addStretch()
-        layout.addLayout(report_layout)
-        
-        # 结果展示区域 - 使用WebEngineView显示HTML
-        from PyQt5.QtWebEngineWidgets import QWebEngineView
-        self.result_view = QWebEngineView()
-        self.result_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        layout.addWidget(self.result_view)
-        
-        # 输出文件信息
-        self.output_info = QLabel("Output file information will be displayed here")
-        layout.addWidget(self.output_info)
-    
+        setup_preview(self, "The trimmed FASTA alignment will appear here.")
+
     def setup_control_panel(self):
         """设置控制面板"""
         super().setup_control_panel()
         
         # 添加导入到平台按钮
-        self.import_to_platform_btn = QPushButton("Import to Current Platform")
+        self.import_to_platform_btn = QPushButton("Send to workspace")
         self.import_to_platform_btn.clicked.connect(self.import_to_platform)
         self.import_to_platform_btn.setVisible(False)  # 初始隐藏
         
@@ -497,18 +473,16 @@ class TrimAlPlugin(BasePlugin):
                 QMessageBox.warning(self, "Warning", "Please provide alignment files or sequence text!")
                 return None
             
-            if self.save_to_tmp.isChecked():
-                # Create temporary file
-                temp_file = self.create_temp_file(suffix='.fas')
-                with open(temp_file, 'w') as f:
-                    f.write(sequence_text)
-                return [temp_file]
-            
-            elif self.save_to_cwd.isChecked():
-                # directly use input paths
-                temp_file = self.import_file
-                return [temp_file]
-            
+            try:
+                records = list(SeqIO.parse(StringIO(sequence_text), "fasta"))
+            except Exception as exc:
+                QMessageBox.warning(self, "Invalid FASTA", str(exc))
+                return None
+            if len(records) < 2:
+                QMessageBox.warning(self, "Need more sequences", "Provide at least two aligned sequences.")
+                return None
+            return [records_temp(self, records, "pasted")]
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Prepare input files failed: {e}")
             return None
@@ -566,169 +540,143 @@ class TrimAlPlugin(BasePlugin):
             self.output_suffix_edit.setEnabled(False)
             self.output_suffix_edit.setVisible(False)
 
-    def display_results(self, output_files):
-        """在输出标签页中显示结果"""
-        if not output_files:
-            self.result_view.setHtml("<p>No output files generated.</p>")
-            return
-            
-        # 显示第一个HTML输出文件的内容
-        try:
-            html_file = getattr(self, 'current_html_files', [None])[0]
-            if html_file and os.path.exists(html_file):
-                # 加载HTML文件
-                from PyQt5.QtCore import QUrl
-                self.result_view.load(QUrl.fromLocalFile(html_file))
-            else:
-                # 如果没有HTML文件，则显示序列文件内容
-                with open(output_files[0], 'r') as f:
-                    content = f.read()
-                    self.result_view.setPlainText(content)
-        except Exception as e:
-            self.result_view.setHtml(f"<p>Error reading output file: {str(e)}</p>")
-        
-        # 更新输出信息
-        self.output_info.setText(f"Results from: {os.path.basename(output_files[0])}")
-    
     def run_analysis(self):
-        """运行TrimAl分析"""
         if self.is_running:
             return
-            
-        # 检查输入
-        if not self.imported_files and not self.sequence_text.toPlainText().strip() and not self.import_file:
-            QMessageBox.warning(self, "Warning", "Please provide alignment files or sequence text!")
+        if not self.tool_path or not Path(self.tool_path).is_file():
+            QMessageBox.critical(self, "Tool missing", "TrimAl executable not found.")
             return
-            
-        if not self.tool_path or not os.path.exists(self.tool_path):
-            QMessageBox.critical(self, "Error", "TrimAl executable file not found!")
-            return
-            
-        # 添加控制台消息
-        self.add_console_message("Starting TrimAl trimming...", "info")
-        
-        # 准备输入文件
         input_files = self.prepare_input_files()
         if not input_files:
             return
-            
-        # 更新UI状态
+        suffix = None
+        if self.save_to_cwd.isChecked():
+            suffix = self.output_suffix_edit.text()
+            if any(sep in suffix for sep in ("/", "\\")):
+                QMessageBox.warning(self, "Invalid suffix", "Suffix must not contain a path separator.")
+                return
+
+        self._payload = None
         self.is_running = True
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # 未知进度
-        
-        # 如果需要添加输出文件后缀，则设置suffix属性
-        suffix = None
-        if self.save_to_cwd.isChecked():
-            suffix = self.output_suffix_edit.text()
-        
-        # 在单独的线程中运行TrimAl
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setFormat("Running TrimAl...")
+        self.import_to_platform_btn.setEnabled(True)
+        self.import_to_platform_btn.setText("Send to workspace")
+        self.tab_widget.setCurrentIndex(2)
+
         self.analysis_thread = TrimAlThread(
-            self.tool_path, input_files, self.get_parameters(), self.imported_files, suffix=suffix
+            self.tool_path, input_files, self.get_parameters(),
+            self.imported_files, suffix=suffix, workdir=self.workdir,
         )
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
+        self.analysis_thread.result_ready.connect(self._on_result)
         self.analysis_thread.finished.connect(self.analysis_finished)
         self.analysis_thread.error.connect(self.analysis_error)
         self.analysis_thread.console_output.connect(self.add_console_message)
         self.analysis_thread.start()
-    
+
+    def _on_result(self, payload):
+        self._payload = payload
+
     def analysis_finished(self, output_files, html_files):
-        """分析完成处理"""
         self.is_running = False
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        
-        # 保存HTML报告文件
-        self.reports = html_files
-        self.update_report_combo()
-        
-        # 显示结果
-        if html_files:
-            self.show_current_report()
-            self.tab_widget.setCurrentIndex(1)  # 切换到输出预览标签页
-        
-        # 添加控制台消息
-        self.add_console_message("Trimming completed successfully!", "info")
-        QMessageBox.information(self, "Success", "Trimming completed successfully!")
-        
-        # 显示导入按钮（支持多种来源）
-        if self.import_from in ["YR_MPEA", "seq_viewer", "DATASET_MANAGER"]:
-            self.import_to_platform_btn.setVisible(True)
-        else:
-            self.import_to_platform_btn.setVisible(False)
-        
-        # 保存输出文件路径供导入使用
         self.alignment_output_files = output_files
-    
+        show_preview(self, output_files)
+        self.tab_widget.setCurrentIndex(1)
+        self.add_console_message("TrimAl trimming completed.", "info")
+        if self.result_has_consumer() or self.import_from in [
+            "YR_MPEA", "seq_viewer", "DATASET_MANAGER"
+        ]:
+            self.import_to_platform_btn.setVisible(True)
+        self.import_to_platform_btn.setEnabled(True)
+
     def analysis_error(self, error_message):
-        """分析错误处理"""
         self.is_running = False
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        
-        # 添加控制台消息
-        self.add_console_message(f"TrimAl failed: {error_message}", "error")
-        
-        QMessageBox.critical(self, "Error", f"TrimAl failed: {error_message}")
-    
+        self.add_console_message("TrimAl failed: %s" % error_message, "error")
+        QMessageBox.critical(self, "TrimAl failed", error_message)
+
     def stop_analysis(self):
-        """停止分析"""
-        if hasattr(self, 'analysis_thread') and self.analysis_thread.isRunning():
-            self.analysis_thread.terminate()
-            self.analysis_thread.wait()
-            
+        if hasattr(self, "analysis_thread") and self.analysis_thread.isRunning():
+            thread = self.analysis_thread
+            for signal in (
+                thread.progress, thread.result_ready, thread.finished,
+                thread.error, thread.console_output,
+            ):
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
         self.is_running = False
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        
-        QMessageBox.information(self, "Stopped", "TrimAl has been aborted.")
-        
+        self.add_console_message("TrimAl trimming stopped by user.", "warning")
+
+    def _build_result_spec(self):
+        if not getattr(self, "alignment_output_files", None):
+            raise ValueError("No TrimAl output is available.")
+        if self.output_format_combo.currentIndex() != 0:
+            raise ValueError(
+                "Sending to the workspace requires FASTA output. "
+                "Switch Output format to FASTA and rerun."
+            )
+        suffix = (self.output_suffix_edit.text()
+                  if self.save_to_cwd.isChecked() else "")
+        return build_result(
+            tool="TrimAl",
+            source="trimal",
+            output_files=self.alignment_output_files,
+            input_files=self.imported_files,
+            parameters=self.get_parameters(),
+            mode=self.mode_combo.currentText(),
+            batch=self.batch_mode,
+            suffix=suffix,
+        )
+
     def import_to_platform(self):
-        """将修剪结果导入到当前平台"""
-        if not hasattr(self, 'alignment_output_files') or not self.alignment_output_files:
-            QMessageBox.warning(self, "Warning", "No trimming results to import.")
+        if not getattr(self, "alignment_output_files", None):
+            QMessageBox.warning(self, "No result", "Run TrimAl first.")
             return
-            
+        if self.result_has_consumer():
+            try:
+                result = self._build_result_spec()
+            except Exception as exc:
+                QMessageBox.critical(self, "Result failed", str(exc))
+                return
+            if self.export_result(result):
+                self.import_to_platform_btn.setEnabled(False)
+                self.import_to_platform_btn.setText("Sent to workspace")
+                QMessageBox.information(
+                    self, "Success", "Trimmed alignment sent to the current workspace."
+                )
+            return
+
+        # Legacy fallback for external callers.
         try:
-            # 判断是否为批量模式
-            is_batch_mode = getattr(self, 'batch_mode', False)
-            
-            if is_batch_mode:
-                # 批量模式：保持分组结构 [[SeqRecord, ...], [SeqRecord, ...]]
-                batch_sequences = []
-                for output_file in self.alignment_output_files:
-                    file_sequences = list(SeqIO.parse(output_file, "fasta"))
-                    batch_sequences.append(file_sequences)
-                self.batch_import_alignment_signal.emit(batch_sequences)
-                
+            if self.batch_mode:
+                self.batch_import_alignment_signal.emit([
+                    list(SeqIO.parse(path, "fasta"))
+                    for path in self.alignment_output_files
+                ])
             else:
-                # 单文件模式：扁平化列表 [SeqRecord, SeqRecord, ...]
                 sequences = []
-                for output_file in self.alignment_output_files:
-                    # 读取FASTA文件
-                    for record in SeqIO.parse(output_file, "fasta"):
-                        sequences.append(record)
-                
-                if not sequences:
-                    QMessageBox.warning(self, "Warning", "No sequences found in trimming results.")
-                    return
-                    
-                # 发送信号将数据导入到平台
-                self.import_alignment_signal.emit(sequences)
-            
-            # 显示成功消息
-            if is_batch_mode:
-                QMessageBox.information(self, "Success", f"Successfully imported {len(self.alignment_output_files)} trimmed files to the platform.")
-            else:
-                QMessageBox.information(self, "Success", f"Successfully imported {len(sequences)} sequences to the platform.")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to import trimming results: {str(e)}")
+                for path in self.alignment_output_files:
+                    sequences.extend(list(SeqIO.parse(path, "fasta")))
+                if sequences:
+                    self.import_alignment_signal.emit(sequences)
+        except Exception as exc:
+            QMessageBox.critical(self, "Import failed", str(exc))
 
     def show_current_report(self):
         """
@@ -1080,5 +1028,8 @@ class TrimAlPluginEntry:
         self.config = config
         self.plugin_path = plugin_path
     
-    def run(self, import_from=None, import_data=None):
-        return TrimAlPlugin(import_from, import_data)
+    def run(self, import_from=None, import_data=None, workdir=None, **kwargs):
+        return TrimAlPlugin(
+            import_from=import_from, import_data=import_data,
+            workdir=workdir, **kwargs,
+        )

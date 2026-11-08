@@ -43,12 +43,19 @@ class PdGuidePlugin(BasePlugin):
     """PD-Guide插件主类"""
     
     def __init__(self, import_from=None, import_data=None):
+        # 首先创建控制面板
+        self.control_panel = PdGuideUI()
+        
+        # 调用父类初始化（会调用self.init_plugin_info()、self.config()和self.init_ui()）
         super().__init__(import_from, import_data)
     
     def init_plugin_info(self):
         """初始化插件信息"""
+        # 必须在调用父类初始化之前设置plugin_path，指向YR_MPE目录
+        self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+        
         self.plugin_name = "PD-Guide"
-        self.tool_name = "pdguide"
+        self.tool_name = "LSD2"  # 使用LSD2作为主要工具名称，这样BasePlugin的config()会自动查找LSD2
         self.input_types = {
             "FASTA": ["fas", "fna", "fa", "fasta"],
             "Newick Tree": ["tree", "nwk", "newick"]
@@ -59,45 +66,40 @@ class PdGuidePlugin(BasePlugin):
         }
         self.citation = []  # citation text lives in YR_MPE/citations/*.bib
         # PD-Guide composes LSD2 (from config) with IQ-TREE and MCMCTree.
-        self.citation_keys = ["minh2020iqtree", "yang2007paml", "dosreis2011approximate"]
+        self.citation_keys = ["wong2026iqtree", "yang2007paml", "dosreis2011approximate"]
     
     def get_tool_path(self, tool_name):
-        """获取工具可执行文件路径"""
-        try:
+        """获取工具路径（使用BasePlugin的标准方式）"""
+        # LSD2路径已经通过父类config()方法设置在self.tool_path中
+        if tool_name.lower() == "lsd2":
+            return self.tool_path
+        elif tool_name.lower() in ["iq-tree 3", "iqtree3", "iqtree"]:
+            # IQ-TREE路径需要在配置文件中查找
             config_path = os.path.join(self.plugin_path, "config.json")
-            if not os.path.exists(config_path):
-                return None
-            
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config_data = json.load(f)
-            
-            for tool in config_data:
-                if tool.get("name", "").lower() == tool_name.lower():
-                    tool_path = tool.get("path", "")
-                    # 处理相对路径
-                    if not os.path.isabs(tool_path):
-                        tool_path = os.path.join(self.plugin_path, tool_path.lstrip("/\\"))
-                    
-                    # 检查文件是否存在
-                    if os.path.exists(tool_path):
-                        return tool_path
-            
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        config_data = json.load(f)
+                    for tool in config_data:
+                        if tool.get("name").lower() in ["iq-tree 3", "iqtree3", "iqtree"]:
+                            tool_path = os.path.join(self.plugin_path, tool["path"].lstrip("/").lstrip("\\"))
+                            if os.path.exists(tool_path):
+                                return tool_path
+                except Exception as e:
+                    print(f"Failed to load IQ-TREE config: {e}")
             return None
-            
-        except Exception as e:
-            print(f"Error getting tool path for {tool_name}: {e}")
+        else:
             return None
     
     def config(self):
         """检查插件配置"""
-        # 检查LSD2是否可用
-        lsd2_path = self.get_tool_path("lsd2")
-        if not lsd2_path:
+        # 首先调用BasePlugin的config()方法检查LSD2
+        if not super().config():
             return False
         
         # 检查IQ-TREE是否可用
-        iqtree_path = self.get_tool_path("iqtree")
-        if not iqtree_path:
+        iqtree_path = self.get_tool_path("iq-tree 3")
+        if not iqtree_path or not os.path.exists(iqtree_path):
             return False
             
         return True
@@ -115,47 +117,14 @@ class PdGuidePlugin(BasePlugin):
     
     def init_ui(self):
         """初始化UI"""
-        # 创建主布局
-        main_layout = QVBoxLayout()
-        self.setLayout(main_layout)
+        # 调用父类的init_ui方法来初始化基本的UI结构（包括标签页和控制台）
+        super().init_ui()
         
-        # 创建标签页
-        self.tabs = QTabWidget()
-        main_layout.addWidget(self.tabs)
-        
-        # 控制面板标签页
-        self.control_panel = PdGuideUI()
-        self.tabs.addTab(self.control_panel, "Control Panel")
+        # 在input_tab中添加控制面板
+        self.input_tab.layout().addWidget(self.control_panel)
         
         # 连接信号
         self.control_panel.infer_tree_button.clicked.connect(self.on_infer_tree_clicked)
-        
-        # 控制台标签页
-        self.console_tab = QWidget()
-        console_layout = QVBoxLayout()
-        self.console_tab.setLayout(console_layout)
-        
-        self.console_text = QTextEdit()
-        self.console_text.setReadOnly(True)
-        console_layout.addWidget(self.console_text)
-        
-        self.tabs.addTab(self.console_tab, "Console")
-        
-        # 添加运行控制按钮
-        button_layout = QHBoxLayout()
-        self.run_button = QPushButton("Run Analysis")
-        self.stop_button = QPushButton("Stop")
-        self.stop_button.setEnabled(False)
-        
-        button_layout.addWidget(self.run_button)
-        button_layout.addWidget(self.stop_button)
-        button_layout.addStretch()
-        
-        main_layout.addLayout(button_layout)
-        
-        # 连接按钮信号
-        self.run_button.clicked.connect(self.run_analysis)
-        self.stop_button.clicked.connect(self.stop_analysis)
     
     def on_infer_tree_clicked(self):
         """处理Infer tree with seqs按钮点击"""
@@ -164,7 +133,7 @@ class PdGuidePlugin(BasePlugin):
             return
         
         # 获取IQ-TREE路径
-        iqtree_path = self.get_tool_path("iqtree")
+        iqtree_path = self.get_tool_path("iq-tree 3")
         if not iqtree_path:
             QMessageBox.warning(self, "IQ-TREE Not Found", "Please configure IQ-TREE path in settings.")
             return
@@ -304,9 +273,17 @@ class PdGuidePlugin(BasePlugin):
     
     def run_analysis(self):
         """运行分析"""
-        # 这里可以根据当前选择的模式决定运行哪个分析
-        if self.control_panel.mode_combo.currentText() == "LSD2 Dating":
+        # 根据当前选择的方法决定运行哪个分析
+        selected_method = self.control_panel.methods_combo.currentText()
+        
+        if selected_method == "LSD2":
             self.on_run_lsd2_clicked()
+        elif selected_method == "PhyloBayes":
+            self.add_console_message("PhyloBayes analysis not yet implemented", "warning")
+        elif selected_method == "MrBayes":
+            self.add_console_message("MrBayes analysis not yet implemented", "warning")
+        elif selected_method == "MCMCTree":
+            self.add_console_message("MCMCTree analysis not yet implemented", "warning")
         else:
             self.on_infer_tree_clicked()
     
@@ -323,14 +300,11 @@ class PdGuidePlugin(BasePlugin):
     
     def update_progress(self, message):
         """更新进度"""
-        self.append_console(message, "info")
+        self.add_console_message(message, "info")
     
     def append_console(self, message, level="info"):
-        """添加控制台消息"""
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        formatted_message = f"[{timestamp}] {message}"
-        self.console_text.append(formatted_message)
-        self.console_text.moveCursor(QTextCursor.End)
+        """添加控制台消息（兼容性方法）"""
+        self.add_console_message(message, level)
     
     def on_iqtree_finished(self, output_files, html_files):
         """IQ-TREE完成回调"""

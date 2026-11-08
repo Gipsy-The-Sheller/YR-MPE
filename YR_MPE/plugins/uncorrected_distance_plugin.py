@@ -20,6 +20,7 @@
 import os
 import sys
 import tempfile
+from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
 # 添加项目根目录到路径
@@ -37,7 +38,9 @@ from PyQt5.QtGui import QFont, QTextCursor, QIcon
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from ..templates.base_plugin_ui import BasePlugin
+from ..templates.base_process_thread import BaseProcessThread
 
 # 相对导入距离计算工具
 distance_utils_path = os.path.join(project_root, 'YR_MPE', 'plugins', 'components', 'methods')
@@ -173,6 +176,58 @@ class AdvancedRulesDialog(QDialog):
         return selected
 
 
+class UncorrectedDistanceThread(BaseProcessThread):
+    """Compute p-distance matrices off the GUI thread."""
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, input_files, parameters, imported_files=None, workdir=None):
+        super().__init__("", input_files, parameters, imported_files,
+                         workdir=workdir)
+
+    def get_tool_name(self):
+        return "Uncorrected p-distance"
+
+    def execute_commands(self):
+        results = []
+        total = len(self.input_files)
+        for index, input_file in enumerate(self.input_files):
+            if not self.is_running:
+                break
+            self.progress.emit("Processing file %d/%d..." % (index + 1, total))
+            self.console_output.emit(
+                "Processing file %d/%d: %s"
+                % (index + 1, total, os.path.basename(input_file)),
+                "info",
+            )
+            sequences = list(SeqIO.parse(input_file, "fasta"))
+            is_valid, message = validate_sequences(sequences)
+            if not is_valid:
+                self.console_output.emit("Validation error: %s" % message, "error")
+                continue
+            distance_matrix = calculate_distance_matrix(
+                sequences,
+                gap_treatment=self.parameters.get("gap_treatment", "pairwise"),
+                substitution_filter=self.parameters.get("substitution_filter"),
+            )
+            sequence_names = [sequence.id for sequence in sequences]
+            results.append({
+                "filename": "%s_uncorrected_distance.dist"
+                            % os.path.splitext(os.path.basename(input_file))[0],
+                "content": format_distance_matrix(distance_matrix, sequence_names),
+                "matrix": distance_matrix,
+                "sequence_names": sequence_names,
+            })
+            self.console_output.emit(
+                "Calculated distance matrix for %d sequences" % len(sequences),
+                "info",
+            )
+        if not results:
+            raise RuntimeError("No distance matrix was produced.")
+        self.result_ready.emit(results)
+        self.finished.emit([], [])
+
+
 class UncorrectedDistancePlugin(BasePlugin):
     """未校正遗传距离(p-distance)计算插件"""
     
@@ -180,22 +235,22 @@ class UncorrectedDistancePlugin(BasePlugin):
     import_alignment_signal = pyqtSignal(list)  # 导入比对结果信号
     export_distance_result_signal = pyqtSignal(dict)  # 导出距离矩阵信号
     
-    def __init__(self, import_from=None, import_data=None):
-        """初始化未校正距离插件"""
-        super().__init__(import_from, import_data)
-        
-        # 初始化用于存储计算结果的属性
+    def __init__(self, import_from=None, import_data=None, **kwargs):
         self.calculated_distance_results = []
-        
-        # 特别处理YR-MPEA导入的数据
-        if import_from == "YR_MPEA" and import_data is not None:
+        self._payload = None
+        super().__init__(import_from, import_data, **kwargs)
+        if import_data is not None and (
+            not isinstance(import_data, list) or import_from != "YR_MPEA"
+        ):
             self.handle_import_data(import_data)
-    
+        self.run_button.setText("Calculate p-distance")
+
     def init_plugin_info(self):
         """初始化插件信息"""
         self.plugin_name = "Uncorrected Distance (p-distance)"
         self.tool_name = "Built-in Python Implementation"
-        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        self.citation = []
+        self.citation_keys = ["nei2000molecular"]
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], "NEXUS": ["nex", "nexus"]}
         self.output_types = {"Distance Matrix": ".dist"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
@@ -347,7 +402,7 @@ class UncorrectedDistancePlugin(BasePlugin):
         super().setup_control_panel()
         
         # 然后添加导入到平台按钮
-        self.import_to_platform_btn = QPushButton("Import to Current Platform")
+        self.import_to_platform_btn = QPushButton("Send to workspace")
         self.import_to_platform_btn.clicked.connect(self.import_to_platform)
         self.import_to_platform_btn.setVisible(False)  # 初始隐藏
         
@@ -513,80 +568,60 @@ class UncorrectedDistancePlugin(BasePlugin):
     
     def run_analysis(self):
         """运行距离分析"""
-        # 检查输入
         if not self.imported_files and not self.sequence_text.toPlainText().strip():
             QMessageBox.warning(self, "Warning", "Please provide alignment files or sequence text!")
             return
-            
-        # 添加控制台消息
         self.add_console_message("Starting uncorrected distance calculation...", "info")
-        
-        # 准备输入文件
         input_files = self.prepare_input_files()
         if not input_files:
             return
-        
-        # 获取参数
         params = self.get_parameters()
-        
-        # 设置运行状态
+
+        self.calculated_distance_results = []
+        self._result_payload = None
         self.is_running = True
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # 未知进度
-        self.import_to_platform_btn.setVisible(False)  # 分析期间隐藏导入按钮
-        
-        try:
-            # 直接在内存中存储计算结果，而不是创建临时文件
-            self.calculated_distance_results = []
-            
-            for i, input_file in enumerate(input_files):
-                if not self.is_running:
-                    break
-                
-                self.progress_bar.setFormat(f"Processing file {i+1}/{len(input_files)}...")
-                self.add_console_message(f"Processing file {i+1}/{len(input_files)}: {os.path.basename(input_file)}", "info")
-                
-                # 读取序列
-                sequences = list(SeqIO.parse(input_file, "fasta"))
-                
-                # 验证序列
-                is_valid, msg = validate_sequences(sequences)
-                if not is_valid:
-                    self.add_console_message(f"Validation error: {msg}", "error")
+        self.progress_bar.setRange(0, 0)
+        self.import_to_platform_btn.setVisible(False)
+
+        self.analysis_thread = UncorrectedDistanceThread(
+            input_files, params, self.imported_files, workdir=self.workdir
+        )
+        self.analysis_thread.progress.connect(self._on_progress)
+        self.analysis_thread.result_ready.connect(self._on_result)
+        self.analysis_thread.console_output.connect(self.add_console_message)
+        self.analysis_thread.finished.connect(self.analysis_finished)
+        self.analysis_thread.error.connect(self.analysis_error)
+        self.analysis_thread.start()
+
+    def _on_progress(self, text):
+        self.progress_bar.setFormat(text)
+
+    def _on_result(self, payload):
+        self._result_payload = payload
+
+    def stop_analysis(self):
+        thread = getattr(self, "analysis_thread", None)
+        if thread is not None and thread.isRunning():
+            for signal_name in ("progress", "result_ready", "finished",
+                                "error", "console_output"):
+                signal = getattr(thread, signal_name, None)
+                if signal is None:
                     continue
-                
-                # 计算距离矩阵
-                distance_matrix = calculate_distance_matrix(
-                    sequences, 
-                    gap_treatment=params['gap_treatment'],
-                    substitution_filter=params.get('substitution_filter')
-                )
-                
-                # 直接保存计算结果到内存
-                sequence_names = [seq.id for seq in sequences]
-                formatted_matrix = format_distance_matrix(distance_matrix, sequence_names)
-                
-                result_data = {
-                    'filename': f"{os.path.splitext(os.path.basename(input_file))[0]}_uncorrected_distance.dist",
-                    'content': formatted_matrix,
-                    'matrix': distance_matrix,
-                    'sequence_names': sequence_names
-                }
-                
-                self.calculated_distance_results.append(result_data)
-                self.add_console_message(f"Calculated distance matrix for {len(sequences)} sequences", "info")
-                
-                # 显示结果预览
-                self.display_results_preview(distance_matrix, sequence_names)
-            
-            # 分析完成，重置UI状态并显示导入按钮
-            self.analysis_finished([], [])
-            
-        except Exception as e:
-            self.analysis_error(str(e))
-    
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
+        self.is_running = False
+        self.run_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.progress_bar.setVisible(False)
+        self.add_console_message("Distance calculation stopped by user.", "warning")
+
     def display_results_preview(self, distance_matrix, sequence_names):
         """显示结果预览"""
         try:
@@ -620,12 +655,15 @@ class UncorrectedDistancePlugin(BasePlugin):
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.progress_bar.setFormat("")
-        
-        # 显示完成消息
+
+        self.calculated_distance_results = list(self._result_payload or [])
+        if self.calculated_distance_results:
+            first = self.calculated_distance_results[0]
+            self.display_results_preview(first["matrix"], first["sequence_names"])
+
         QMessageBox.information(self, "Completed", "Distance calculation completed successfully!")
-        
-        # 分析完成后显示导入按钮（如果有计算结果）
-        if hasattr(self, 'calculated_distance_results') and self.calculated_distance_results:
+
+        if self.calculated_distance_results:
             self.import_to_platform_btn.setVisible(True)
             self.add_console_message("Analysis completed. Click 'Import to Current Platform' to export results.", "info")
     
@@ -640,53 +678,74 @@ class UncorrectedDistancePlugin(BasePlugin):
         
         QMessageBox.critical(self, "Error", f"Analysis failed: {error_msg}")
     
-    def prepare_platform_import(self):
-        """准备将结果导入平台的数据"""
-        
-        if not hasattr(self, 'calculated_distance_results') or not self.calculated_distance_results:
-            QMessageBox.warning(self, "Warning", "No distance results to import.")
-            return False
-        
-        try:
-            # 直接使用内存中的计算结果
-            distance_matrices = []
-            for result in self.calculated_distance_results:
-                distance_matrices.append({
-                    'filename': result['filename'],
-                    'content': result['content']
-                })
-            
-            if not distance_matrices:
-                QMessageBox.warning(self, "Warning", "No distance matrices found in results.")
-                return False
-            
-            # 准备要发送的数据
-            export_data = {
-                'type': 'distance_matrix',
-                'data': distance_matrices,
-                'source_plugin': 'Uncorrected Distance'
-            }
-            
-            # 发送信号将数据导入到平台
-            self.export_distance_result_signal.emit(export_data)
-            
-            # 显示成功消息
-            QMessageBox.information(self, "Success", f"Successfully imported {len(distance_matrices)} distance matrix(es) to the platform.")
-            return True
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to import distance matrices: {str(e)}")
-            return False
+    def _build_result_spec(self):
+        if not self.calculated_distance_results:
+            raise ValueError("No p-distance result is available.")
+        items = []
+        artifacts = []
+        for result in self.calculated_distance_results:
+            path = Path(self.create_temp_file(suffix=".dist"))
+            path.write_text(result["content"], encoding="utf-8")
+            self.temp_files.append(str(path))
+            artifacts.append(str(path))
+            items.append(DatasetItemSpec(
+                loci_name=Path(result["filename"]).stem,
+                item_type="distance",
+                file_path=str(path),
+                format="phylip",
+                data={
+                    "labels": list(result.get("sequence_names", [])),
+                    "matrix": result.get("matrix", []),
+                },
+                metadata={
+                    "source": self.plugin_name,
+                    "tool": "Uncorrected p-distance",
+                },
+            ))
+        dataset = DatasetSpec(
+            name="p-distance",
+            items=items,
+            description="%d uncorrected distance matrix(es)" % len(items),
+            source="p_distance",
+            summary={"matrices": len(items)},
+            metadata={
+                "parameters": self.get_parameters(),
+                "input": self.imported_files[0] if len(self.imported_files) == 1 else "",
+            },
+        )
+        return ResultSpec(source="p_distance", datasets=[dataset], artifacts=artifacts)
 
     def import_to_platform(self):
-        """将结果导入到当前平台"""
-        success = self.prepare_platform_import()
-        if success:
-            # 强制更新UI
-            self.import_to_platform_btn.update()
-            self.add_console_message("Results imported to platform successfully.", "info")
-        return success
-    
+        if not self.calculated_distance_results:
+            QMessageBox.warning(self, "No result", "Calculate a distance matrix first.")
+            return
+        if self.result_has_consumer():
+            try:
+                result = self._build_result_spec()
+            except Exception as exc:
+                QMessageBox.critical(self, "Export failed", str(exc))
+                return
+            if self.export_result(result):
+                self.import_to_platform_btn.setEnabled(False)
+                self.import_to_platform_btn.setText("Sent to workspace")
+                QMessageBox.information(
+                    self, "Success",
+                    "Distance matrix sent to the current workspace.",
+                )
+            return
+        # Legacy fallback for external callers.
+        matrices = []
+        for result in self.calculated_distance_results:
+            matrices.append({
+                "filename": result["filename"],
+                "content": result["content"],
+            })
+        self.export_distance_result_signal.emit({
+            "type": "distance_matrix",
+            "data": matrices,
+            "source_plugin": "Uncorrected Distance",
+        })
+
     def handle_import_data(self, import_data):
         """处理从YR-MPEA导入的数据"""
         if isinstance(import_data, dict) and 'type' in import_data and import_data['type'] == 'alignment':
@@ -748,5 +807,8 @@ class UncorrectedDistancePluginEntry:
         self.config = config
         self.plugin_path = plugin_path
     
-    def run(self, import_from=None, import_data=None):
-        return UncorrectedDistancePlugin(import_from=import_from, import_data=import_data)
+    def run(self, import_from=None, import_data=None, workdir=None, **kwargs):
+        return UncorrectedDistancePlugin(
+            import_from=import_from, import_data=import_data,
+            workdir=workdir, **kwargs,
+        )

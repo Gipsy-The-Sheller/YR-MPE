@@ -26,10 +26,12 @@ from PyQt5.QtGui import QIcon, QFont, QColor, QBrush
 import tempfile
 import os
 import re
+from pathlib import Path
 from typing import List, Optional, Dict
 from Bio import SeqIO
 import json
 
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
 from .components.model_parameter_parser import parse_iqtree_file, validate_dna_sequences, get_q_matrix_color_scale, format_q_matrix_for_display
@@ -37,10 +39,15 @@ import subprocess
 
 
 class ModelParameterThread(BaseProcessThread):
-    """Model Parameter Estimation线程类"""
-    
-    def __init__(self, tool_path, input_files, parameters, imported_files=None):
-        super().__init__(tool_path, input_files, parameters, imported_files)
+    """Estimate model parameters with IQ-TREE and return .iqtree reports."""
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, input_files, parameters,
+                 imported_files=None, workdir=None):
+        super().__init__(
+            tool_path, input_files, parameters, imported_files, workdir=workdir
+        )
     
     def get_tool_name(self):
         """返回工具名称"""
@@ -68,11 +75,14 @@ class ModelParameterThread(BaseProcessThread):
                 ]
                 
                 # 执行命令
-                result = self.execute_command(cmd)
-                
+                result = self.execute_command(cmd, cwd=str(Path(input_file).parent))
+                detail = (result.stderr or "").strip()
                 if result.returncode != 0:
-                    self.error.emit(f"IQ-TREE execution failed for file {i+1}: {result.stderr}")
-                    return
+                    raise RuntimeError(
+                        "IQ-TREE failed for %s%s"
+                        % (os.path.basename(input_file),
+                           ": " + detail if detail else "")
+                    )
                 
                 # 查找生成的.iqtree文件
                 iqtree_file = input_file + ".iqtree"
@@ -82,10 +92,11 @@ class ModelParameterThread(BaseProcessThread):
                     self.console_output.emit(f"Warning: Could not find .iqtree file for {input_file}", "warning")
             
             self.progress.emit("Model parameter estimation completed")
+            self.result_ready.emit({"output_files": output_files})
             self.finished.emit(output_files, [])
             
-        except Exception as e:
-            self.error.emit(f"Model parameter estimation exception: {str(e)}")
+        except Exception as exc:
+            self.error.emit("Model parameter estimation exception: %s" % exc)
 
 
 class ModelParameterPlugin(BasePlugin):
@@ -95,22 +106,22 @@ class ModelParameterPlugin(BasePlugin):
     import_alignment_signal = pyqtSignal(list)  # 导入比对结果信号
     export_model_result_signal = pyqtSignal(dict)  # 导出模型结果信号
     
-    def __init__(self, import_from=None, import_data=None):
-        """初始化Model Parameter Estimation插件"""
-        super().__init__(import_from, import_data)
-        
-        # 存储解析的参数数据
-        self.parsed_parameters = {}  # {file_path: parameters_dict}
-        
-        # 特别处理YR-MPEA导入的数据
-        if import_from == "YR_MPEA" and import_data is not None:
+    def __init__(self, import_from=None, import_data=None, **kwargs):
+        self.parsed_parameters = {}
+        self._payload = None
+        super().__init__(import_from, import_data, **kwargs)
+        if import_data is not None and (
+            not isinstance(import_data, list) or import_from != "YR_MPEA"
+        ):
             self.handle_import_data(import_data)
-        
+        self.run_button.setText("Run Model Parameters")
+
     def init_plugin_info(self):
         """初始化插件信息"""
         self.plugin_name = "Estimate Model Parameters (DNA, ML)"
         self.tool_name = "IQ-TREE 3"
-        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        self.citation = []
+        self.citation_keys = ["wong2026iqtree"]
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], "PHYLIP": ["phy"]}
         self.output_types = {"IQ-TREE Report": ".iqtree"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
@@ -139,6 +150,49 @@ class ModelParameterPlugin(BasePlugin):
         else:
             self.import_file = None
             self.imported_files = []
+
+    def control_bindings(self):
+        """GUI controls mapped to the IQ-TREE model-parameter command."""
+        choices = {}
+        for index in range(self.model_combo.count()):
+            text = self.model_combo.itemText(index)
+            if text == "auto":
+                choices[text] = "MFP"
+            elif " (" in text and text.endswith(")"):
+                choices[text] = text.split(" (")[0]
+            else:
+                choices[text] = text
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input alignment", "kind": "path",
+             "cli": ["-s", "{value}"],
+             "notes": "Batch mode runs one IQ-TREE process per file."},
+            {"id": "model", "widget": "model_combo",
+             "label": "Substitution model", "kind": "choice",
+             "choices": choices,
+             "cli": ["-m", "{value}"],
+             "notes": "auto maps to MFP; rate suffixes are appended."},
+            {"id": "gamma", "widget": "gamma_checkbox",
+             "label": "Discrete Gamma", "kind": "bool",
+             "cli": [], "notes": "Appends +G{n} to the model string."},
+            {"id": "gamma_categories", "widget": "gamma_spinbox",
+             "label": "Gamma categories", "kind": "int",
+             "cli": [], "enabled_by": "gamma_checkbox",
+             "notes": "Appended as +G{n} only when +G is enabled."},
+            {"id": "invariant", "widget": "invar_checkbox",
+             "label": "Invariant sites", "kind": "bool", "cli": [],
+             "notes": "Appends +I to the model string."},
+            {"id": "empirical", "widget": "empirical_checkbox",
+             "label": "Empirical frequencies", "kind": "bool", "cli": [],
+             "notes": "Appends +F to the model string."},
+            {"id": "threads", "widget": "threads_spinbox",
+             "label": "Threads", "kind": "int",
+             "cli": ["-nt", "{value}"], "omit_values": [1]},
+            {"id": "load_iqtree", "widget": "direct_iqtree_checkbox",
+             "label": "Load existing .iqtree", "kind": "bool", "cli": [],
+             "notes": "GUI-only: parses existing reports instead of running "
+                      "IQ-TREE."},
+        ]
 
     def setup_input_tab(self):
         """设置输入标签页"""
@@ -749,10 +803,12 @@ class ModelParameterPlugin(BasePlugin):
         
         # 创建并启动线程
         self.analysis_thread = ModelParameterThread(
-            self.tool_path, input_files, self.get_parameters(), self.imported_files
+            self.tool_path, input_files, self.get_parameters(), self.imported_files,
+            workdir=self.workdir,
         )
         
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
+        self.analysis_thread.result_ready.connect(self._on_result)
         self.analysis_thread.finished.connect(self.analysis_finished)
         self.analysis_thread.error.connect(self.analysis_error)
         self.analysis_thread.console_output.connect(self.add_console_message)
@@ -782,6 +838,9 @@ class ModelParameterPlugin(BasePlugin):
         
         self.add_console_message(f"Parsed {len(self.parsed_parameters)} file(s)", "info")
     
+    def _on_result(self, payload):
+        self._payload = payload
+
     def analysis_finished(self, output_files, html_files):
         """分析完成处理"""
         self.is_running = False
@@ -804,11 +863,12 @@ class ModelParameterPlugin(BasePlugin):
         # 切换到输出标签页
         self.tab_widget.setCurrentIndex(1)
         
+        self.analysis_output_files = output_files
         # 添加控制台消息
         self.add_console_message(f"Model parameter estimation completed! Found {len(output_files)} result file(s)", "info")
         
         # 显示导入按钮（仅在从平台导入数据时显示）
-        if self.import_from == "YR_MPEA":
+        if self.import_from == "YR_MPEA" or self.result_has_consumer():
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)
@@ -1033,10 +1093,81 @@ class ModelParameterPlugin(BasePlugin):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Export failed: {e}")
     
+    def stop_analysis(self):
+        if hasattr(self, "analysis_thread") and self.analysis_thread.isRunning():
+            thread = self.analysis_thread
+            for signal in (
+                thread.progress, thread.result_ready, thread.finished,
+                thread.error, thread.console_output,
+            ):
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
+        self.is_running = False
+        self.run_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.progress_bar.setVisible(False)
+        self.add_console_message("Model parameter estimation stopped by user.", "warning")
+
+    def _build_result_spec(self):
+        files = list(getattr(self, "analysis_output_files", []) or [])
+        if not files:
+            files = list(self.parsed_parameters)
+        if not files:
+            raise ValueError("No IQ-TREE model parameter report is available.")
+        items = []
+        for path in files:
+            params = self.parsed_parameters.get(path)
+            if params is None:
+                params = parse_iqtree_file(path) or {}
+            items.append(DatasetItemSpec(
+                loci_name=Path(path).stem,
+                item_type="model",
+                file_path=str(path),
+                format="iqtree",
+                data={"parameters": params},
+                metadata={"source": self.plugin_name, "tool": "IQ-TREE 3"},
+            ))
+        dataset = DatasetSpec(
+            name="Model parameters",
+            items=items,
+            description="%d estimated model report(s)" % len(items),
+            source="model_parameters",
+            summary={"reports": len(items)},
+            metadata={
+                "input": self.imported_files[0] if len(self.imported_files) == 1 else "",
+                "parameters": self.get_parameters()
+                if isinstance(self.get_parameters(), list) else {},
+            },
+        )
+        return ResultSpec(
+            source="model_parameters",
+            datasets=[dataset],
+            artifacts=[str(path) for path in files],
+        )
+
     def import_to_platform(self):
-        """导入到当前平台"""
-        # TODO: 实现导入到平台的功能
-        self.add_console_message("Import to platform functionality not yet implemented", "warning")
+        if self.result_has_consumer():
+            try:
+                result = self._build_result_spec()
+            except Exception as exc:
+                QMessageBox.critical(self, "Export failed", str(exc))
+                return
+            if self.export_result(result):
+                self.import_to_platform_btn.setEnabled(False)
+                self.import_to_platform_btn.setText("Sent to workspace")
+                QMessageBox.information(
+                    self, "Success",
+                    "Model parameters sent to the current workspace.",
+                )
+            return
+        self.add_console_message(
+            "No workspace result channel is connected; use Export to CSV/JSON.",
+            "warning",
+        )
 
 
 class ModelParameterPluginEntry:
@@ -1046,5 +1177,8 @@ class ModelParameterPluginEntry:
         self.config = config
         self.plugin_path = plugin_path
     
-    def run(self, import_from=None, import_data=None):
-        return ModelParameterPlugin(import_from, import_data)
+    def run(self, import_from=None, import_data=None, workdir=None, **kwargs):
+        return ModelParameterPlugin(
+            import_from=import_from, import_data=import_data,
+            workdir=workdir, **kwargs,
+        )

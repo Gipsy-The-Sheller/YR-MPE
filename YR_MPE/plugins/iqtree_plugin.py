@@ -26,9 +26,13 @@ from PyQt5.QtGui import QFont, QTextCursor, QIcon
 import tempfile
 import os
 import re
+from pathlib import Path
 from typing import List, Optional, Dict
 from Bio import SeqIO
 
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
+from .components.alignment_common import collect_partition_sequences
+from .components.model_parameter_parser import parse_iqtree_file
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
 import subprocess
@@ -40,10 +44,15 @@ from .iqtree_partition_thread import IQTreePartitionThread
 
 
 class IQTreeThread(BaseProcessThread):
-    """IQ-TREE系统发育推断线程类"""
-    
-    def __init__(self, tool_path, input_files, parameters, imported_files=None):
-        super().__init__(tool_path, input_files, parameters, imported_files)
+    """IQ-TREE phylogenetic inference worker."""
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, input_files, parameters,
+                 imported_files=None, workdir=None):
+        super().__init__(
+            tool_path, input_files, parameters, imported_files, workdir=workdir
+        )
     
     def get_tool_name(self):
         """返回工具名称"""
@@ -72,11 +81,14 @@ class IQTreeThread(BaseProcessThread):
                 ]
                 
                 # 执行命令
-                result = self.execute_command(cmd)
-                
+                result = self.execute_command(cmd, cwd=str(Path(input_file).parent))
+                detail = (result.stderr or "").strip()
                 if result.returncode != 0:
-                    self.error.emit(f"IQ-TREE execution failed for file {i+1}: {result.stderr}")
-                    return
+                    raise RuntimeError(
+                        "IQ-TREE failed for %s%s"
+                        % (os.path.basename(input_file),
+                           ": " + detail if detail else "")
+                    )
                 
                 # 查找生成的.treefile文件
                 treefile = input_file + ".treefile"
@@ -101,10 +113,11 @@ class IQTreeThread(BaseProcessThread):
                     output_files.append(log_file)
             
             self.progress.emit("Phylogenetic inference completed")
+            self.result_ready.emit({"output_files": output_files})
             self.finished.emit(output_files, [])
             
-        except Exception as e:
-            self.error.emit(f"Phylogenetic inference exception: {str(e)}")
+        except Exception as exc:
+            self.error.emit("Phylogenetic inference exception: %s" % exc)
 
 
 class IQTreePlugin(BasePlugin):
@@ -125,20 +138,20 @@ class IQTreePlugin(BasePlugin):
         self.partition_mode = PartitionMode.EL
         self.partition_bootstrap_enabled = True
         self.partition_bootstrap_replicates = 1000
+        self.partition_rcluster_percent = None
         self.partition_dialog = None
         
-        # 特别处理YR-MPEA导入的数据
-        if import_from == "YR_MPEA" and import_data is not None:
-            self.handle_import_data(import_data)
-        # 处理Dataset Manager导入的数据
-        elif import_from == "DATASET_MANAGER" and import_data is not None:
+        if import_data is not None and (
+            not isinstance(import_data, list) or import_from != "YR_MPEA"
+        ):
             self.handle_import_data(import_data)
         
     def init_plugin_info(self):
         """初始化插件信息"""
         self.plugin_name = "IQ-TREE Phylogeny"
         self.tool_name = "IQ-TREE 3"
-        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        self.citation = []
+        self.citation_keys = ["wong2026iqtree"]
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], "PHYLIP": ["phy"]}
         self.output_types = {"Newick Tree": ".treefile", "IQ-TREE Report": ".iqtree"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
@@ -337,6 +350,7 @@ class IQTreePlugin(BasePlugin):
         self.ufboot_checkbox.setChecked(True)
         self.ufboot_spinbox = QSpinBox()
         self.ufboot_spinbox.setRange(1000, 100000)
+        self.ufboot_spinbox.setSingleStep(100)
         self.ufboot_spinbox.setValue(10000)
         self.ufboot_spinbox.setEnabled(True)
         self.ufboot_checkbox.stateChanged.connect(
@@ -517,12 +531,10 @@ class IQTreePlugin(BasePlugin):
     
     def on_rate_combo_changed(self, rate_option):
         """处理 Rate Heterogeneity 组合框变化"""
-        if rate_option == "Gamma Distribution (+G)":
-            # 启用分类数 spinbox
-            self.rate_categories_spinbox.setEnabled(True)
-        else:
-            # Equal 或 FreeRate Model，禁用分类数 spinbox
-            self.rate_categories_spinbox.setEnabled(False)
+        # Both +G and +R take a category count: -m GTR+G8 / -m GTR+R8.
+        self.rate_categories_spinbox.setEnabled(
+            rate_option in ("Gamma Distribution (+G)", "FreeRate Model (+R)")
+        )
     
     def setup_output_tab(self):
         """设置输出标签页"""
@@ -586,6 +598,127 @@ class IQTreePlugin(BasePlugin):
             QMessageBox.critical(self, "Error", f"Prepare input files failed: {e}")
             return None
     
+    def _model_choices(self):
+        choices = {}
+        for index in range(self.model_combo.count()):
+            text = self.model_combo.itemText(index)
+            if text == "auto":
+                choices[text] = "MFP"
+            elif " (" in text and text.endswith(")"):
+                choices[text] = text.split(" (")[0]
+            else:
+                choices[text] = text
+        return choices
+
+    def control_bindings(self):
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input alignment", "kind": "path",
+             "cli": ["-s", "{value}"]},
+            {"id": "seq_type", "widget": "seq_type_combo",
+             "label": "Sequence type", "kind": "choice",
+             "choices": {"AUTO": "", "DNA": "DNA", "AA": "AA"},
+             "cli": ["-st", "{value}"]},
+            {"id": "threads", "widget": "threads_spinbox",
+             "label": "Threads", "kind": "int",
+             "cli": ["-nt", "{value}"],
+             "omit_values": [1]},
+            {"id": "model", "widget": "model_combo",
+             "label": "Substitution model", "kind": "choice",
+             "choices": self._model_choices(),
+             "cli": ["-m", "{value}"],
+             "notes": "Base model only; rate, invariant-site, ascertainment "
+                      "and state-frequency suffixes are appended to -m."},
+            {"id": "rate_heterogeneity", "widget": "rate_combo",
+             "label": "Rate heterogeneity", "kind": "choice",
+             "choices": {
+                 "Equal": [],
+                 "Gamma Distribution (+G)": ["+G"],
+                 "FreeRate Model (+R)": ["+R"],
+             },
+             "cli": ["{value}"],
+             "notes": "Equal adds nothing; +G and +R both append the "
+                      "category count (for example +G8 or +R8)."},
+            {"id": "rate_categories", "widget": "rate_categories_spinbox",
+             "label": "Rate categories", "kind": "int",
+             "cli": [],
+             "enabled_when": {"widget": "rate_combo",
+                              "in": ["Gamma Distribution (+G)",
+                                     "FreeRate Model (+R)"]},
+             "notes": "Appended to -m as +G{n} when Gamma is selected or "
+                      "+R{n} when FreeRate is selected."},
+            {"id": "invariant_sites", "widget": "invar_checkbox",
+             "label": "Invariant sites", "kind": "bool",
+             "cli": ["+I"],
+             "notes": "Appended to -m."},
+            {"id": "ascertainment_bias", "widget": "ascertain_bias_checkbox",
+             "label": "Ascertainment bias", "kind": "bool",
+             "cli": ["+ASC"],
+             "notes": "Appended to -m."},
+            {"id": "state_freq", "widget": "state_freq_combo",
+             "label": "State frequencies", "kind": "choice",
+             "choices": {
+                 "Estimated": "",
+                 "Empirical (+F)": "+F",
+                 "ML-optimized (+FO)": "+FO",
+                 "Equal (+FQ)": "+FQ",
+             },
+             "cli": ["{value}"],
+             "notes": "Appended to -m; Estimated adds nothing."},
+            {"id": "ufboot", "widget": "ufboot_spinbox",
+             "label": "UFBoot replicates", "kind": "int",
+             "step": 100,
+             "cli": ["-bb", "{value}"],
+             "enabled_by": "ufboot_checkbox",
+             "notes": "Only used when the UFBoot checkbox is enabled."},
+            {"id": "abayes", "widget": "abayes_checkbox",
+             "label": "aBayes", "kind": "bool",
+             "cli": ["-abayes"]},
+            {"id": "sh_alrt", "widget": "sh_alrt_spinbox",
+             "label": "SH-aLRT replicates", "kind": "int",
+             "cli": ["-alrt", "{value}"],
+             "enabled_by": "sh_alrt_checkbox",
+             "notes": "Only used when the SH-aLRT checkbox is enabled."},
+            {"id": "partition_mode", "widget": "",
+             "label": "Partition mode", "kind": "choice",
+             "choices": {
+                 "Edge-linked Proportional (-p)": "-p",
+                 "Edge-linked Equal (-q)": "-q",
+                 "Edge-unlinked (-Q)": "-Q",
+                 "Separate Tree (-S)": "-S",
+             },
+             "cli": [],
+             "notes": "Set in Configure Partitions; the flag consumes the "
+                      "partition file."},
+            {"id": "partition_bootstrap", "widget": "",
+             "label": "Partition bootstrap", "kind": "composite",
+             "step": 100,
+             "cli": ["-bb", "{value}"],
+             "notes": "Partition thread adds -bb N and -abayes; N is the "
+                      "replicate count."},
+            {"id": "partition_sampling", "widget": "",
+             "label": "Partition resampling", "kind": "choice",
+             "choices": {
+                 "SITE (Site-wise resampling)": "SITE",
+                 "GENE (Gene-wise resampling)": "GENE",
+                 "GENESITE (Gene then Site resampling)": "GENESITE",
+             },
+             "cli": [],
+             "notes": "Reserved by the partition dialog; not passed by the "
+                      "current -bb command builder."},
+            {"id": "partition_rcluster", "widget": "",
+             "label": "RCluster", "kind": "composite",
+             "cli": [],
+             "notes": "Optional accelerated partition merging; percentage is "
+                      "shown in Configure Partitions."},
+        ]
+
+    def cli_preview(self):
+        input_file = (self.imported_files[0] if self.imported_files
+                      else self.file_path_edit.text().strip() or "<input>")
+        parameters = self.get_parameters()
+        return [self.tool_path or "iqtree3", "-s", input_file] + parameters
+
     def get_parameters(self):
         """获取命令行参数"""
         params = []
@@ -613,7 +746,7 @@ class IQTreePlugin(BasePlugin):
         if rate_option == "Gamma Distribution (+G)":
             model += f"+G{self.rate_categories_spinbox.value()}"
         elif rate_option == "FreeRate Model (+R)":
-            model += "+R"
+            model += f"+R{self.rate_categories_spinbox.value()}"
         # Equal 选项不添加任何参数
         
         if self.invar_checkbox.isChecked():
@@ -698,20 +831,27 @@ class IQTreePlugin(BasePlugin):
                 self.partition_mode,
                 model_params,
                 self.partition_bootstrap_enabled,
-                self.partition_bootstrap_replicates
+                self.partition_bootstrap_replicates,
+                rcluster_percent=self.partition_rcluster_percent,
             )
         else:
             # 使用常规线程
             self.analysis_thread = IQTreeThread(
-                self.tool_path, input_files, self.get_parameters(), self.imported_files
+                self.tool_path, input_files, self.get_parameters(), self.imported_files,
+                workdir=self.workdir,
             )
         
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
+        if hasattr(self.analysis_thread, "result_ready"):
+            self.analysis_thread.result_ready.connect(self._on_result)
         self.analysis_thread.finished.connect(self.analysis_finished)
         self.analysis_thread.error.connect(self.analysis_error)
         self.analysis_thread.console_output.connect(self.add_console_message)
         self.analysis_thread.start()
     
+    def _on_result(self, payload):
+        self._payload = payload
+
     def analysis_finished(self, output_files, html_files):
         """分析完成处理"""
         self.is_running = False
@@ -732,7 +872,8 @@ class IQTreePlugin(BasePlugin):
         self.add_console_message(f"Phylogenetic inference completed successfully! Found {len(output_files)} result file(s)", "info")
         
         # 显示导入按钮（仅在从平台导入数据时显示）
-        if self.import_from in ["YR_MPEA", "DATASET_MANAGER"]:
+        if (self.import_from in ["YR_MPEA", "DATASET_MANAGER"]
+                or self.result_has_consumer()):
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)
@@ -752,164 +893,134 @@ class IQTreePlugin(BasePlugin):
         QMessageBox.critical(self, "Error", f"Phylogenetic inference failed: {error_message}")
     
     def stop_analysis(self):
-        """停止分析"""
-        if hasattr(self, 'analysis_thread') and self.analysis_thread.isRunning():
-            self.analysis_thread.terminate()
-            self.analysis_thread.wait()
-            
+        if hasattr(self, "analysis_thread") and self.analysis_thread.isRunning():
+            thread = self.analysis_thread
+            for signal_name in ("progress", "result_ready", "finished",
+                                "error", "console_output"):
+                signal = getattr(thread, signal_name, None)
+                if signal is None:
+                    continue
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
         self.is_running = False
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        
-        QMessageBox.information(self, "Stopped", "Phylogenetic inference has been aborted.")
+        self.add_console_message("Phylogenetic inference stopped by user.", "warning")
     
     def display_results(self, output_files):
-        """显示结果，使用IcyTree展示系统发育树"""
-        if not output_files:
-            QMessageBox.information(self, "error","No output files generated")
-            return
-            
-        # 查找.treefile文件并显示
-        treefile = None
-        for file in output_files:
-            if file.endswith('.treefile'):
-                treefile = file
-                break
-                
+        treefile = next(
+            (path for path in output_files if path.endswith(".treefile")), None
+        )
         if treefile:
             try:
-                # 读取树文件内容
-                with open(treefile, 'r', encoding='utf-8') as f:
-                    tree_content = f.read().strip()
-                
-                # 确保树内容不为空
-                if not tree_content:
-                    QMessageBox.information(self, "error","Tree file is empty")
-                    return
-                
-                # 导入IcyTree插件
-                from .icytree import IcyTreePlugin
-                import os
-                
-                # 创建IcyTree插件实例
-                plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
-                icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
-                
-                # Connect to IcyTree status_changed signal to remove output_info when tree is loaded
-                icytree_plugin.status_changed.connect(lambda status: self._on_icytree_status_changed(status, icytree_plugin))
-                
-                # 设置Newick字符串并显示
-                icytree_plugin.set_newick_string(tree_content)
-                
-                # 在输出标签页中显示IcyTree
-                output_layout = self.output_tab.layout()
-                if output_layout:
-                    # 清除现有部件（保留output_info）
-                    for i in reversed(range(output_layout.count())):
-                        widget = output_layout.itemAt(i).widget()
-                        if widget and widget != self.output_info:
-                            widget.setParent(None)
-                
-                # 添加IcyTree插件到输出标签页
-                output_layout.addWidget(icytree_plugin)
-                
-                if hasattr(self, 'output_info') and self.output_info:
-                    self.output_info.setText(f"Phylogenetic tree visualization ready: {os.path.basename(treefile)}")
-                
-            except ImportError:
-                # 如果无法导入IcyTree插件，显示错误信息
-                if hasattr(self, 'output_info'):
-                    self.output_info.setText("Error: IcyTree plugin not available")
-                QMessageBox.information(self, "error","Error: IcyTree plugin not available")
-                
-            except Exception as e:
-                error_msg = f"Error processing tree file: {str(e)}"
-                if hasattr(self, 'output_info'):
-                    self.output_info.setText(error_msg)
-                QMessageBox.information(self, "error",error_msg)
-                self.add_console_message(error_msg, "error")
-        else:
-            # 没有找到树文件，显示信息
-            if hasattr(self, 'output_info'):
-                self.output_info.setText(f"No treefile found. Generated {len(output_files)} file(s).")
-            QMessageBox.information(self, "error",f"No treefile found. Generated {len(output_files)} file(s).")
-    
-    def _on_icytree_status_changed(self, status, icytree_plugin):
-        """Handle IcyTree status changes"""
-        if status == "Tree loaded to IcyTree":
-            # Remove the "No tree available yet." label when tree is loaded
-            if hasattr(self, 'output_info') and self.output_info:
-                self.output_info.setParent(None)
-                self.output_info = None
-    
-    def import_to_platform(self):
-        """将结果导入到当前平台"""
-        if not hasattr(self, 'current_output_files') or not self.current_output_files:
-            QMessageBox.warning(self, "Warning", "No phylogenetic results to import.")
-            return
-
-        try:
-            # 读取系统发育树文件内容
-            phylogenies = []
-            for output_file in self.current_output_files:
-                if output_file.endswith('.treefile'):
-                    with open(output_file, 'r', encoding='utf-8') as f:
-                        content = f.read().strip()
-                    
-                    # 检查是否包含多棵树（例如 Topo-unlinked 模式）
-                    # 多棵树通常用换行符分隔，或者用分号分隔
-                    trees = []
-                    # 尝试用换行符分割
-                    potential_trees = content.split('\n')
-                    potential_trees = [t.strip() for t in potential_trees if t.strip()]
-                    
-                    # 检查是否每行都是一个有效的 Newick 树
-                    valid_trees = []
-                    for tree_str in potential_trees:
-                        # 简单检查：Newick 树通常以分号结尾
-                        if tree_str.endswith(';'):
-                            valid_trees.append(tree_str)
-                        elif len(potential_trees) == 1:
-                            # 只有一行，可能是整个文件就是一个树
-                            valid_trees.append(tree_str)
-                    
-                    if len(valid_trees) > 1:
-                        # 多棵树，每棵树作为一个独立的 item
-                        for i, tree_content in enumerate(valid_trees):
-                            phylogenies.append({
-                                'filename': f"{os.path.basename(output_file)}_tree{i+1}",
-                                'content': tree_content,
-                                'file_path': output_file  # 所有树都指向同一个文件路径
-                            })
-                    else:
-                        # 单棵树，作为单个 item
-                        phylogenies.append({
-                            'filename': os.path.basename(output_file),
-                            'content': content,
-                            'file_path': output_file
-                        })
-
-            if not phylogenies:
-                QMessageBox.warning(self, "Warning", "No phylogenetic trees found in results.")
+                text = Path(treefile).read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                self.output_info.setText("Cannot read tree: %s" % exc)
+                self.output_preview.clear()
                 return
+            self.output_info.setText("Tree: %s" % Path(treefile).name)
+            self.output_preview.setPlainText(text)
+        else:
+            self.output_info.setText("No .treefile found in the IQ-TREE output.")
+            self.output_preview.clear()
 
-            # 发送信号将数据导入到平台
+    def _build_result_spec(self):
+        files = list(getattr(self, "current_output_files", []) or [])
+        if not files:
+            raise ValueError("No IQ-TREE output is available.")
+        items = []
+        artifacts = []
+        for path in files:
+            suffix = Path(path).suffix
+            if suffix == ".treefile":
+                text = Path(path).read_text(encoding="utf-8", errors="replace").strip()
+                if not text:
+                    continue
+                trees = [line.strip() for line in text.splitlines() if line.strip()]
+                if len(trees) > 1:
+                    items.append(DatasetItemSpec(
+                        loci_name=Path(path).stem,
+                        item_type="treeset",
+                        file_path=str(path),
+                        format="newick",
+                        data={"data": [{"content": tree} for tree in trees]},
+                        metadata={"source": self.plugin_name, "tool": "IQ-TREE 3"},
+                    ))
+                else:
+                    items.append(DatasetItemSpec(
+                        loci_name=Path(path).stem,
+                        item_type="phylogeny",
+                        file_path=str(path),
+                        format="newick",
+                        data={"newick": text},
+                        metadata={"source": self.plugin_name, "tool": "IQ-TREE 3"},
+                    ))
+            elif suffix == ".iqtree":
+                params = parse_iqtree_file(path) or {}
+                items.append(DatasetItemSpec(
+                    loci_name=Path(path).stem,
+                    item_type="model",
+                    file_path=str(path),
+                    format="iqtree",
+                    data={"parameters": params},
+                    metadata={"source": self.plugin_name, "tool": "IQ-TREE 3"},
+                ))
+            else:
+                artifacts.append(str(path))
+        if not items:
+            raise ValueError("IQ-TREE produced no tree or model report.")
+        dataset = DatasetSpec(
+            name="IQ-TREE result",
+            items=items,
+            description="%d tree/model item(s)" % len(items),
+            source="iqtree",
+            summary={"items": len(items)},
+            metadata={
+                "input": self.imported_files[0] if len(self.imported_files) == 1 else "",
+                "parameters": self.get_parameters()
+                if isinstance(self.get_parameters(), list) else {},
+            },
+        )
+        return ResultSpec(
+            source="iqtree",
+            datasets=[dataset],
+            artifacts=artifacts,
+        )
+
+    def import_to_platform(self):
+        if not getattr(self, "current_output_files", None):
+            QMessageBox.warning(self, "No result", "Run IQ-TREE first.")
+            return
+        if self.result_has_consumer():
+            try:
+                result = self._build_result_spec()
+            except Exception as exc:
+                QMessageBox.critical(self, "Export failed", str(exc))
+                return
+            if self.export_result(result):
+                self.import_to_platform_btn.setEnabled(False)
+                self.import_to_platform_btn.setText("Sent to workspace")
+                QMessageBox.information(
+                    self, "Success", "IQ-TREE result sent to the current workspace."
+                )
+            return
+        # Legacy fallback: emit treefiles as phylogenies.
+        phylogenies = []
+        for path in self.current_output_files:
+            if path.endswith(".treefile"):
+                phylogenies.append({
+                    "filename": os.path.basename(path),
+                    "content": Path(path).read_text(encoding="utf-8"),
+                    "file_path": path,
+                })
+        if phylogenies:
             self.import_phylogenies_to_platform(phylogenies)
 
-            # 显示成功消息
-            tree_count = len(phylogenies)
-            item_type = "tree set" if tree_count > 1 else "phylogenetic tree"
-            QMessageBox.information(self, "Success", f"Successfully imported {tree_count} {item_type}(s) to the platform.")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to import phylogenetic trees: {str(e)}")
-    
-    def import_phylogenies_to_platform(self, phylogenies):
-        """将系统发育树导入到平台的工作区"""
-        # 发送信号将数据导入到平台
-        self.export_phylogeny_result_signal.emit({"type": "phylogeny", "data": phylogenies})
-    
     def handle_import_data(self, import_data):
         """处理从YR-MPEA或Dataset Manager导入的数据"""
         # 情况1: 从 YR_MPEA 导入的单一序列列表
@@ -932,20 +1043,45 @@ class IQTreePlugin(BasePlugin):
             dataset_items = import_data.get('dataset_items', [])
             dataset_config = import_data.get('dataset_config', {})
 
-            # 筛选出 alignment 类型的 items
+            # 筛选出 alignment 类型的 items；兼容尚未改写类型但已标记为
+            # aligned 的数据项。
             from ..platforms.methods.dataset_models import ITEM_TYPE_ALIGNMENT
-            selected_items = [item for item in dataset_items if item.item_type == ITEM_TYPE_ALIGNMENT]
+            selected_items = [
+                item for item in dataset_items
+                if item.item_type == ITEM_TYPE_ALIGNMENT
+                or getattr(item, "is_aligned", False)
+            ]
 
             if len(selected_items) == 0:
-                # 没有alignment，不导入
+                # 没有 alignment：明确提示，而不是静默留空。
                 self.import_file = None
                 self.imported_files = []
+                self.add_console_message(
+                    "Warning: the selected dataset contains unaligned "
+                    "sequence items only. Align them first (for example "
+                    "with MAFFT) and run IQ-TREE on the aligned dataset.",
+                    "warning",
+                )
                 return
 
             if len(selected_items) == 1:
-                # 单一alignment，直接使用
-                self.import_file = selected_items[0].file_path
-                self.imported_files = [selected_items[0].file_path]
+                # 单一 alignment：优先使用文件；若只有内存序列，写临时文件。
+                single = selected_items[0]
+                path = single.file_path
+                if not path or not os.path.exists(path):
+                    if single.sequences:
+                        path = self.create_temp_file(suffix=".fas")
+                        SeqIO.write(single.sequences, path, "fasta")
+                        self.temp_files.append(path)
+                        self.add_console_message(
+                            "Alignment had no file on disk; wrote its %d "
+                            "sequences to a temporary FASTA." % len(single.sequences),
+                            "info",
+                        )
+                    else:
+                        path = ""
+                self.import_file = path or None
+                self.imported_files = [path] if path else []
             else:
                 # 多个alignment，合并成超级矩阵（参考ModelFinder的做法）
                 try:
@@ -975,23 +1111,29 @@ class IQTreePlugin(BasePlugin):
                     partition_definitions = []
                     current_pos = 1
 
-                    # 获取所有序列名称
-                    if selected_items:
-                        all_seq_names = [seq.id for seq in selected_items[0].sequences]
-                    else:
-                        all_seq_names = []
+                    # Use the union of taxa across all partitions. Taking the
+                    # first partition's list drops taxa that are absent there
+                    # but present in other loci (missing-data datasets).
+                    all_seq_names, records_by_item = collect_partition_sequences(
+                        selected_items
+                    )
+                    partition_lengths = []
+                    for item, records in zip(selected_items, records_by_item):
+                        length = item.length
+                        if not length and records:
+                            length = max(len(str(record.seq)) for record in records)
+                        partition_lengths.append(length)
 
                     # 合并序列
                     for seq_name in all_seq_names:
                         supermatrix_seq = ""
-                        for item in selected_items:
-                            # 找到对应的序列
-                            seq = next((s for s in item.sequences if s.id == seq_name), None)
+                        for records, length in zip(records_by_item, partition_lengths):
+                            seq = next((s for s in records if s.id == seq_name), None)
                             if seq:
                                 supermatrix_seq += str(seq.seq)
                             else:
                                 # 如果某个 partition 缺少该序列，用 ? 填充
-                                supermatrix_seq += "?" * item.length
+                                supermatrix_seq += "?" * length
                         supermatrix_sequences[seq_name] = supermatrix_seq
 
                     # 创建 supermatrix 临时文件
@@ -1005,8 +1147,8 @@ class IQTreePlugin(BasePlugin):
                     self.imported_files = [temp_file]
 
                     # 计算 partition 坐标并创建 partition definitions
-                    for item in selected_items:
-                        end_pos = current_pos + item.length - 1
+                    for item, length in zip(selected_items, partition_lengths):
+                        end_pos = current_pos + length - 1
                         partition_def = PartitionDefinition(
                             name=item.loci_name,
                             file_path="",  # 空字符串表示使用 supermatrix 的坐标
@@ -1179,12 +1321,14 @@ class IQTreePlugin(BasePlugin):
                 mode = self.partition_dialog.get_partition_mode()
                 bootstrap_enabled = self.partition_dialog.enable_bootstrap.isChecked()
                 bootstrap_replicates = self.partition_dialog.bootstrap_replicates.value()
-                
+                rcluster_percent = self.partition_dialog.get_rcluster_percent()
+
                 # 更新分区定义
                 self.partition_definitions = partitions
                 self.partition_mode = mode
                 self.partition_bootstrap_enabled = bootstrap_enabled
                 self.partition_bootstrap_replicates = bootstrap_replicates
+                self.partition_rcluster_percent = rcluster_percent
                 
                 # 更新状态显示
                 self.update_partition_status()
@@ -1241,7 +1385,7 @@ class IQTreePlugin(BasePlugin):
             if rate_option == "Gamma Distribution (+G)":
                 model += f"+G{self.rate_categories_spinbox.value()}"
             elif rate_option == "FreeRate Model (+R)":
-                model += "+R"
+                model += f"+R{self.rate_categories_spinbox.value()}"
             # Equal 选项不添加任何参数
 
             if self.invar_checkbox.isChecked():

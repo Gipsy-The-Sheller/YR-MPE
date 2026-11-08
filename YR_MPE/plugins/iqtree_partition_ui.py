@@ -87,6 +87,7 @@ class IQTreePartitionDialog(QDialog):
         
         self.bootstrap_replicates = QSpinBox()
         self.bootstrap_replicates.setRange(100, 100000)
+        self.bootstrap_replicates.setSingleStep(100)
         self.bootstrap_replicates.setValue(1000)
         self.bootstrap_replicates.setEnabled(True)
         bootstrap_layout.addWidget(QLabel("Replicates:"))

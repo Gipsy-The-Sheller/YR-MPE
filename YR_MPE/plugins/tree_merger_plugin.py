@@ -27,6 +27,10 @@ from PyQt5.QtCore import Qt
 
 
 class TreeMergerPlugin(QWidget):
+    def help_doc(self):
+        from ..runtime.skills import SkillLibrary
+        return SkillLibrary().get_skill("tree-merger") or {}
+
     """
     TreeMerger Plugin for merging multiple phylogenetic trees into a single file.
     Useful for preparing multi-locus gene trees for species tree inference.

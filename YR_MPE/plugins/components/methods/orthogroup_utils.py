@@ -94,11 +94,19 @@ def write_single_copy_ogs(
                 ok = False
                 break
             protein_id = entry["protein_id"]
+            # Use the species label as the sequence id.  This is the key that
+            # the concatenator and partitioned-NEXUS exporter use to match
+            # orthologues across single-copy OG files; the original protein
+            # id remains in the map table and in dbxrefs.
             protein_records.append(
-                SeqRecord(Seq(entry["aa_seq"]), id=protein_id, description=entry.get("product", ""))
+                SeqRecord(Seq(entry["aa_seq"]), id=species,
+                          description=species,
+                          dbxrefs=["protein_id:" + protein_id])
             )
             cds_records.append(
-                SeqRecord(Seq(entry["cds_seq"]), id=protein_id, description=entry.get("gene", ""))
+                SeqRecord(Seq(entry["cds_seq"]), id=species,
+                          description=species,
+                          dbxrefs=["protein_id:" + protein_id])
             )
             map_rows.append({
                 "orthogroup": og,

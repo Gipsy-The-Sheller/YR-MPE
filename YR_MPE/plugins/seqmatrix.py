@@ -347,6 +347,10 @@ class SeqMatrixUI(QMainWindow):
         # Other columns are handled in the drop event to make them non-editable
 
 class Lg_SeqMatrix(SeqMatrixUI):
+    def help_doc(self):
+        from ..runtime.skills import SkillLibrary
+        return SkillLibrary().get_skill("seqmatrix") or {}
+
     
     # 信号定义
     import_dataset_signal = pyqtSignal(list, list)  # 发送序列数据和分区定义

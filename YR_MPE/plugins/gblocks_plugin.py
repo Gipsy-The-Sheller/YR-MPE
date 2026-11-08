@@ -17,139 +17,91 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, 
-                             QMessageBox, QGroupBox, QFormLayout, QLineEdit, 
-                             QSpinBox, QCheckBox, QLabel, QComboBox, QScrollArea,
-                             QWidget, QFrame, QTextEdit, QToolButton, QDialog, QDoubleSpinBox, QRadioButton)
-from PyQt5.QtCore import Qt, pyqtSignal, QUrl
-from PyQt5.QtGui import QIcon
-from PyQt5.QtWebEngineWidgets import QWebEngineView
-import tempfile
+from PyQt5.QtWidgets import (
+    QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QRadioButton,
+    QScrollArea, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
+)
+from PyQt5.QtCore import pyqtSignal
 import os
-from typing import List, Optional
+import shutil
+from io import StringIO
+from pathlib import Path
 
 from Bio import SeqIO
 
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
-import subprocess
+from .components.alignment_common import (
+    build_result, prepare_import, records_temp, setup_preview, show_preview,
+)
 
 
 class GBlocksThread(BaseProcessThread):
-    """GBlocks修剪线程类"""
-    
-    def __init__(self, tool_path, input_files, parameters, imported_files=None, suffix=None):
-        super().__init__(tool_path, input_files, parameters, imported_files)
-        if suffix:
-            self.output_suffix = suffix
-    
+    """Run GBlocks and move its -gb.fa output to the requested path."""
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, input_files, parameters,
+                 imported_files=None, suffix=None, workdir=None):
+        super().__init__(
+            tool_path, input_files, parameters, imported_files, workdir=workdir
+        )
+        self.output_suffix = suffix or ""
+
     def get_tool_name(self):
-        """返回工具名称"""
         return "GBlocks"
-        
+
+    def _output_path(self, input_file):
+        if self.output_suffix:
+            return Path("%s%s.fas" % (input_file, self.output_suffix))
+        return Path(self.create_temp_file(suffix=".fas"))
+
     def execute_commands(self):
-        """执行GBlocks修剪命令"""
         try:
             output_files = []
-            html_files = []
-            
-            # 分别处理每个输入文件
-            total_files = len(self.input_files)
-            for i, input_file in enumerate(self.input_files):
+            total = len(self.input_files)
+            for index, input_file in enumerate(self.input_files):
                 if not self.is_running:
                     break
-                    
-                self.progress.emit(f"Processing file {i+1}/{total_files}...")
-                self.console_output.emit(f"Processing file {i+1}/{total_files}: {os.path.basename(input_file)}", "info")
-                
-                # 构建命令
-                cmd = [self.tool_path, input_file]
-                
-                # 添加参数
-                cmd.extend(self.parameters)
-                
-                # 添加HTML输出参数
-                cmd.extend(["-p=y", "-e=-gb"])  # 生成HTML报告
-                
-                # 执行命令
-                result = self.execute_command(cmd)
-                
+                self.progress.emit("Processing file %d/%d..." % (index + 1, total))
+                self.console_output.emit(
+                    "Processing file %d/%d: %s"
+                    % (index + 1, total, os.path.basename(input_file)),
+                    "info",
+                )
+                output_file = self._output_path(input_file)
+                cmd = [
+                    self.tool_path, input_file, *self.parameters,
+                    "-p=n", "-q=n", "-r=n", "-e=-gb",
+                ]
+                result = self.execute_command(
+                    cmd, cwd=str(output_file.parent)
+                )
+                detail = (result.stderr or "").strip()
                 if result.returncode != 0:
-                    self.error.emit(f"GBlocks execution failed for file {i+1}: {result.stderr}")
-                    return
-                
-                # GBlocks会自动生成输出文件，通常为原文件名加-gb后缀
-                # 如果是从UI传递过来的suffix参数，则使用它来构造输出文件名
-                if self.output_suffix:
-                    # 构造带后缀的输出文件名
-                    base_name = os.path.splitext(input_file)[0]
-                    output_file = f"{base_name}{self.output_suffix}.fas"
-                    # 同时需要重命名GBlocks生成的默认输出文件
-                    default_gb_file = f"{base_name}-gb"
-                    if os.path.exists(default_gb_file):
-                        os.rename(default_gb_file, output_file)
-                else:
-                    base_name = os.path.splitext(input_file)[0]
-                    output_file = f"{base_name}-gb"
-                
-                # HTML文件为原输入文件名直接加-gb.html后缀
-                gblocks_html_file = f"{input_file}-gb.html"
-                
-                # 如果GBlocks生成了HTML文件，则使用它
-                if os.path.exists(gblocks_html_file):
-                    html_files.append(gblocks_html_file)
-                else:
-                    # 尝试.htm扩展名作为备选
-                    gblocks_html_file_alt = f"{input_file}-gb.htm"
-                    if os.path.exists(gblocks_html_file_alt):
-                        html_files.append(gblocks_html_file_alt)
-                    else:
-                        # 创建一个简单的HTML报告
-                        html_file = self.create_temp_file(suffix='.html')
-                        self.create_simple_html_report(html_file, input_file, output_file, cmd, result)
-                        html_files.append(html_file)
-                
-                # 检查输出文件是否存在，如果不存在则使用输入文件名
-                if not os.path.exists(output_file):
-                    output_file = input_file
-                    
-                output_files.append(output_file)
-            
+                    raise RuntimeError(
+                        "GBlocks failed for %s%s"
+                        % (os.path.basename(input_file),
+                           ": " + detail if detail else "")
+                    )
+                generated = Path("%s-gb.fa" % input_file)
+                if not generated.is_file():
+                    raise RuntimeError(
+                        "GBlocks did not write %s" % generated
+                    )
+                if generated.resolve() != output_file.resolve():
+                    output_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(generated), str(output_file))
+                if output_file.stat().st_size == 0:
+                    raise RuntimeError("GBlocks wrote an empty file: %s" % output_file)
+                output_files.append(str(output_file))
+
             self.progress.emit("All trimming completed")
-            self.finished.emit(output_files, html_files)
-            
-        except Exception as e:
-            self.error.emit(f"Trimming exception: {str(e)}")
-    
-    def create_simple_html_report(self, html_file, input_file, output_file, cmd, result):
-        """创建简单的HTML报告"""
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>GBlocks Report</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                h1 {{ color: #2c3e50; }}
-                .info {{ background-color: #e8f4f8; padding: 10px; border-radius: 5px; }}
-            </style>
-        </head>
-        <body>
-            <h1>GBlocks Trimming Report</h1>
-            <div class="info">
-                <p><strong>Input file:</strong> {input_file}</p>
-                <p><strong>Output file:</strong> {output_file}</p>
-                <p><strong>Command:</strong> {' '.join(cmd)}</p>
-            </div>
-            <h2>Output</h2>
-            <pre>{result.stdout}</pre>
-            {('<h2>Errors</h2><pre>' + result.stderr + '</pre>') if result.stderr else ''}
-        </body>
-        </html>
-        """
-        
-        with open(html_file, 'w') as f:
-            f.write(html_content)
+            self.result_ready.emit({"output_files": output_files})
+            self.finished.emit(output_files, [])
+        except Exception as exc:
+            self.error.emit("Trimming exception: %s" % exc)
 
 
 class GBlocksPlugin(BasePlugin):
@@ -157,65 +109,73 @@ class GBlocksPlugin(BasePlugin):
     import_alignment_signal = pyqtSignal(list)
     batch_import_alignment_signal = pyqtSignal(list)
     
-    def __init__(self, import_from=None, import_data=None):
-        """初始化GBlocks插件"""
-        super().__init__(import_from, import_data)
+    def __init__(self, import_from=None, import_data=None, **kwargs):
         self.batch_mode = False
-        if import_from in ["YR_MPEA", "seq_viewer", "DATASET_MANAGER"] and import_data is not None:
+        self._payload = None
+        super().__init__(import_from, import_data, **kwargs)
+        if import_data is not None and (
+            not isinstance(import_data, list) or import_from != "YR_MPEA"
+        ):
             self.handle_import_data(import_data)
-    
-    def handle_import_data(self, import_data):
-        """处理从YR-MPEA或Dataset Manager导入的数据"""
-        if isinstance(import_data, list):
-            # 判断是否为批量模式：[[SeqRecord, ...], [SeqRecord, ...]]
-            if len(import_data) > 0 and isinstance(import_data[0], list):
-                # 批量模式
-                self.batch_mode = True
-                self.temp_files = []
-                self.imported_files = []
-                
-                for i, seq_list in enumerate(import_data):
-                    temp_file = self.create_temp_file(suffix=f'_batch_{i}.fas')
-                    with open(temp_file, 'w') as f:
-                        for seq in seq_list:
-                            f.write(f">{seq.id}\n{seq.seq}\n")
-                    self.temp_files.append(temp_file)
-                    self.imported_files.append(temp_file)
-                    
-                # 更新UI显示
-                if hasattr(self, 'file_path_edit') and self.file_path_edit:
-                    self.file_path_edit.setText(f"{len(import_data)} files selected")
-                    self.file_path_edit.setEnabled(False)
-                    
-            else:
-                # 单文件模式
-                self.batch_mode = False
-                # 创建临时文件来存储导入的序列数据
-                temp_file = self.create_temp_file(suffix='.fas')
-                with open(temp_file, 'w') as f:
-                    for seq in import_data:
-                        f.write(f">{seq.id}\n{seq.seq}\n")
-                self.temp_files.append(temp_file)
-                self.import_file = temp_file
-                self.imported_files = [temp_file]
-                
-                # 更新UI显示导入的文件
-                if hasattr(self, 'file_path_edit') and self.file_path_edit:
-                    self.file_path_edit.setText(temp_file)
-        else:
-            self.import_file = None
-            self.imported_files = []
-            
+        self.run_button.setText("Run GBlocks")
+
     def init_plugin_info(self):
-        """初始化插件信息"""
         self.plugin_name = "GBlocks Trimmer"
         self.tool_name = "GBlocks"
-        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
-        self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], 
-                           "NBRF/PIR": ["pir"]}
-        self.output_types = {"FASTA": ".fas"}
-        self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
-    
+        self.citation = []
+        self.citation_keys = ["talavera2007improvement"]
+        self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"],
+                            "NBRF/PIR": ["pir"]}
+        self.output_types = {"Trimmed alignment FASTA": ["fas"]}
+        self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+
+    def handle_import_data(self, import_data):
+        files, batch = prepare_import(self, import_data)
+        self.batch_mode = batch
+        self.imported_files = files
+        self.import_file = files[0] if len(files) == 1 else None
+        if hasattr(self, "file_path_edit"):
+            if not files:
+                self.file_path_edit.clear()
+            elif len(files) == 1:
+                self.file_path_edit.setText(files[0])
+            else:
+                self.file_path_edit.setText("%d files selected" % len(files))
+                self.file_path_edit.setEnabled(False)
+
+    def control_bindings(self):
+        """GUI controls mapped to the GBlocks command line."""
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input alignment", "kind": "path", "cli": [],
+             "notes": "Positional input; one GBlocks run per file."},
+            {"id": "seq_type", "widget": "seq_type_combo",
+             "label": "Sequence type", "kind": "choice",
+             "choices": {"Auto": "", "Protein": "-t=p",
+                         "DNA": "-t=d", "Codons": "-t=c"},
+             "cli": ["{value}"]},
+            {"id": "b1", "widget": "b1_spinbox",
+             "label": "Minimum block length", "kind": "int",
+             "cli": ["-b1={value}"], "omit_values": [0]},
+            {"id": "b2", "widget": "b2_spinbox",
+             "label": "Minimum conserved positions", "kind": "int",
+             "cli": ["-b2={value}"], "omit_values": [0]},
+            {"id": "b3", "widget": "b3_spinbox",
+             "label": "Maximum contiguous non-conserved", "kind": "int",
+             "cli": ["-b3={value}"], "omit_values": [8]},
+            {"id": "b4", "widget": "b4_spinbox",
+             "label": "Minimum flank positions", "kind": "int",
+             "cli": ["-b4={value}"], "omit_values": [10]},
+            {"id": "b5", "widget": "gap_combo",
+             "label": "Gap positions", "kind": "choice",
+             "choices": {"None": "", "With Half": "-b5=h",
+                         "All": "-b5=a"},
+             "cli": ["{value}"]},
+            {"id": "b6", "widget": "sim_matrix_checkbox",
+             "label": "Similarity matrix", "kind": "bool", "cli": [],
+             "notes": "Emitted as -b6=y when checked, -b6=n otherwise."},
+        ]
+
     def setup_input_tab(self):
         """设置输入和参数标签页"""
         layout = QVBoxLayout()
@@ -484,7 +444,7 @@ class GBlocksPlugin(BasePlugin):
         super().setup_control_panel()
         
         # 添加导入到平台按钮
-        self.import_to_platform_btn = QPushButton("Import to Current Platform")
+        self.import_to_platform_btn = QPushButton("Send to workspace")
         self.import_to_platform_btn.clicked.connect(self.import_to_platform)
         self.import_to_platform_btn.setVisible(False)  # 初始隐藏
         
@@ -492,76 +452,31 @@ class GBlocksPlugin(BasePlugin):
         self.control_layout.addWidget(self.import_to_platform_btn)
     
     def setup_output_tab(self):
-        """设置输出预览标签页"""
-        layout = QVBoxLayout()
-        self.output_tab.setLayout(layout)
-        
-        # 说明文字
-        info_label = QLabel("Trimmed alignment results will be displayed here after analysis completes.")
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
-        
-        # 报告选择下拉框（用于批量处理）
-        report_layout = QHBoxLayout()
-        report_label = QLabel("Select Report:")
-        self.report_combo = QComboBox()
-        self.report_combo.setEnabled(False)
-        self.report_combo.currentIndexChanged.connect(self.on_report_changed)
-        report_layout.addWidget(report_label)
-        report_layout.addWidget(self.report_combo)
-        report_layout.addStretch()
-        layout.addLayout(report_layout)
-        
-        # 结果展示区域 - 使用WebEngineView显示HTML
-        self.result_view = QWebEngineView()
-        layout.addWidget(self.result_view)
-        
-        # 输出文件信息
-        self.output_info = QLabel("Output file information will be displayed here")
-        layout.addWidget(self.output_info)
-    
+        setup_preview(self, "The GBlocks-trimmed FASTA alignment will appear here.")
+
     def get_parameters(self):
-        """获取命令行参数"""
         params = []
-        
-        # 序列类型
         seq_type_index = self.seq_type_combo.currentIndex()
-        if seq_type_index == 1:  # Protein
+        if seq_type_index == 1:
             params.append("-t=p")
-        elif seq_type_index == 2:  # DNA
+        elif seq_type_index == 2:
             params.append("-t=d")
-        elif seq_type_index == 3:  # Codons
+        elif seq_type_index == 3:
             params.append("-t=c")
-            
-        # 保守位置最小序列数
-        b1_value = self.b1_spinbox.value()
-        if b1_value > 0:
-            params.extend(["-b1", str(b1_value)])
-            
-        # 非保守位置最大序列数
-        b2_value = self.b2_spinbox.value()
-        if b2_value > 0:
-            params.extend(["-b2", str(b2_value)])
-            
-        # 保守位置占比
-        b3_value = self.b3_spinbox.value()
-        if b3_value > 0:
-            params.extend(["-b3", str(b3_value)])
-            
-        # 非保守位置占比
-        b4_value = self.b4_spinbox.value()
-        if b4_value < 100:
-            params.extend(["-b4", str(b4_value)])
-            
-        # 半保守位置
-        b5_value = {'None': 'n', 'With Half': 'h', 'All': 'a'}[self.gap_combo.currentText()]
-        # if b5_value != 50:  # 默认值为50
-        params.extend(["-b5", str(b5_value)])
-            
-        # # 使用小写字母表示非保守位置
-        # if self.use_lower_case_checkbox.isChecked():
-        params.append("-u n")
-            
+        if self.b1_spinbox.value() > 0:
+            params.append("-b1=%d" % self.b1_spinbox.value())
+        if self.b2_spinbox.value() > 0:
+            params.append("-b2=%d" % self.b2_spinbox.value())
+        if self.b3_spinbox.value() != 8:
+            params.append("-b3=%d" % self.b3_spinbox.value())
+        if self.b4_spinbox.value() != 10:
+            params.append("-b4=%d" % self.b4_spinbox.value())
+        b5 = {"None": "n", "With Half": "h", "All": "a"}[
+            self.gap_combo.currentText()
+        ]
+        if b5 != "n":
+            params.append("-b5=%s" % b5)
+        params.append("-b6=%s" % ("y" if self.sim_matrix_checkbox.isChecked() else "n"))
         return params
 
     def on_output_radio_changed(self):
@@ -595,195 +510,160 @@ class GBlocksPlugin(BasePlugin):
                 QMessageBox.warning(self, "Warning", "Please provide alignment files or sequence text!")
                 return None
             
-            if self.save_to_tmp.isChecked():
-                # Create temporary file
-                temp_file = self.create_temp_file(suffix='.fas')
-                with open(temp_file, 'w') as f:
-                    f.write(sequence_text)
-                return [temp_file]
-            
-            elif self.save_to_cwd.isChecked():
-                # directly use input paths
-                temp_file = self.import_file
-                return [temp_file]
-            
+            try:
+                records = list(SeqIO.parse(StringIO(sequence_text), "fasta"))
+            except Exception as exc:
+                QMessageBox.warning(self, "Invalid FASTA", str(exc))
+                return None
+            if len(records) < 2:
+                QMessageBox.warning(self, "Need more sequences", "Provide at least two aligned sequences.")
+                return None
+            return [records_temp(self, records, "pasted")]
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Prepare input files failed: {e}")
             return None
     
-    def display_results(self, output_files):
-        """在输出标签页中显示结果"""
-        if not output_files:
-            self.result_view.setHtml("<p>No output files generated.</p>")
-            return
-            
-        # 显示第一个HTML输出文件的内容
-        try:
-            html_file = getattr(self, 'current_html_files', [None])[0]
-            if html_file and os.path.exists(html_file):
-                # 加载HTML文件
-                self.result_view.load(QUrl.fromLocalFile(html_file))
-            else:
-                # 如果没有HTML文件，则显示序列文件内容
-                with open(output_files[0], 'r') as f:
-                    content = f.read()
-                    self.result_view.setHtml(f"<pre>{content}</pre>")
-        except Exception as e:
-            self.result_view.setHtml(f"<p>Error reading output file: {str(e)}</p>")
-        
-        # 更新输出信息
-        self.output_info.setText(f"Results from: {os.path.basename(output_files[0])}")
-    
     def run_analysis(self):
-        """运行GBlocks分析"""
         if self.is_running:
             return
-            
-        # 检查输入
-        if not self.imported_files and not self.sequence_text.toPlainText().strip() and not self.import_file:
-            QMessageBox.warning(self, "Warning", "Please provide alignment files or sequence text!")
+        if not self.tool_path or not Path(self.tool_path).is_file():
+            QMessageBox.critical(self, "Tool missing", "GBlocks executable not found.")
             return
-            
-        if not self.tool_path or not os.path.exists(self.tool_path):
-            QMessageBox.critical(self, "Error", "GBlocks executable file not found!")
-            return
-            
-        # 添加控制台消息
-        self.add_console_message("Starting GBlocks trimming...", "info")
-        
-        # 准备输入文件
         input_files = self.prepare_input_files()
         if not input_files:
             return
-            
-        # 更新UI状态
+        suffix = None
+        if self.save_to_cwd.isChecked():
+            suffix = self.output_suffix_edit.text()
+            if any(sep in suffix for sep in ("/", "\\")):
+                QMessageBox.warning(self, "Invalid suffix", "Suffix must not contain a path separator.")
+                return
+
+        self._payload = None
         self.is_running = True
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # 未知进度
-        
-        # 如果需要添加输出文件后缀，则设置suffix属性
-        suffix = None
-        if self.save_to_cwd.isChecked():
-            suffix = self.output_suffix_edit.text()
-        
-        # 在单独的线程中运行GBlocks
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setFormat("Running GBlocks...")
+        self.import_to_platform_btn.setEnabled(True)
+        self.import_to_platform_btn.setText("Send to workspace")
+        self.tab_widget.setCurrentIndex(2)
+
         self.analysis_thread = GBlocksThread(
-            self.tool_path, input_files, self.get_parameters(), self.imported_files, suffix=suffix
+            self.tool_path, input_files, self.get_parameters(),
+            self.imported_files, suffix=suffix, workdir=self.workdir,
         )
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
+        self.analysis_thread.result_ready.connect(self._on_result)
         self.analysis_thread.finished.connect(self.analysis_finished)
         self.analysis_thread.error.connect(self.analysis_error)
         self.analysis_thread.console_output.connect(self.add_console_message)
         self.analysis_thread.start()
 
-    def analysis_error(self, error_message):
-        """分析错误处理"""
-        self.is_running = False
-        self.run_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-        self.progress_bar.setVisible(False)
-        
-        # 添加控制台消息
-        self.add_console_message(f"GBlocks failed: {error_message}", "error")
-        
-        QMessageBox.critical(self, "Error", f"ModelFinder failed: {error_message}")
+    def _on_result(self, payload):
+        self._payload = payload
+
     def analysis_finished(self, output_files, html_files):
-        """分析完成处理"""
         self.is_running = False
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        
-        # Save output files and reports
-        self.reports = html_files
-        self.update_report_combo()
-        
-        # Show results
-        if html_files:
-            self.show_current_report()
-            self.tab_widget.setCurrentIndex(1)  # Switch to output preview tab
-        
-        self.add_console_message("Trimming completed successfully!", "info")
-        QMessageBox.information(self, "Success", "Trimming completed successfully!")
-        
-        # 显示导入按钮（支持多种来源）
-        if self.import_from in ["YR_MPEA", "seq_viewer", "DATASET_MANAGER"]:
-            self.import_to_platform_btn.setVisible(True)
-        else:
-            self.import_to_platform_btn.setVisible(False)
-        
-        # 保存输出文件路径供导入使用
         self.alignment_output_files = output_files
-    
-    def reset_to_defaults(self):
-        """将所有参数重置为默认值"""
-        self.seq_type_combo.setCurrentIndex(0)  # Auto
-        self.b1_spinbox.setValue(0)  # Default
-        self.b2_spinbox.setValue(0)  # Default
-        self.b3_spinbox.setValue(8)  # Default
-        self.b4_spinbox.setValue(10)  # Default
-        self.gap_combo.setCurrentIndex(0)  # None
-        self.sim_matrix_checkbox.setChecked(True)  # Use similarity matrix
-    
-    def show_current_report(self):
-        """
-        显示当前选中的报告（使用result_view而不是web_view）
-        """
-        if not self.reports or self.current_report_index >= len(self.reports):
-            self.result_view.setHtml("<h2>No report available</h2>")
-            return
-        
-        report_file = self.reports[self.current_report_index]
-        if report_file and os.path.exists(report_file):
-            # 转换Windows路径为文件URL格式
-            file_url = QUrl.fromLocalFile(report_file)
-            self.result_view.load(file_url)
-        else:
-            self.result_view.setHtml("<h2>Report file not found</h2>")
-    
+        show_preview(self, output_files)
+        self.tab_widget.setCurrentIndex(1)
+        self.add_console_message("GBlocks trimming completed.", "info")
+        if self.result_has_consumer() or self.import_from in [
+            "YR_MPEA", "seq_viewer", "DATASET_MANAGER"
+        ]:
+            self.import_to_platform_btn.setVisible(True)
+        self.import_to_platform_btn.setEnabled(True)
+
+    def analysis_error(self, error_message):
+        self.is_running = False
+        self.run_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.progress_bar.setVisible(False)
+        self.add_console_message("GBlocks failed: %s" % error_message, "error")
+        QMessageBox.critical(self, "GBlocks failed", error_message)
+
+    def stop_analysis(self):
+        if hasattr(self, "analysis_thread") and self.analysis_thread.isRunning():
+            thread = self.analysis_thread
+            for signal in (
+                thread.progress, thread.result_ready, thread.finished,
+                thread.error, thread.console_output,
+            ):
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
+        self.is_running = False
+        self.run_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.progress_bar.setVisible(False)
+        self.add_console_message("GBlocks trimming stopped by user.", "warning")
+
+    def _build_result_spec(self):
+        if not getattr(self, "alignment_output_files", None):
+            raise ValueError("No GBlocks output is available.")
+        suffix = (self.output_suffix_edit.text()
+                  if self.save_to_cwd.isChecked() else "")
+        return build_result(
+            tool="GBlocks",
+            source="gblocks",
+            output_files=self.alignment_output_files,
+            input_files=self.imported_files,
+            parameters=self.get_parameters(),
+            mode=self.seq_type_combo.currentText(),
+            batch=self.batch_mode,
+            suffix=suffix,
+        )
+
     def import_to_platform(self):
-        """将修剪结果导入到当前平台"""
-        if not hasattr(self, 'alignment_output_files') or not self.alignment_output_files:
-            QMessageBox.warning(self, "Warning", "No trimming results to import.")
+        if not getattr(self, "alignment_output_files", None):
+            QMessageBox.warning(self, "No result", "Run GBlocks first.")
             return
-            
+        if self.result_has_consumer():
+            try:
+                result = self._build_result_spec()
+            except Exception as exc:
+                QMessageBox.critical(self, "Result failed", str(exc))
+                return
+            if self.export_result(result):
+                self.import_to_platform_btn.setEnabled(False)
+                self.import_to_platform_btn.setText("Sent to workspace")
+                QMessageBox.information(
+                    self, "Success", "GBlocks result sent to the current workspace."
+                )
+            return
         try:
-            # 判断是否为批量模式
-            is_batch_mode = getattr(self, 'batch_mode', False)
-            
-            if is_batch_mode:
-                # 批量模式：保持分组结构 [[SeqRecord, ...], [SeqRecord, ...]]
-                batch_sequences = []
-                for output_file in self.alignment_output_files:
-                    file_sequences = list(SeqIO.parse(output_file, "fasta"))
-                    batch_sequences.append(file_sequences)
-                self.batch_import_alignment_signal.emit(batch_sequences)
-                
+            if self.batch_mode:
+                self.batch_import_alignment_signal.emit([
+                    list(SeqIO.parse(path, "fasta"))
+                    for path in self.alignment_output_files
+                ])
             else:
-                # 单文件模式：扁平化列表 [SeqRecord, SeqRecord, ...]
                 sequences = []
-                for output_file in self.alignment_output_files:
-                    # 读取FASTA文件
-                    for record in SeqIO.parse(output_file, "fasta"):
-                        sequences.append(record)
-                
-                if not sequences:
-                    QMessageBox.warning(self, "Warning", "No sequences found in trimming results.")
-                    return
-                    
-                # 发送信号将数据导入到平台
-                self.import_alignment_signal.emit(sequences)
-            
-            # 显示成功消息
-            if is_batch_mode:
-                QMessageBox.information(self, "Success", f"Successfully imported {len(self.alignment_output_files)} trimmed files to the platform.")
-            else:
-                QMessageBox.information(self, "Success", f"Successfully imported {len(sequences)} sequences to the platform.")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to import trimming results: {str(e)}")
+                for path in self.alignment_output_files:
+                    sequences.extend(list(SeqIO.parse(path, "fasta")))
+                if sequences:
+                    self.import_alignment_signal.emit(sequences)
+        except Exception as exc:
+            QMessageBox.critical(self, "Import failed", str(exc))
+
+    def reset_to_defaults(self):
+        self.seq_type_combo.setCurrentIndex(0)
+        self.b1_spinbox.setValue(0)
+        self.b2_spinbox.setValue(0)
+        self.b3_spinbox.setValue(8)
+        self.b4_spinbox.setValue(10)
+        self.gap_combo.setCurrentIndex(0)
+        self.sim_matrix_checkbox.setChecked(True)
+
 
 class GBlocksPluginEntry:
     """GBlocks插件入口点"""
@@ -792,5 +672,8 @@ class GBlocksPluginEntry:
         self.config = config
         self.plugin_path = plugin_path
     
-    def run(self, import_from=None, import_data=None):
-        return GBlocksPlugin(import_from, import_data)
+    def run(self, import_from=None, import_data=None, workdir=None, **kwargs):
+        return GBlocksPlugin(
+            import_from=import_from, import_data=import_data,
+            workdir=workdir, **kwargs,
+        )

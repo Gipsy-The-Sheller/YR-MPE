@@ -24,16 +24,22 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFi
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon
 import os
+from pathlib import Path
 
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
 import subprocess
 
 
 class DecentTreeThread(BaseProcessThread):
-    def __init__(self, tool_path, input_files, parameters, imported_files=None):
-        super().__init__(tool_path, input_files, parameters, imported_files)
-        self.working_dir = os.path.dirname(tool_path)
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, input_files, parameters,
+                 imported_files=None, workdir=None):
+        super().__init__(
+            tool_path, input_files, parameters, imported_files, workdir=workdir
+        )
     
     def get_tool_name(self):
         return "DecentTree"
@@ -48,38 +54,75 @@ class DecentTreeThread(BaseProcessThread):
                 self.progress.emit(f"Processing file {i+1}/{total_files}...")
                 self.console_output.emit(f"Processing file {i+1}/{total_files}: {os.path.basename(input_file)}", "info")
                 cmd = [self.tool_path, "-in", input_file, "-out", input_file + ".nwk", *self.parameters]
-                result = self.execute_command(cmd, cwd=self.working_dir)
+                # PyQt prepends Qt's bin directory to PATH. DecentTree links
+                # its own MinGW runtime and crashes with 0xC0000005 when that
+                # directory shadows the DLL search order, so run it with a
+                # PATH that omits PyQt's private Qt bin.
+                env = os.environ.copy()
+                env["PATH"] = os.pathsep.join(
+                    part for part in env.get("PATH", "").split(os.pathsep)
+                    if "PyQt5" not in part.replace("\\", "/")
+                )
+                result = self.execute_command(
+                    cmd, cwd=str(Path(input_file).parent), env=env
+                )
+                detail = (result.stderr or "").strip()
                 if result.returncode != 0:
-                    self.error.emit(f"DecentTree execution failed: {result.stderr}")
-                    return
+                    raise RuntimeError(
+                        "DecentTree failed for %s%s"
+                        % (os.path.basename(input_file),
+                           ": " + detail if detail else "")
+                    )
                 tree_file = input_file + ".nwk"
                 if os.path.exists(tree_file):
                     output_files.append(tree_file)
             self.progress.emit("Tree construction completed")
+            self.result_ready.emit({"output_files": output_files})
             self.finished.emit(output_files, [])
-        except Exception as e:
-            self.error.emit(f"Tree construction exception: {str(e)}")
+        except Exception as exc:
+            self.error.emit("Tree construction exception: %s" % exc)
 
 
 class DecentTreePlugin(BasePlugin):
     export_phylogeny_result_signal = pyqtSignal(dict)
     
-    def __init__(self, import_from=None, import_data=None):
-        super().__init__(import_from, import_data)
-        # Initialize temp_files list if not exists
-        if not hasattr(self, 'temp_files'):
-            self.temp_files = []
-        if import_from == "YR_MPEA" and import_data is not None:
+    def __init__(self, import_from=None, import_data=None, **kwargs):
+        self._payload = None
+        super().__init__(import_from, import_data, **kwargs)
+        if import_data is not None:
             self.handle_import_data(import_data)
-    
+        self.run_button.setText("Build tree")
+
     def init_plugin_info(self):
         self.plugin_name = "DecentTree Distance Methods"
         self.tool_name = "DecentTree"
-        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        self.citation = []
+        self.citation_keys = ["wang2023decenttree"]
         self.input_types = {"ML Distance Matrix": ["mldist", "dist"]}
         self.output_types = {"Newick Tree": ".nwk"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
-    
+
+    def control_bindings(self):
+        """GUI controls mapped to the DecentTree command line."""
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Distance matrix", "kind": "path",
+             "cli": ["-in", "{value}"],
+             "notes": "One .mldist/.dist file per run; batch mode repeats the "
+                      "command per input."},
+            {"id": "algorithm", "widget": "algorithm_combo",
+             "label": "Algorithm", "kind": "choice",
+             "choices": {
+                 "BIONJ-R (Rapid BioNJ)": "BIONJ-R",
+                 "BIONJ-V (Vectorized BIONJ)": "BIONJ-V",
+                 "NJ-R-D (Double Precision Rapid NJ)": "NJ-R-D",
+                 "ONJ-R (Rival Rapid NJ)": "ONJ-R",
+                 "ONJ-R-V (Rival Rapid NJ Vectorized)": "ONJ-R-V",
+                 "AUCTION (Auction Joining)": "AUCTION",
+             },
+             "cli": ["-t", "{value}"]},
+        ]
+
     def setup_input_tab(self):
         layout = QVBoxLayout()
         self.input_tab.setLayout(layout)
@@ -116,12 +159,15 @@ class DecentTreePlugin(BasePlugin):
         layout.addWidget(params_group)
         
         self.algorithm_combo = QComboBox()
+        # The current Windows build of DecentTree segfaults in the classic
+        # BIONJ/NJ paths; keep the variants verified on this build.
         self.algorithm_combo.addItems([
-            "BIONJ (BioNJ)", "BIONJ-R (Rapid BioNJ)", "BIONJ2009 (BioNJ with OMP)",
-            "NJ (Neighbor Joining)", "NJ-R (Rapid NJ)", "NJ-R-D (Double Precision Rapid NJ)",
-            "NJ-V (Vectorized NJ)", "RapidNJ (Fastest NJ)", "UNJ (Unweighted NJ)",
-            "ONJ-R (Rival Rapid NJ)", "ONJ-R-V (Rival Rapid NJ Vectorized)",
-            "AUCTION (Auction Joining)", "BENCHMARK (Benchmark)"
+            "BIONJ-R (Rapid BioNJ)",
+            "BIONJ-V (Vectorized BIONJ)",
+            "NJ-R-D (Double Precision Rapid NJ)",
+            "ONJ-R (Rival Rapid NJ)",
+            "ONJ-R-V (Rival Rapid NJ Vectorized)",
+            "AUCTION (Auction Joining)",
         ])
         params_form_layout.addRow("Algorithm:", self.algorithm_combo)
         
@@ -191,24 +237,20 @@ class DecentTreePlugin(BasePlugin):
         return base_name
     
     def setup_output_tab(self):
-        layout = QVBoxLayout()
-        self.output_tab.setLayout(layout)
-        
-        # Add output info label
+        layout = QVBoxLayout(self.output_tab)
+        layout.setContentsMargins(12, 12, 12, 12)
         self.output_info = QLabel("No tree available yet.")
-        self.output_info.setAlignment(Qt.AlignCenter)
-        self.output_info.setStyleSheet("color: #6c757d; padding: 20px;")
+        self.output_info.setWordWrap(True)
+        self.output_info.setStyleSheet("color: palette(mid);")
         layout.addWidget(self.output_info)
-        
         self.output_preview = QTextEdit()
         self.output_preview.setReadOnly(True)
         self.output_preview.setFont(QFont("Courier", 10))
-        layout.addWidget(QLabel("Phylogenetic Tree Preview (Newick Format):"))
-        layout.addWidget(self.output_preview)
-    
+        layout.addWidget(self.output_preview, 1)
+
     def setup_control_panel(self):
         super().setup_control_panel()
-        self.import_to_platform_btn = QPushButton("Import to Current Platform")
+        self.import_to_platform_btn = QPushButton("Send to workspace")
         self.import_to_platform_btn.clicked.connect(self.import_to_platform)
         self.import_to_platform_btn.setVisible(False)
         self.control_layout.addWidget(self.import_to_platform_btn)
@@ -254,14 +296,19 @@ class DecentTreePlugin(BasePlugin):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
         self.analysis_thread = DecentTreeThread(
-            self.tool_path, input_files, self.get_parameters(), self.imported_files
+            self.tool_path, input_files, self.get_parameters(), self.imported_files,
+            workdir=self.workdir,
         )
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
+        self.analysis_thread.result_ready.connect(self._on_result)
         self.analysis_thread.finished.connect(self.analysis_finished)
         self.analysis_thread.error.connect(self.analysis_error)
         self.analysis_thread.console_output.connect(self.add_console_message)
         self.analysis_thread.start()
     
+    def _on_result(self, payload):
+        self._payload = payload
+
     def analysis_finished(self, output_files, html_files):
         self.is_running = False
         self.run_button.setEnabled(True)
@@ -271,7 +318,7 @@ class DecentTreePlugin(BasePlugin):
         self.display_results(output_files)
         self.tab_widget.setCurrentIndex(1)
         self.add_console_message(f"Tree construction completed! Found {len(output_files)} result file(s)", "info")
-        if self.import_from == "YR_MPEA":
+        if self.import_from == "YR_MPEA" or self.result_has_consumer():
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)
@@ -286,85 +333,100 @@ class DecentTreePlugin(BasePlugin):
         QMessageBox.critical(self, "Error", f"Tree construction failed: {error_message}")
     
     def stop_analysis(self):
-        if hasattr(self, 'analysis_thread') and self.analysis_thread.isRunning():
-            self.analysis_thread.terminate()
-            self.analysis_thread.wait()
+        if hasattr(self, "analysis_thread") and self.analysis_thread.isRunning():
+            thread = self.analysis_thread
+            for signal in (
+                thread.progress, thread.result_ready, thread.finished,
+                thread.error, thread.console_output,
+            ):
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
         self.is_running = False
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        QMessageBox.information(self, "Stopped", "Tree construction has been aborted.")
-    
+        self.add_console_message("Tree construction stopped by user.", "warning")
+
     def display_results(self, output_files):
         if not output_files:
-            QMessageBox.warning(self, "Error", "No output files generated")
+            self.output_info.setText("No tree output.")
+            self.output_preview.clear()
             return
-        treefile = None
-        for file in output_files:
-            if file.endswith('.nwk'):
-                treefile = file
-                break
-        if treefile:
-            try:
-                with open(treefile, 'r', encoding='utf-8') as f:
-                    tree_content = f.read().strip()
-                if not tree_content:
-                    QMessageBox.warning(self, "Error", "Tree file is empty")
-                    return
-                from .icytree import IcyTreePlugin
-                plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
-                icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
-                
-                # Connect to IcyTree status_changed signal to remove output_info when tree is loaded
-                icytree_plugin.status_changed.connect(lambda status: self._on_icytree_status_changed(status, icytree_plugin))
-                
-                icytree_plugin.set_newick_string(tree_content)
-                output_layout = self.output_tab.layout()
-                if output_layout:
-                    for i in reversed(range(output_layout.count())):
-                        widget = output_layout.itemAt(i).widget()
-                        if widget and widget != self.output_info:
-                            widget.setParent(None)
-                output_layout.addWidget(icytree_plugin)
-            except ImportError:
-                QMessageBox.warning(self, "Error", "IcyTree plugin not available")
-            except Exception as e:
-                error_msg = f"Error processing tree file: {str(e)}"
-                QMessageBox.warning(self, "Error", error_msg)
-                self.add_console_message(error_msg, "error")
-        else:
-            QMessageBox.warning(self, "Error", f"No tree file found. Generated {len(output_files)} file(s).")
-    
-    def _on_icytree_status_changed(self, status, icytree_plugin):
-        """Handle IcyTree status changes"""
-        if status == "Tree loaded to IcyTree":
-            # Remove the "No tree available yet." label when tree is loaded
-            if hasattr(self, 'output_info') and self.output_info:
-                self.output_info.setParent(None)
-                self.output_info = None
-    
-    def import_to_platform(self):
-        if not hasattr(self, 'current_output_files') or not self.current_output_files:
-            QMessageBox.warning(self, "Warning", "No phylogenetic results to import.")
-            return
+        treefile = next((path for path in output_files if path.endswith(".nwk")), output_files[0])
         try:
-            phylogenies = []
-            for output_file in self.current_output_files:
-                if output_file.endswith('.nwk'):
-                    with open(output_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        phylogenies.append({'filename': os.path.basename(output_file), 'content': content})
-            if not phylogenies:
-                QMessageBox.warning(self, "Warning", "No phylogenetic trees found in results.")
+            text = Path(treefile).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            self.output_info.setText("Cannot read %s: %s" % (treefile, exc))
+            self.output_preview.clear()
+            return
+        self.output_info.setText("Tree: %s" % Path(treefile).name)
+        self.output_preview.setPlainText(text)
+
+    def _build_result_spec(self):
+        files = list(getattr(self, "current_output_files", []) or [])
+        if not files:
+            raise ValueError("No DecentTree output is available.")
+        items = []
+        for path in files:
+            newick = Path(path).read_text(encoding="utf-8", errors="replace").strip()
+            if not newick:
+                raise ValueError("Tree file is empty: %s" % path)
+            items.append(DatasetItemSpec(
+                loci_name=Path(path).stem,
+                item_type="phylogeny",
+                file_path=str(path),
+                format="newick",
+                data={"newick": newick, "method": self.algorithm_combo.currentText()},
+                metadata={"source": self.plugin_name, "tool": "DecentTree"},
+            ))
+        dataset = DatasetSpec(
+            name="DecentTree tree" if len(items) == 1 else "DecentTree trees",
+            items=items,
+            description="%d distance-based tree(s)" % len(items),
+            source="decenttree",
+            summary={"trees": len(items)},
+            metadata={
+                "input": self.imported_files[0] if len(self.imported_files) == 1 else "",
+                "parameters": self.get_parameters(),
+                "algorithm": self.algorithm_combo.currentText(),
+            },
+        )
+        return ResultSpec(source="decenttree", datasets=[dataset],
+                          artifacts=[str(path) for path in files])
+
+    def import_to_platform(self):
+        if not getattr(self, "current_output_files", None):
+            QMessageBox.warning(self, "No result", "Build a tree first.")
+            return
+        if self.result_has_consumer():
+            try:
+                result = self._build_result_spec()
+            except Exception as exc:
+                QMessageBox.critical(self, "Export failed", str(exc))
                 return
-            self.import_phylogenies_to_platform(phylogenies)
-            QMessageBox.information(self, "Success", f"Successfully imported {len(phylogenies)} phylogenetic tree(s) to the platform.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to import phylogenetic trees: {str(e)}")
-    
-    def import_phylogenies_to_platform(self, phylogenies):
-        self.export_phylogeny_result_signal.emit({"type": "phylogeny", "data": phylogenies})
-    
+            if self.export_result(result):
+                self.import_to_platform_btn.setEnabled(False)
+                self.import_to_platform_btn.setText("Sent to workspace")
+                QMessageBox.information(
+                    self, "Success", "Tree sent to the current workspace."
+                )
+            return
+        phylogenies = []
+        for path in self.current_output_files:
+            if path.endswith(".nwk"):
+                phylogenies.append({
+                    "filename": os.path.basename(path),
+                    "content": Path(path).read_text(encoding="utf-8"),
+                })
+        if phylogenies:
+            self.export_phylogeny_result_signal.emit(
+                {"type": "phylogeny", "data": phylogenies}
+            )
+
     def handle_import_data(self, import_data):
         if isinstance(import_data, list):
             if import_data:
@@ -456,5 +518,8 @@ class DecentTreePluginEntry:
     def __init__(self, config=None, plugin_path=None):
         self.config = config
         self.plugin_path = plugin_path
-    def run(self, import_from=None, import_data=None):
-        return DecentTreePlugin(import_from=import_from, import_data=import_data)
+    def run(self, import_from=None, import_data=None, workdir=None, **kwargs):
+        return DecentTreePlugin(
+            import_from=import_from, import_data=import_data,
+            workdir=workdir, **kwargs,
+        )

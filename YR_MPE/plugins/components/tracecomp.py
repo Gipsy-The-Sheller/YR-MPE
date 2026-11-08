@@ -2,9 +2,11 @@ import pandas as pd
 import numpy as np
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QTableWidget, QTableWidgetItem, QApplication, QMainWindow
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QTableWidget, QTableWidgetItem, QApplication, QMainWindow
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
+
+from .methods.mcmc_utils import calculate_psrf
 
 
 class TraceComp(QWidget):
@@ -37,17 +39,18 @@ class TraceComp(QWidget):
         self.table = QTableWidget()
         self.table.setColumnCount(2)
         self.table.setHorizontalHeaderLabels(['Metric', 'Value'])
-        self.table.setRowCount(5)
+        self.table.setRowCount(6)
         # Disable vertical header (index) to avoid display issues
         self.table.verticalHeader().setVisible(False)
-        
+
         # Set the metric labels in the first column
         metrics = [
             'Samples (Chain 1)',
-            'Mean (Chain 1)', 
+            'Mean (Chain 1)',
             'Samples (Chain 2)',
             'Mean (Chain 2)',
-            'Correlation Coefficiency (R)'
+            'Correlation Coefficiency (R)',
+            'PSRF (R-hat)'
         ]
         for i, metric in enumerate(metrics):
             item = QTableWidgetItem(metric)
@@ -62,7 +65,7 @@ class TraceComp(QWidget):
         self.table.verticalHeader().setFont(font)
         
         # Adjust row heights and column widths
-        for i in range(5):
+        for i in range(6):
             self.table.setRowHeight(i, 25)  # Reduced row height
         self.table.setColumnWidth(0, 120)  # Adjust column widths
         self.table.setColumnWidth(1, 120)
@@ -70,11 +73,25 @@ class TraceComp(QWidget):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)  # Make table read-only
         
-        # Set stretch factors: 70% for plot, 30% for table (7:3 ratio)
-        layout.addWidget(self.canvas, 7)  # 7/(7+3) = 70%
-        layout.addWidget(self.table, 3)   # 3/(7+3) = 30%
-        
+        # Right column: statistics table with room for extra panels below it.
+        self.right_panel = QWidget()
+        self.right_layout = QVBoxLayout(self.right_panel)
+        self.right_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_layout.setSpacing(4)
+        self.right_layout.addWidget(self.table, 0)
+        self.right_layout.addStretch(1)
+
+        # Set stretch factors: 70% for plot, 30% for the right column (7:3).
+        layout.addWidget(self.canvas, 7)
+        layout.addWidget(self.right_panel, 3)
+
         self.setLayout(layout)
+
+    def add_right_widget(self, widget):
+        """Place a widget below the statistics table in the right column."""
+        # Insert before the trailing stretch so the column stays top-aligned.
+        self.right_layout.insertWidget(self.right_layout.count() - 1, widget, 0)
+        return widget
     
     def set_data(self, chain1_data, chain1_iterations, chain2_data, chain2_iterations):
         """
@@ -105,7 +122,7 @@ class TraceComp(QWidget):
         self.canvas.draw()
         
         # Clear table values
-        for i in range(5):
+        for i in range(6):
             self.table.setItem(i, 1, QTableWidgetItem(""))
     
     def update_burnin_fraction(self, burnin_fraction):
@@ -128,51 +145,62 @@ class TraceComp(QWidget):
         
         # Plot all points (opaque blue) - no pre-burnin since data is already filtered
         min_len = min(len(post_burnin1), len(post_burnin2))
+        psrf = None
         if min_len > 0:
-            self.ax.scatter(post_burnin1[:min_len], post_burnin2[:min_len], 
+            self.ax.scatter(post_burnin1[:min_len], post_burnin2[:min_len],
                           alpha=1.0, color='#4e699a', s=20)
-            
+
             # Calculate correlation coefficient
             if min_len > 1:
                 correlation_matrix = np.corrcoef(post_burnin1[:min_len], post_burnin2[:min_len])
                 r_value = correlation_matrix[0, 1]
+                psrf = calculate_psrf(post_burnin1[:min_len],
+                                      post_burnin2[:min_len])
             else:
                 r_value = 0.0
-                
+
             # Set axis limits based on all data
             x_min, x_max = post_burnin1[:min_len].min(), post_burnin1[:min_len].max()
             y_min, y_max = post_burnin2[:min_len].min(), post_burnin2[:min_len].max()
-            
+
             # Add some padding
             x_padding = (x_max - x_min) * 0.05
             y_padding = (y_max - y_min) * 0.05
             self.ax.set_xlim(x_min - x_padding, x_max + x_padding)
             self.ax.set_ylim(y_min - y_padding, y_max + y_padding)
-            
+
             # Add y=x reference line for convergence assessment
             line_min = min(x_min - x_padding, y_min - y_padding)
             line_max = max(x_max + x_padding, y_max + y_padding)
-            self.ax.plot([line_min, line_max], [line_min, line_max], 
+            self.ax.plot([line_min, line_max], [line_min, line_max],
                         color='#ba3e45', linestyle='--', linewidth=1, alpha=0.8)
         else:
             r_value = 0.0
-        
+
         self.ax.set_xlabel('Chain 1')
         self.ax.set_ylabel('Chain 2')
-        self.ax.set_title('Chain Comparison')
+        title = 'Chain Comparison'
+        if psrf is not None:
+            if np.isfinite(psrf):
+                title += ' (PSRF = %.3f)' % psrf
+            else:
+                title += ' (PSRF = inf)'
+        self.ax.set_title(title)
         self.ax.grid(True, alpha=0.3)
-        
+
         # Update the table with actual data counts and statistics
         count1 = len(post_burnin1)
         count2 = len(post_burnin2)
         mean1 = np.mean(post_burnin1) if count1 > 0 else 0
         mean2 = np.mean(post_burnin2) if count2 > 0 else 0
-        
-        self.update_statistics_table(count1, mean1, count2, mean2, r_value)
-        
+
+        self.update_statistics_table(count1, mean1, count2, mean2, r_value,
+                                     psrf)
+
         self.canvas.draw()
-    
-    def update_statistics_table(self, count1, mean1, count2, mean2, r_value):
+
+    def update_statistics_table(self, count1, mean1, count2, mean2, r_value,
+                                psrf=None):
         """Update the statistics table with calculated values."""
         # Update values in the second column
         self.table.setItem(0, 1, QTableWidgetItem(str(count1)))
@@ -180,6 +208,13 @@ class TraceComp(QWidget):
         self.table.setItem(2, 1, QTableWidgetItem(str(count2)))
         self.table.setItem(3, 1, QTableWidgetItem(f"{mean2:.6f}"))
         self.table.setItem(4, 1, QTableWidgetItem(f"{r_value:.6f}"))
+        if psrf is None:
+            psrf_text = "N/A"
+        elif np.isfinite(psrf):
+            psrf_text = f"{psrf:.4f}"
+        else:
+            psrf_text = "inf"
+        self.table.setItem(5, 1, QTableWidgetItem(psrf_text))
 
 
 def parse_trace_file(trace_file):

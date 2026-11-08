@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 class SeqDBGWindow(QMainWindow):
+    def help_doc(self):
+        from ..runtime.skills import SkillLibrary
+        return SkillLibrary().get_skill("seqdbg") or {}
+
     """
     SeqDBG主窗口
     

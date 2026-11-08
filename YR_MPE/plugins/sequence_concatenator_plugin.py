@@ -157,6 +157,10 @@ class NexusDisplayDialog(QDialog):
 
 
 class SequenceConcatenatorPlugin(QWidget):
+    def help_doc(self):
+        from ..runtime.skills import SkillLibrary
+        return SkillLibrary().get_skill("sequence-concatenator") or {}
+
     """
     Sequence Concatenator Plugin for merging multiple sequence alignments.
     Concatenates sequences with matching descriptions, filling missing sequences with ?.

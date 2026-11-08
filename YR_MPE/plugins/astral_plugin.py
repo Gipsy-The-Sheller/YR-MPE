@@ -28,16 +28,63 @@ import tempfile
 import os
 from typing import List, Optional
 
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
+from .components.nexus_tree import read_tree_file
 import subprocess
+
+
+def normalize_weighted_support_labels(input_path, output_path):
+    """Collapse composite gene-tree support labels to one numeric value.
+
+    IQ-TREE can write ``SH-aLRT/aBayes/UFBoot`` labels such as ``/1/100``.
+    ASTER's wASTRAL and ASTRAL-Hybrid parse node labels with ``std::stod`` and
+    abort on the leading slash (``std::invalid_argument: stod``). Keep the
+    first numeric field (aBayes when present, otherwise aLRT/UFBoot) and drop
+    the rest. Returns ``(trees, changed)``.
+    """
+    from Bio import Phylo
+
+    trees = list(Phylo.parse(input_path, "newick"))
+    if not trees:
+        raise ValueError("no Newick trees found")
+
+    changed = 0
+    for tree in trees:
+        for clade in tree.get_nonterminals():
+            label = (clade.name or "").strip()
+            if not label:
+                continue
+            value = None
+            for token in label.split("/"):
+                token = token.strip()
+                if not token:
+                    continue
+                try:
+                    float(token)
+                    value = token
+                    break
+                except ValueError:
+                    continue
+            if value != clade.name:
+                clade.name = value
+                changed += 1
+
+    with open(output_path, "w", encoding="utf-8") as handle:
+        Phylo.write(trees, handle, "newick")
+    return len(trees), changed
 
 
 class AstralThread(BaseProcessThread):
     """ASTRAL分析线程类"""
 
-    def __init__(self, tool_path, input_files, parameters, imported_files=None, output_file=None):
-        super().__init__(tool_path, input_files, parameters, imported_files)
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, input_files, parameters, imported_files=None,
+                 output_file=None, workdir=None):
+        super().__init__(tool_path, input_files, parameters, imported_files,
+                         workdir=workdir)
         self.output_file = output_file
 
     def get_tool_name(self):
@@ -58,36 +105,65 @@ class AstralThread(BaseProcessThread):
                 self.progress.emit(f"Processing file {i+1}/{total_files}...")
                 self.console_output.emit(f"Processing file {i+1}/{total_files}: {os.path.basename(input_file)}", "info")
 
-                # 如果指定了输出文件，则使用指定的输出文件，否则创建临时输出文件
-                if self.output_file:
-                    output_file = self.output_file
-                else:
+                # ASTER writes the tree to -o; if the dialog did not specify
+                # one, insert a temporary -o before the input file.
+                output_file = self.output_file
+                cmd = [self.tool_path, *self.parameters]
+                if not output_file:
                     output_file = self.create_temp_file(suffix='.tre')
+                    cmd = cmd[:-1] + ["-o", output_file, cmd[-1]]
 
-                # 构建命令（input_file 已经在 parameters 中）
-                cmd = [
-                    self.tool_path,
-                    *self.parameters
-                ]
-
-                # 执行命令
-                result = self.execute_command(cmd)
+                result = self.execute_command(
+                    cmd, cwd=self.workdir if self.workdir else None
+                )
 
                 if result.returncode != 0:
-                    self.error.emit(f"ASTRAL execution failed: {result.stderr}")
-                    return
+                    detail = (result.stderr or "").strip()
+                    raise RuntimeError(
+                        "ASTRAL failed%s" % (": " + detail if detail else "")
+                    )
 
-                # 将stdout写入输出文件
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    f.write(result.stdout)
+                # Prefer the file ASTER wrote. stdout may contain only logs
+                # when -o is used, so never overwrite the tree with it.
+                if not (os.path.exists(output_file) and os.path.getsize(output_file) > 0):
+                    with open(output_file, 'w', encoding='utf-8') as f:
+                        f.write(result.stdout or "")
+                if not (os.path.exists(output_file) and os.path.getsize(output_file) > 0):
+                    raise RuntimeError("ASTRAL produced no tree output.")
 
+                self._ensure_terminal_lengths(output_file)
                 output_files.append(output_file)
 
             self.progress.emit("ASTRAL analysis completed")
+            self.result_ready.emit({"output_files": output_files})
             self.finished.emit(output_files, [])
 
         except Exception as e:
             self.error.emit(f"Analysis exception: {str(e)}")
+
+    def _ensure_terminal_lengths(self, path):
+        """Add dummy terminal lengths for viewers that reject missing tips.
+
+        ASTRAL-IV/CASTER SU output already has terminal lengths. wASTRAL
+        (coalescent units) intentionally leaves them empty; ape and some
+        viewers fail on that. The dummy is tiny and display-only.
+        """
+        try:
+            from Bio import Phylo
+            tree = Phylo.read(path, "newick")
+            changed = False
+            for tip in tree.get_terminals():
+                if tip.branch_length is None:
+                    tip.branch_length = 1e-5
+                    changed = True
+            if changed:
+                Phylo.write(tree, path, "newick")
+                self.console_output.emit(
+                    "Added display-only terminal branch lengths (1e-5) "
+                    "because this ASTER mode leaves them empty.", "info")
+        except Exception as exc:
+            self.console_output.emit(
+                "Could not add terminal branch lengths: %s" % exc, "warning")
 
 
 class AdvancedOptionsDialog(QDialog):
@@ -354,29 +430,6 @@ class AdvancedOptionsDialog(QDialog):
             hybrid_group.setLayout(hybrid_layout)
             scroll_layout.addWidget(hybrid_group)
 
-        # ASTRAL-Pro3 specific options
-        if self.astral_version == "astral-pro3":
-            pro3_group = QGroupBox("ASTRAL-Pro3 Specific Options")
-            pro3_layout = QVBoxLayout()
-
-            # Exit mode
-            exit_layout = QHBoxLayout()
-            exit_label = QLabel("Exit Mode:")
-            exit_label.setAlignment(Qt.AlignLeft)
-            self.exit_combo = QComboBox()
-            self.exit_combo.addItems([
-                "0 - Print warning when polytomies",
-                "1 - Resolve polytomies",
-                "2 - Print rooted/tagged and exit"
-            ])
-            self.exit_combo.setEditable(False)
-            exit_layout.addWidget(exit_label)
-            exit_layout.addWidget(self.exit_combo)
-            pro3_layout.addLayout(exit_layout)
-
-            pro3_group.setLayout(pro3_layout)
-            scroll_layout.addWidget(pro3_group)
-
         scroll_layout.addStretch()
         scroll_area.setWidget(scroll_widget)
         scroll_area.setWidgetResizable(True)
@@ -412,10 +465,10 @@ class AstralPlugin(BasePlugin):
     """ASTRAL插件：用于物种树推断的基于基因树四叶树采样的工具"""
 
     # 类常量：支持的 ASTRAL 版本
-    ASTRAL_VERSIONS = ["astral4", "astral-pro3", "wastral", "astral-hybrid"]
+    ASTRAL_VERSIONS = ["astral4", "wastral", "astral-hybrid"]
 
-    def __init__(self, import_from=None, import_data=None):
-        super().__init__(import_from, import_data)
+    def __init__(self, import_from=None, import_data=None, **kwargs):
+        super().__init__(import_from, import_data, **kwargs)
         
         # 如果提供了import_data且它是包含多棵基因树的newick文件路径，则设置输入文件
         if import_data and isinstance(import_data, str) and os.path.exists(import_data):
@@ -447,11 +500,29 @@ class AstralPlugin(BasePlugin):
                     temp_file.close()
                     self._preimport_gene_trees_file = temp_file.name
 
+        # setup_input_tab() runs during super().__init__, before the preimport
+        # attribute above exists. Apply it again once the UI is ready.
+        self._apply_preimport_gene_trees()
+
+    def _apply_preimport_gene_trees(self):
+        path = getattr(self, "_preimport_gene_trees_file", "")
+        if not path or not os.path.exists(path):
+            return
+        if not hasattr(self, "file_path_edit") or self.file_path_edit is None:
+            return
+        self.file_path_edit.setText(path)
+        self.import_file = path
+        self.imported_files = [path]
+        self.add_console_message(
+            "Loaded gene trees from: %s" % os.path.basename(path), "info"
+        )
+
     def init_plugin_info(self):
         """初始化插件信息"""
         self.plugin_name = "ASTRAL"
         self.tool_name = "astral"
         self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        self.citation_keys = ["zhang2025aster", "zhang2022wastral"]
         self.input_types = {
             "Newick": ["nwk", "newick", "tre", "tree"]
         }
@@ -459,6 +530,128 @@ class AstralPlugin(BasePlugin):
             "Newick": ".tre"
         }
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
+
+    def control_bindings(self):
+        """GUI controls mapped to the ASTER command line."""
+        bindings = [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input gene trees", "kind": "path", "cli": [],
+             "notes": "Positional input, appended after all options."},
+            {"id": "version", "widget": "version_combo",
+             "label": "ASTRAL version", "kind": "choice",
+             "choices": {
+                 "ASTRAL-IV (Standard species tree inference)": "astral4",
+                 "Weighted ASTRAL (wastral)": "wastral",
+                 "ASTRAL-Hybrid (Hybrid weighting)": "astral-hybrid",
+             },
+             "cli": ["{value}"],
+             "notes": "First argv token; the wrapper selects the matching "
+                      "ASTER executable."},
+            {"id": "threads", "widget": "thread_spin",
+             "label": "Threads", "kind": "int",
+             "cli": ["-t", "{value}"]},
+            {"id": "output", "widget": "output_path_edit",
+             "label": "Output tree", "kind": "path",
+             "cli": ["-o", "{value}"],
+             "notes": "Optional; if empty the plugin writes a temporary .tre."},
+            {"id": "support", "widget": "support_combo",
+             "label": "Support option", "kind": "choice",
+             "choices": {
+                 "0 - No branch or support": "0",
+                 "1 - Length and support only": "1",
+                 "2 - Detailed": "2",
+                 "3 - freqQuad.csv": "3",
+             },
+             "cli": ["-u", "{value}"]},
+            {"id": "constraint", "widget": "advanced_dialog.constraint_edit",
+             "label": "Constraint tree", "kind": "path",
+             "cli": ["-c", "{value}"]},
+            {"id": "guide", "widget": "advanced_dialog.guide_edit",
+             "label": "Guide trees", "kind": "path",
+             "cli": ["-g", "{value}"]},
+            {"id": "rounds", "widget": "advanced_dialog.round_spin",
+             "label": "Rounds", "kind": "int",
+             "cli": ["-r", "{value}"], "omit_values": [4]},
+            {"id": "subsample", "widget": "advanced_dialog.subsample_spin",
+             "label": "Subsample rounds", "kind": "int",
+             "cli": ["-s", "{value}"], "omit_values": [4]},
+            {"id": "mapping", "widget": "advanced_dialog.mapping_edit",
+             "label": "Gene-to-taxon map", "kind": "path",
+             "cli": ["-a", "{value}"]},
+            {"id": "root", "widget": "advanced_dialog.root_edit",
+             "label": "Root taxon", "kind": "text",
+             "cli": ["--root", "{value}"]},
+            {"id": "proportion", "widget": "advanced_dialog.proportion_spin",
+             "label": "Subsample proportion", "kind": "float",
+             "cli": ["--proportion", "{value}"], "omit_values": [0.25]},
+            {"id": "seed", "widget": "advanced_dialog.seed_spin",
+             "label": "Seed", "kind": "int",
+             "cli": ["--seed", "{value}"], "omit_values": [233]},
+            {"id": "lambda", "widget": "advanced_dialog.lambda_spin",
+             "label": "Yule lambda", "kind": "float",
+             "cli": ["-l", "{value}"], "omit_values": [0.5]},
+            {"id": "downweight", "widget": "advanced_dialog.downweight_spin",
+             "label": "Downweight repeats", "kind": "float",
+             "cli": ["-w", "{value}"], "omit_values": [1.0]},
+            {"id": "verbose", "widget": "advanced_dialog.verbose_combo",
+             "label": "Verbose level", "kind": "choice",
+             "choices": {"1 - Minimum": "1", "2 - Normal": "2"},
+             "cli": ["-v", "{value}"], "omit_values": ["2"]},
+            {"id": "scoring", "widget": "scoring_checkbox",
+             "label": "Scoring only", "kind": "bool", "cli": ["-C"]},
+            {"id": "moreround", "widget": "moreround_checkbox",
+             "label": "More rounds", "kind": "bool", "cli": ["-R"]},
+            {"id": "length", "widget": "advanced_dialog.length_combo",
+             "label": "Branch lengths", "kind": "choice",
+             "choices": {"SULength": "SULength", "CULength": "CULength"},
+             "cli": ["--length", "{value}"], "omit_values": ["SULength"],
+             "enabled_when": {"widget": "version_combo",
+                              "equals": "ASTRAL-IV (Standard species tree inference)"},
+             "notes": "ASTRAL-IV only."},
+            {"id": "gene_length", "widget": "advanced_dialog.gene_length_spin",
+             "label": "Gene length", "kind": "float",
+             "cli": ["--genelength", "{value}"], "omit_values": [1000.0],
+             "enabled_when": {"widget": "version_combo",
+                              "equals": "ASTRAL-IV (Standard species tree inference)"},
+             "notes": "ASTRAL-IV only."},
+        ]
+
+        # Hybrid-only widgets exist only when the advanced dialog was built
+        # for astral-hybrid.
+        if hasattr(self.advanced_dialog, "mode_combo"):
+            bindings.extend([
+                {"id": "hybrid_bayes", "widget": "bayes_radio",
+                 "label": "Bayesian support preset", "kind": "bool",
+                 "cli": ["-B"]},
+                {"id": "hybrid_bootstrap", "widget": "bootstrap_radio",
+                 "label": "Bootstrap support preset", "kind": "bool",
+                 "cli": ["-S"]},
+                {"id": "hybrid_lrt", "widget": "lrt_radio",
+                 "label": "LRT support preset", "kind": "bool",
+                 "cli": ["-L"]},
+                {"id": "treeweights", "widget": "advanced_dialog.weights_edit",
+                 "label": "Tree weights", "kind": "path",
+                 "cli": ["--treeweights", "{value}"]},
+                {"id": "hybrid_mode", "widget": "advanced_dialog.mode_combo",
+                 "label": "Weighting mode", "kind": "choice",
+                 "choices": {
+                     "1 - Hybrid weighting": "1",
+                     "2 - Support only": "2",
+                     "3 - Length only": "3",
+                     "4 - Unweighted": "4",
+                 },
+                 "cli": ["--mode", "{value}"], "omit_values": ["1"]},
+                {"id": "min_support", "widget": "advanced_dialog.min_spin",
+                 "label": "Minimum support", "kind": "float",
+                 "cli": ["-n", "{value}"], "omit_values": [-1.0]},
+                {"id": "max_support", "widget": "advanced_dialog.max_spin",
+                 "label": "Maximum support", "kind": "float",
+                 "cli": ["-x", "{value}"], "omit_values": [-1.0]},
+                {"id": "default_support", "widget": "advanced_dialog.default_spin",
+                 "label": "Default support", "kind": "float",
+                 "cli": ["-d", "{value}"], "omit_values": [0.0]},
+            ])
+        return bindings
 
     def setup_input_tab(self):
         """设置输入标签页"""
@@ -477,7 +670,6 @@ class AstralPlugin(BasePlugin):
         self.version_combo = QComboBox()
         self.version_combo.addItems([
             "ASTRAL-IV (Standard species tree inference)",
-            "ASTRAL-Pro3 (Paralogs and orthologs)",
             "Weighted ASTRAL (wastral)",
             "ASTRAL-Hybrid (Hybrid weighting)"
         ])
@@ -612,6 +804,10 @@ class AstralPlugin(BasePlugin):
         self.output_preview.setFont(QFont("Courier", 10))
         layout.addWidget(QLabel("Phylogenetic Tree Preview (Newick Format):"))
         layout.addWidget(self.output_preview)
+        self.import_to_platform_btn = QPushButton("Send to workspace")
+        self.import_to_platform_btn.setVisible(False)
+        self.import_to_platform_btn.clicked.connect(self.import_to_platform)
+        layout.addWidget(self.import_to_platform_btn)
 
     def on_version_changed(self, index):
         """当ASTRAL版本改变时更新UI"""
@@ -654,59 +850,73 @@ class AstralPlugin(BasePlugin):
             self.output_path_edit.setText(file_path)
     
     def import_from_selected_treeset(self):
-        """从选中的 TreeSet 导入基因树到 ASTRAL"""
-        # 获取 dataset_selection_manager
+        """Import selected phylogenies and/or TreeSets into the tree input."""
         dataset_selection_manager = getattr(self, '_dataset_selection_manager', None)
         if not dataset_selection_manager:
             QMessageBox.warning(self, "Warning", "No dataset selection manager available")
             return
-        
-        # 获取选中的 TreeSet
-        from ..platforms.methods.dataset_models import ITEM_TYPE_TREESET, SELECTION_STATE_GREEN
+
+        from ..platforms.methods.dataset_models import (
+            ITEM_TYPE_PHYLOGENY, ITEM_TYPE_TREESET,
+        )
         selected_items = dataset_selection_manager.get_selected_items()
-        treeset_items = [item for item in selected_items if item.item_type == ITEM_TYPE_TREESET]
-        
-        if not treeset_items:
-            QMessageBox.warning(self, "Warning", "Please select a TreeSet first (click on it to select)")
-            return
-        
-        # 提取所有树的 Newick 字符串
         trees = []
-        for tree_data in treeset_items[0].data.get('data', []):
-            if 'content' in tree_data:
-                trees.append(tree_data['content'])
-            elif 'file_path' in tree_data:
-                try:
-                    with open(tree_data['file_path'], 'r') as f:
-                        trees.append(f.read().strip())
-                except:
-                    pass
-        
+        for item in selected_items:
+            if item.item_type == ITEM_TYPE_TREESET:
+                for tree_data in (item.data or {}).get('data', []):
+                    if isinstance(tree_data, str):
+                        trees.append(tree_data)
+                    elif 'content' in tree_data:
+                        trees.append(tree_data['content'])
+                    elif tree_data.get('file_path'):
+                        try:
+                            with open(tree_data['file_path'], 'r', encoding='utf-8') as f:
+                                trees.append(f.read().strip())
+                        except OSError:
+                            pass
+            elif item.item_type == ITEM_TYPE_PHYLOGENY:
+                data = item.data or {}
+                content = ""
+                if isinstance(data, dict):
+                    content = data.get('content') or data.get('newick') or data.get('tree') or ""
+                elif isinstance(data, str):
+                    content = data
+                if not content and item.file_path:
+                    try:
+                        with open(item.file_path, 'r', encoding='utf-8') as f:
+                            content = f.read().strip()
+                    except OSError:
+                        content = ""
+                if content:
+                    trees.extend(line.strip() for line in content.splitlines()
+                                 if line.strip())
+
+        trees = [tree for tree in trees if tree]
         if not trees:
-            QMessageBox.warning(self, "Warning", "No trees found in the selected TreeSet")
+            QMessageBox.warning(
+                self, "Warning",
+                "Please select a Phylogeny or TreeSet first."
+            )
             return
-        
-        # 创建临时文件，所有树用换行符分隔
+
         import tempfile
-        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.trees', delete=False)
-        temp_file.write('\n'.join(trees))
-        temp_file.close()
-        
-        # 设置输入文件
-        self.file_path_edit.setText(temp_file.name)
-        if not self.import_file:
-            self.import_file = temp_file.name
-            self.imported_files = [temp_file.name]
-        
-        self.add_console_message(f"Imported {len(trees)} trees from selected TreeSet", "info")
+        handle = tempfile.NamedTemporaryFile(
+            mode='w', suffix='.trees', delete=False, encoding='utf-8'
+        )
+        handle.write('\n'.join(trees))
+        handle.close()
+
+        self.file_path_edit.setText(handle.name)
+        self.import_file = handle.name
+        self.imported_files = [handle.name]
+        self.add_console_message(
+            "Imported %d tree(s) from the current selection." % len(trees),
+            "info",
+        )
 
     def run_analysis(self):
         """运行ASTRAL分析"""
         # 调试信息
-        print(f"[AstralPlugin] run_analysis called")
-        print(f"[AstralPlugin] tool_path: {self.tool_path}")
-        print(f"[AstralPlugin] tool_path exists: {os.path.exists(self.tool_path) if self.tool_path else 'None'}")
-        print(f"[AstralPlugin] plugin_path: {self.plugin_path}")
 
         # 检查工具路径
         if not self.tool_path or not os.path.exists(self.tool_path):
@@ -767,16 +977,16 @@ class AstralPlugin(BasePlugin):
         if self.advanced_dialog.seed_spin.value() != 233:  # 默认值为233
             params.extend(["--seed", str(self.advanced_dialog.seed_spin.value())])
 
-        # --length 参数只适用于 astral4 和 astral-pro3
-        if selected_version in ["astral4", "astral-pro3"]:
+        # --length 参数只适用于 astral4
+        if selected_version == "astral4":
             if self.advanced_dialog.length_combo.currentIndex() != 0:  # 默认值为SULength
                 params.extend(["--length", self.advanced_dialog.length_combo.currentText()])
 
         if self.advanced_dialog.lambda_spin.value() != 0.5:  # 默认值为0.5
             params.extend(["-l", f"{self.advanced_dialog.lambda_spin.value():.1f}"])
 
-        # --genelength 参数只适用于 astral4 和 astral-pro3
-        if selected_version in ["astral4", "astral-pro3"]:
+        # --genelength 参数只适用于 astral4
+        if selected_version == "astral4":
             if self.advanced_dialog.gene_length_spin.value() != 1000.0:  # 默认值为1000
                 params.extend(["--genelength", f"{self.advanced_dialog.gene_length_spin.value():.0f}"])
 
@@ -816,18 +1026,37 @@ class AstralPlugin(BasePlugin):
             if self.advanced_dialog.default_spin.value() != 0.0:  # 默认值为0
                 params.extend(["-d", f"{self.advanced_dialog.default_spin.value():.3f}"])
 
-        # ASTRAL-Pro3 特定参数
-        if selected_version == "astral-pro3":
-            if self.advanced_dialog.exit_combo.currentIndex() != 0:  # 默认值为0
-                exit_val = self.advanced_dialog.exit_combo.currentText().split(" ")[0]
-                params.extend(["-e", exit_val])
-
         # 预设选项
         if self.scoring_checkbox.isChecked():
             params.append("-C")
 
         if self.moreround_checkbox.isChecked():
             params.append("-R")
+
+        # Weighted modes use ASTER's std::stod parser, which aborts on
+        # composite labels like "/1/100" from IQ-TREE. Normalize first.
+        if selected_version in ("wastral", "astral-hybrid"):
+            try:
+                sanitized = self.create_temp_file(
+                    suffix="_%s.trees" % selected_version
+                )
+                tree_count, changed = normalize_weighted_support_labels(
+                    input_file, sanitized
+                )
+                if changed:
+                    input_file = sanitized
+                    self.add_console_message(
+                        "Normalized %d composite support label(s) across %d "
+                        "gene tree(s); kept one numeric value per node."
+                        % (changed, tree_count),
+                        "info",
+                    )
+            except Exception as exc:
+                self.add_console_message(
+                    "Could not normalize support labels (%s); passing the "
+                    "input unchanged." % exc,
+                    "warning",
+                )
 
         # 添加输入文件到最后
         params.append(input_file)
@@ -838,10 +1067,12 @@ class AstralPlugin(BasePlugin):
             [input_file],
             params,
             self.imported_files,
-            output_file if output_file else None
+            output_file if output_file else None,
+            workdir=self.workdir,
         )
 
         self.analysis_thread.progress.connect(self.update_progress)
+        self.analysis_thread.result_ready.connect(self._on_result)
         self.analysis_thread.console_output.connect(self.add_console_message)
         self.analysis_thread.error.connect(self.handle_error)
         self.analysis_thread.finished.connect(self.handle_finished)
@@ -852,15 +1083,29 @@ class AstralPlugin(BasePlugin):
         self.stop_button.setEnabled(True)
         self.progress_bar.setVisible(True)
 
+    def _on_result(self, payload):
+        self._result_payload = payload
+
     def stop_analysis(self):
         """停止分析"""
-        if hasattr(self, 'analysis_thread') and self.analysis_thread:
-            self.analysis_thread.stop()
-            self.is_running = False
-            self.run_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-            self.progress_bar.setVisible(False)
+        thread = getattr(self, 'analysis_thread', None)
+        if thread is not None and thread.isRunning():
+            for signal_name in ("progress", "result_ready", "finished",
+                                "error", "console_output"):
+                signal = getattr(thread, signal_name, None)
+                if signal is None:
+                    continue
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
             self.add_console_message("Analysis stopped by user", "info")
+        self.is_running = False
+        self.run_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.progress_bar.setVisible(False)
 
     def handle_error(self, error_msg):
         """处理错误"""
@@ -871,64 +1116,104 @@ class AstralPlugin(BasePlugin):
         self.progress_bar.setVisible(False)
 
     def display_results(self, output_files):
-        """显示结果到输出标签页"""
-        if not output_files:
-            QMessageBox.warning(self, "Error", "No output files generated")
-            return
-
+        """Show the inferred species tree without embedding a web view."""
         treefile = None
-        for file in output_files:
-            # 支持多种树文件扩展名
-            if file.endswith('.nwk') or file.endswith('.tre') or file.endswith('.tree') or file.endswith('.newick'):
-                treefile = file
+        for path in output_files:
+            if path.endswith((".nwk", ".tre", ".tree", ".newick")):
+                treefile = path
                 break
+        if treefile is None:
+            self.output_info.setText(
+                "No tree file found. Generated %d file(s)." % len(output_files)
+            )
+            self.output_preview.clear()
+            return
+        try:
+            trees = read_tree_file(treefile)
+        except OSError as exc:
+            self.output_info.setText("Cannot read %s: %s" % (treefile, exc))
+            self.output_preview.clear()
+            return
+        if not trees:
+            self.output_info.setText(
+                "No tree could be parsed from %s." % os.path.basename(treefile)
+            )
+            self.output_preview.clear()
+            return
+        self.output_info.setText(
+            "Species tree: %s · %d output file(s)"
+            % (os.path.basename(treefile), len(output_files))
+        )
+        self.output_preview.setPlainText("\n".join(trees))
 
-        if treefile:
-            try:
-                with open(treefile, 'r', encoding='utf-8') as f:
-                    tree_content = f.read().strip()
+    def _build_result_spec(self):
+        files = list(getattr(self, "current_output_files", []) or [])
+        if not files:
+            raise ValueError("No ASTRAL output is available.")
+        items = []
+        artifacts = []
+        for path in files:
+            name = os.path.basename(path)
+            if name.endswith((".nwk", ".tre", ".tree", ".newick")):
+                trees = read_tree_file(path)
+                if not trees:
+                    raise ValueError("No tree could be parsed from %s." % name)
+                if len(trees) > 1:
+                    items.append(DatasetItemSpec(
+                        loci_name=os.path.splitext(name)[0],
+                        item_type="treeset",
+                        file_path=str(path),
+                        format="newick",
+                        data={"data": [{"content": tree} for tree in trees]},
+                        metadata={"source": self.plugin_name, "tool": "ASTRAL"},
+                    ))
+                else:
+                    items.append(DatasetItemSpec(
+                        loci_name=os.path.splitext(name)[0],
+                        item_type="phylogeny",
+                        file_path=str(path),
+                        format="newick",
+                        data={"newick": trees[0]},
+                        metadata={"source": self.plugin_name, "tool": "ASTRAL"},
+                    ))
+            else:
+                artifacts.append(str(path))
+        if not items:
+            raise ValueError("ASTRAL produced no tree item.")
+        dataset = DatasetSpec(
+            name="ASTRAL species tree",
+            items=items,
+            description="%d tree item(s)" % len(items),
+            source="astral",
+            summary={"items": len(items)},
+            metadata={
+                "input": self.file_path_edit.text(),
+                "version": self.ASTRAL_VERSIONS[self.version_combo.currentIndex()],
+            },
+        )
+        return ResultSpec(source="astral", datasets=[dataset], artifacts=artifacts)
 
-                if not tree_content:
-                    QMessageBox.warning(self, "Error", "Tree file is empty")
-                    return
-
-                # 导入并创建IcyTree插件
-                from .icytree import IcyTreePlugin
-                plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
-                icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
-
-                # 连接IcyTree状态变化信号
-                icytree_plugin.status_changed.connect(lambda status: self._on_icytree_status_changed(status, icytree_plugin))
-
-                # 设置newick字符串
-                icytree_plugin.set_newick_string(tree_content)
-
-                # 清理output_tab布局中的现有组件（保留output_info）
-                output_layout = self.output_tab.layout()
-                if output_layout:
-                    for i in reversed(range(output_layout.count())):
-                        widget = output_layout.itemAt(i).widget()
-                        if widget and widget != self.output_info:
-                            widget.setParent(None)
-
-                # 添加IcyTree插件到输出标签页
-                output_layout.addWidget(icytree_plugin)
-
-            except ImportError:
-                QMessageBox.warning(self, "Error", "IcyTree plugin not available")
-                # 如果IcyTree不可用，显示原始文本
-                if hasattr(self, 'output_preview'):
-                    with open(treefile, 'r', encoding='utf-8') as f:
-                        self.output_preview.setText(f.read())
-                    if hasattr(self, 'output_info'):
-                        self.output_info.setParent(None)
-                        self.output_info = None
-            except Exception as e:
-                error_msg = f"Error processing tree file: {str(e)}"
-                QMessageBox.warning(self, "Error", error_msg)
-                self.add_console_message(error_msg, "error")
-        else:
-            QMessageBox.warning(self, "Error", f"No tree file found. Generated {len(output_files)} file(s).")
+    def import_to_platform(self):
+        if not getattr(self, "current_output_files", None):
+            QMessageBox.warning(self, "No result", "Run ASTRAL first.")
+            return
+        if not self.result_has_consumer():
+            QMessageBox.warning(
+                self, "No workspace",
+                "This window is not connected to a YR-MPE workspace."
+            )
+            return
+        try:
+            result = self._build_result_spec()
+        except Exception as exc:
+            QMessageBox.critical(self, "Export failed", str(exc))
+            return
+        if self.export_result(result):
+            self.import_to_platform_btn.setEnabled(False)
+            self.import_to_platform_btn.setText("Sent to workspace")
+            QMessageBox.information(
+                self, "Success", "ASTRAL species tree sent to the current workspace."
+            )
 
     def _on_icytree_status_changed(self, status, icytree_plugin):
         """处理IcyTree状态变化"""
@@ -954,6 +1239,12 @@ class AstralPlugin(BasePlugin):
         if hasattr(self, 'tab_widget'):
             self.tab_widget.setCurrentIndex(1)
 
+        if (self.import_from in ["YR_MPEA", "DATASET_MANAGER"]
+                or self.result_has_consumer()):
+            self.import_to_platform_btn.setVisible(True)
+        else:
+            self.import_to_platform_btn.setVisible(False)
+
         self.add_console_message(f"ASTRAL analysis completed! Output saved to: {', '.join(output_files)}", "info")
         QMessageBox.information(self, "Completed", f"ASTRAL analysis completed! Output saved to: {', '.join(output_files)}")
 
@@ -964,5 +1255,8 @@ class AstralPlugin(BasePlugin):
 
 
 class AstralPluginEntry:
-    def run(self, import_from=None, import_data=None):
-        return AstralPlugin(import_from=import_from, import_data=import_data)
+    def run(self, import_from=None, import_data=None, workdir=None, **kwargs):
+        return AstralPlugin(
+            import_from=import_from, import_data=import_data,
+            workdir=workdir, **kwargs,
+        )

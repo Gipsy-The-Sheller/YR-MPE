@@ -861,13 +861,13 @@ class MrBayesModelConverter:
         # 处理DNA分区
         if dna_partitions:
             dna_indices = [i+1 for i, p in enumerate(partitions) if p.seq_type == "DNA"]
-            dna_indices_str = ",".join([f"({i})" for i in dna_indices])
+            dna_indices_str = ",".join([str(i) for i in dna_indices])
             commands.append(f"lset applyto=({dna_indices_str}) nucmodel=4by4;")
         
         # 处理Protein分区
         if protein_partitions:
             prot_indices = [i+1 for i, p in enumerate(partitions) if p.seq_type == "PROTEIN"]
-            prot_indices_str = ",".join([f"({i})" for i in prot_indices])
+            prot_indices_str = ",".join([str(i) for i in prot_indices])
             commands.append(f"lset applyto=({prot_indices_str}) nucmodel=protein;")
         
         # 为每个分区设置具体模型参数

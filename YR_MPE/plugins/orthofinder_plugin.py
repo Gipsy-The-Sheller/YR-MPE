@@ -20,6 +20,7 @@ streams its log to the Console tab.
 
 from __future__ import annotations
 
+import csv
 import datetime as _dt
 import json
 import os
@@ -1142,6 +1143,15 @@ class OrthoFinderPlugin(BasePlugin):
 
     def start_pipeline(self, show_dialogs=True):
         """Start the pipeline. Agents call this with show_dialogs=False."""
+        if self.is_running or (
+            self.analysis_thread and self.analysis_thread.isRunning()
+        ):
+            if show_dialogs:
+                QMessageBox.information(
+                    self, "Pipeline running",
+                    "The OrthoFinder pipeline is already running.",
+                )
+            return False
         self._show_run_dialogs = bool(show_dialogs)
         if not self._validate_inputs(show=show_dialogs):
             return False
@@ -1550,7 +1560,7 @@ class OrthoFinderPlugin(BasePlugin):
 
         single_copy = []
         for path in sorted((output_dir / "single_copy_ogs").glob("*.cds.fna")):
-            og = path.name[: -len(".cds.fna")]
+            og = self._og_name(path)
             single_copy.append({
                 "orthogroup": og,
                 "cds_fasta": str(path),
@@ -1692,6 +1702,22 @@ class OrthoFinderPlugin(BasePlugin):
     def closeEvent(self, event):
         state = self.can_close()
         if not state["can_close"]:
+            # A queue-owned job outlives its window.  Hide the window instead
+            # of prompting to kill the pipeline; the queue panel still exposes
+            # progress, cancellation and the result preview.
+            queue = getattr(self, "task_queue", None)
+            job_id = str(getattr(self, "queue_job_id", "") or "")
+            job = None
+            if queue is not None and job_id and callable(
+                getattr(queue, "get_job", None)
+            ):
+                job = queue.get_job(job_id)
+            if job is not None and getattr(job, "state", "") in (
+                "queued", "running"
+            ):
+                event.ignore()
+                self.hide()
+                return
             reply = QMessageBox.question(
                 self,
                 "Pipeline running",
@@ -1704,6 +1730,32 @@ class OrthoFinderPlugin(BasePlugin):
                 return
             self.stop_analysis()
         super().closeEvent(event)
+
+    @staticmethod
+    def _og_name(cds_path):
+        name = Path(cds_path).name
+        for suffix in (".cds.fna", ".cds.fasta", ".cds.fa",
+                       ".fna", ".fasta", ".fa"):
+            if name.lower().endswith(suffix):
+                return name[:-len(suffix)]
+        return Path(cds_path).stem
+
+    @staticmethod
+    def _read_species_by_protein(map_path):
+        path = Path(map_path)
+        if not path.exists():
+            return {}
+        mapping = {}
+        try:
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                for row in csv.DictReader(handle, delimiter="	"):
+                    protein = str(row.get("protein_id", "") or "").strip()
+                    species = str(row.get("species", "") or "").strip()
+                    if protein and species:
+                        mapping[protein] = species
+        except Exception:
+            return {}
+        return mapping
 
     def _build_result_spec(self):
         """Build the dataset exported to YR-MPEA (one item per OG)."""
@@ -1718,17 +1770,28 @@ class OrthoFinderPlugin(BasePlugin):
 
         items = []
         for cds_path in sorted(single_dir.glob("*.cds.fna")):
-            og = cds_path.name[: -len(".cds.fna")]
+            og = self._og_name(cds_path)
             records = list(SeqIO.parse(str(cds_path), "fasta"))
             if not records:
                 continue
             map_path = single_dir / (og + ".map.tsv")
             faa_path = single_dir / (og + ".faa")
+            species_by_protein = self._read_species_by_protein(map_path)
+            normalized = []
+            for record in records:
+                protein_id = str(record.id)
+                species = species_by_protein.get(protein_id, protein_id)
+                record.id = species
+                record.name = species
+                record.description = species
+                if protein_id != species:
+                    record.dbxrefs.append("protein_id:" + protein_id)
+                normalized.append(record)
             items.append(
                 DatasetItemSpec(
                     loci_name=og,
                     item_type="sequence",
-                    sequences=records,
+                    sequences=normalized,
                     file_path=str(cds_path),
                     format="fasta",
                     is_aligned=False,

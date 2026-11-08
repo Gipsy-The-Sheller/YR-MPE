@@ -2,16 +2,19 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLineEdit, QTextEdit, 
                              QLabel, QComboBox, QCheckBox, QRadioButton, 
                              QSpinBox, QDoubleSpinBox, QScrollArea, 
-                             QFrame, QTextEdit, QToolButton, QDialog,
+                             QFrame, QTextEdit, QPlainTextEdit, QToolButton, QDialog,
                              QGroupBox, QSizePolicy, QFormLayout, QGridLayout,
                              QFileDialog, QMessageBox, QApplication,
                              QListWidget, QTableWidget, QTableWidgetItem,
                              QHeaderView, QAbstractItemView)
 from PyQt5.QtCore import Qt, pyqtSignal, QRegExp
 from PyQt5.QtGui import QFont, QTextCursor, QSyntaxHighlighter, QTextCharFormat, QColor, QPalette
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
 from ..platforms.methods.dataset_models import ChainItem
+from .components.alignment_common import collect_partition_sequences
+from .components.nexus_tree import read_nexus_trees
 from .partition_mode import PartitionMode, MrBayesPartitionDefinition, MrBayesModelConverter
 from .mrbayes_partition_ui import MrBayesPartitionDialog
 import os
@@ -116,8 +119,10 @@ class MPIBeagleSettingsDialog(QDialog):
 
 class MrBayesThread(BaseProcessThread):
     """MrBayes系统发育推断线程类"""
-    
-    def __init__(self, tool_path, mpirun_path, input_files, parameters, imported_files=None, run_data_block_checked=True, 
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, mpirun_path, input_files, parameters, imported_files=None, run_data_block_checked=True,
                  use_partition_mode=False, partition_definitions=None, partition_mode=None, workdir=None, use_mpi=False):
         super().__init__(tool_path, input_files, parameters, imported_files, workdir=workdir)
         self.mpirun_path = mpirun_path
@@ -127,28 +132,35 @@ class MrBayesThread(BaseProcessThread):
         self.use_partition_mode = use_partition_mode
         self.partition_definitions = partition_definitions or []
         self.partition_mode = partition_mode
-    
+        self._run_dir = None
+
     def get_tool_name(self):
         """返回工具名称"""
         return "MrBayes-MPI-BEAGLE Phylogeny"
-    
+
+    def _temp_file(self, suffix):
+        """Create a temporary file inside the current per-input run directory."""
+        return self.create_temp_file(suffix=suffix, workdir=self._run_dir or self.workdir)
+
     def execute_commands(self):
         """执行MrBayes命令"""
         try:
             output_files = []
-            
+            root_dir = self.workdir or tempfile.mkdtemp(prefix='mrbayes_')
+            os.makedirs(root_dir, exist_ok=True)
+
             # 分别处理每个输入文件
             total_files = len(self.input_files)
             for i, input_file in enumerate(self.input_files):
                 if not self.is_running:
                     break
-                    
+
                 self.progress.emit(f"Processing file {i+1}/{total_files}...")
                 self.console_output.emit(f"Processing file {i+1}/{total_files}: {os.path.basename(input_file)}", "info")
-                
+
                 # 获取参数
                 params = self.parameters.copy()
-                
+
                 # 获取MCMC参数
                 if len(params) > 0 and isinstance(params[0], dict):
                     param_dict = params[0]
@@ -157,14 +169,19 @@ class MrBayesThread(BaseProcessThread):
                 else:
                     nchains = 4
                     nruns = 2
-                
+
                 # 计算MPI进程数
                 # MPI进程数 = nchains * nruns（每个进程处理一条链）
                 total_threads = nchains * nruns
-                
+
+                # MrBayes writes its output next to the process working
+                # directory, so each input gets a fresh directory; this also
+                # keeps repeated runs from asking about existing files.
+                self._run_dir = tempfile.mkdtemp(prefix='mb_run_', dir=root_dir)
+
                 # 生成MrBayes NEXUS文件
                 nexus_file = self._generate_mrbayes_script(input_file, params)
-                
+
                 # 构建命令
                 if self.use_mpi and total_threads > 1 and self.mpirun_path:
                     # 使用MPI并行版本
@@ -176,39 +193,42 @@ class MrBayesThread(BaseProcessThread):
                 else:
                     # 使用单线程版本
                     cmd = [self.tool_path]
-                
+
                 # 添加输入文件
                 cmd.append(nexus_file)
-                
+
                 # 执行命令
-                result = self.execute_command(cmd)
-                
+                result = self.execute_command(cmd, cwd=self._run_dir)
+
                 if result.returncode != 0:
-                    self.error.emit(f"MrBayes execution failed for file {i+1}: {result.stderr}")
-                    return
-                
-                # 查找生成的输出文件（在nexus_file所在目录）
-                nexus_dir = os.path.dirname(nexus_file)
-                nexus_name = os.path.splitext(os.path.basename(nexus_file))[0]
-                
-                # 查找.con.tre文件
-                con_tre_files = [f for f in os.listdir(nexus_dir) if f.startswith(nexus_name) and f.endswith('.con.tre')]
-                for f in con_tre_files:
-                    output_files.append(os.path.join(nexus_dir, f))
-                
-                # 查找.p文件（chain文件）
-                chain_files = [f for f in os.listdir(nexus_dir) if f.startswith(nexus_name) and '.run' in f and f.endswith('.p')]
-                for f in chain_files:
-                    output_files.append(os.path.join(nexus_dir, f))
-                
-                # 查找.t文件
-                t_files = [f for f in os.listdir(nexus_dir) if f.startswith(nexus_name) and '.run' in f and f.endswith('.t')]
-                for f in t_files:
-                    output_files.append(os.path.join(nexus_dir, f))
-                        
+                    detail = (result.stderr or "").strip()
+                    raise RuntimeError(
+                        "MrBayes failed for %s%s"
+                        % (os.path.basename(input_file),
+                           ": " + detail if detail else "")
+                    )
+
+                # MrBayes names every output after the input file, so collect
+                # the files that belong to this run directory.
+                prefix = os.path.splitext(os.path.basename(nexus_file))[0]
+                produced = sorted(
+                    os.path.join(self._run_dir, name)
+                    for name in os.listdir(self._run_dir)
+                    if name.startswith(prefix)
+                    and os.path.isfile(os.path.join(self._run_dir, name))
+                )
+                if not any(path.endswith('.con.tre') for path in produced):
+                    raise RuntimeError(
+                        "MrBayes produced no consensus tree for %s; "
+                        "see the console for MCMC errors."
+                        % os.path.basename(input_file)
+                    )
+                output_files.extend(produced)
+
             self.progress.emit("Phylogenetic inference completed")
+            self.result_ready.emit({"output_files": output_files})
             self.finished.emit(output_files, [])
-            
+
         except Exception as e:
             self.error.emit(f"Phylogenetic inference exception: {str(e)}")
     
@@ -285,7 +305,7 @@ class MrBayesThread(BaseProcessThread):
             new_content = content + "\n" + mrbayes_block
             
             # 创建临时文件保存新内容
-            output_file = self.create_temp_file(suffix='.nex')
+            output_file = self._temp_file('.nex')
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(new_content)
             
@@ -339,7 +359,7 @@ class MrBayesThread(BaseProcessThread):
                 processed_lines.append(line)
             
             # 创建临时文件保存处理后的内容
-            temp_nexus_file = self.create_temp_file(suffix='.nex')
+            temp_nexus_file = self._temp_file('.nex')
             with open(temp_nexus_file, 'w') as f:
                 f.write('\n'.join(processed_lines))
             
@@ -371,7 +391,7 @@ class MrBayesThread(BaseProcessThread):
             input_format = 'fasta'
         
         # 生成临时NEXUS文件
-        output_file = self.create_temp_file(suffix='.nex')
+        output_file = self._temp_file('.nex')
         
         try:
             # 使用BioPython进行格式转换
@@ -752,9 +772,105 @@ class MrBayesPlugin(BasePlugin):
         self.plugin_name = "MrBayes-MPI-BEAGLE Phylogeny"
         self.tool_name = "MrBayes-MPI-BEAGLE"
         self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        self.citation_keys = ["ronquist2012mrbayes"]
         self.input_types = {"PHYLIP": ["phy"], "NEXUS": ["nex", "nexus"], "Chain File": [""]}
         self.output_types = {"Chain File": [".chain"], "Tree File": [".con.tre"]}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
+
+    def control_bindings(self):
+        """GUI controls mapped to MRBAYES-block directives."""
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input NEXUS/PHYLIP", "kind": "path", "cli": [],
+             "notes": "Run as mb -i <nexus>; PHYLIP/FASTA is converted first."},
+            {"id": "datatype", "widget": "datatype_combo",
+             "label": "Data type", "kind": "choice",
+             "choices": {"DNA": "lset nucmodel=4by4;",
+                         "Protein": "lset nucmodel=protein;"},
+             "cli": ["{value}"],
+             "notes": "NEXUS directive inside the MRBAYES block."},
+            {"id": "dna_nst", "widget": "dna_rate_num_spinbox",
+             "label": "DNA substitution number", "kind": "int",
+             "cli": ["lset", "nst={value};"],
+             "enabled_when": {"widget": "datatype_combo", "equals": "DNA"},
+             "notes": "DNA only; NEXUS directive."},
+            {"id": "dna_statefreq", "widget": "state_freq_pr_combo_dna",
+             "label": "DNA state frequencies", "kind": "choice",
+             "choices": {
+                 "estimated(dirichlet)":
+                     "prset statefreqpr=dirichlet(1.0,1.0,1.0,1.0);",
+                 "fixed(equal)": "prset statefreqpr=fixed(equal);",
+                 "fixed(empirical)": "prset statefreqpr=fixed(empirical);",
+             },
+             "cli": ["{value}"],
+             "enabled_when": {"widget": "datatype_combo", "equals": "DNA"},
+             "notes": "NEXUS directive; DNA only."},
+            {"id": "protein_model", "widget": "prot_model_combo",
+             "label": "Protein model", "kind": "choice",
+             "choices": {
+                 "Blosum62": "prset aamodelpr=fixed(blosum62);",
+                 "Blosum": "prset aamodelpr=fixed(blosum);",
+                 "Wag": "prset aamodelpr=fixed(wag);",
+                 "Lg": "prset aamodelpr=fixed(lg);",
+                 "gtr": "prset aamodelpr=fixed(gtr);",
+                 "jones": "prset aamodelpr=fixed(jones);",
+                 "mtrev": "prset aamodelpr=fixed(mtrev);",
+                 "Poisson": "prset aamodelpr=fixed(poisson);",
+                 "mixed": "prset aamodelpr=mixed;",
+             },
+             "cli": ["{value}"],
+             "enabled_when": {"widget": "datatype_combo", "equals": "Protein"},
+             "notes": "NEXUS directive; protein only."},
+            {"id": "rates", "widget": "rate_hetero_combo",
+             "label": "Rate heterogeneity", "kind": "choice",
+             "choices": {
+                 "Equal": "lset rates=equal;",
+                 "Gamma (+G)": "lset rates=gamma;",
+                 "InvGamma (+G+I)": "lset rates=invgamma;",
+                 "PropInv (+I)": "lset rates=propinv;",
+                 "Lognormal": "lset rates=lnorm;",
+                 "Adgamma": "lset rates=adgamma;",
+             },
+             "cli": ["{value}"],
+             "notes": "ngammacat/nlnormcat is appended from the category "
+                      "control by the block builder."},
+            {"id": "gamma_categories", "widget": "gamma_categories_spinbox",
+             "label": "Rate categories", "kind": "int", "cli": [],
+             "notes": "Appended as ngammacat=N (or nlnormcat=N for lnorm)."},
+            {"id": "generations", "widget": "generation_spinbox",
+             "label": "MCMC generations", "kind": "int",
+             "cli": ["mcmcp", "ngen={value}"],
+             "notes": "Part of the mcmcp line."},
+            {"id": "sampling_frequency", "widget": "sampling_frequency_spinbox",
+             "label": "Sampling frequency", "kind": "int",
+             "cli": ["mcmcp", "samplefreq={value}"],
+             "notes": "Also reused as printfreq."},
+            {"id": "chains", "widget": "chain_num_spinbox",
+             "label": "Chains", "kind": "int",
+             "cli": ["mcmcp", "nchains={value}"]},
+            {"id": "runs", "widget": "run_num_spinbox",
+             "label": "Runs", "kind": "int",
+             "cli": ["mcmcp", "nruns={value}"]},
+        ]
+
+    def setup_output_tab(self):
+        """Native preview: MrBayes writes NEXUS, not the base HTML report."""
+        layout = QVBoxLayout(self.output_tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        self.output_info = QLabel("Run MrBayes to see the consensus tree.")
+        self.output_info.setWordWrap(True)
+        layout.addWidget(self.output_info)
+        self.output_preview = QPlainTextEdit()
+        self.output_preview.setReadOnly(True)
+        self.output_preview.setPlaceholderText(
+            "Consensus tree (Newick) and the output files of this run"
+        )
+        layout.addWidget(self.output_preview, 1)
+        self.import_to_platform_btn = QPushButton("Send to workspace")
+        self.import_to_platform_btn.setVisible(False)
+        self.import_to_platform_btn.clicked.connect(self.import_to_platform)
+        layout.addWidget(self.import_to_platform_btn)
+
     def setup_input_tab(self):
         layout = QVBoxLayout()
         self.input_tab.setLayout(layout)
@@ -1221,23 +1337,27 @@ class MrBayesPlugin(BasePlugin):
                 partition_definitions = []
                 current_pos = 1
                 
-                # 获取所有序列名称
-                if selected_items:
-                    all_seq_names = [seq.id for seq in selected_items[0].sequences]
-                else:
-                    all_seq_names = []
-                
+                # Use the union of taxa across all partitions, not the first one.
+                all_seq_names, records_by_item = collect_partition_sequences(
+                    selected_items
+                )
+                partition_lengths = []
+                for item, records in zip(selected_items, records_by_item):
+                    length = item.length
+                    if not length and records:
+                        length = max(len(str(record.seq)) for record in records)
+                    partition_lengths.append(length)
+
                 # 合并序列
                 for seq_name in all_seq_names:
                     supermatrix_seq = ""
-                    for item in selected_items:
-                        # 找到对应的序列
-                        seq = next((s for s in item.sequences if s.id == seq_name), None)
+                    for records, length in zip(records_by_item, partition_lengths):
+                        seq = next((s for s in records if s.id == seq_name), None)
                         if seq:
                             supermatrix_seq += str(seq.seq)
                         else:
                             # 如果某个 partition 缺少该序列，用 ? 填充
-                            supermatrix_seq += "?" * item.length
+                            supermatrix_seq += "?" * length
                     supermatrix_sequences[seq_name] = supermatrix_seq
                 
                 # 创建 supermatrix 临时文件
@@ -1260,8 +1380,8 @@ class MrBayesPlugin(BasePlugin):
                 self.imported_files = [temp_file]
                 
                 # 计算 partition 坐标并创建 MrBayes 分区定义
-                for item in selected_items:
-                    end_pos = current_pos + item.length - 1
+                for item, length in zip(selected_items, partition_lengths):
+                    end_pos = current_pos + length - 1
                     
                     # 检测序列类型
                     seq_type = self._detect_sequence_type(item)
@@ -1934,11 +2054,15 @@ class MrBayesPlugin(BasePlugin):
             use_mpi=self.use_mpi
         )
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
+        self.analysis_thread.result_ready.connect(self._on_result)
         self.analysis_thread.finished.connect(self.analysis_finished)
         self.analysis_thread.error.connect(self.analysis_error)
         self.analysis_thread.console_output.connect(self.add_console_message)
         self.analysis_thread.start()
-    
+
+    def _on_result(self, payload):
+        self._result_payload = payload
+
     def get_mpirun_path(self):
         """获取MPI运行程序路径"""
         config_path = os.path.join(self.plugin_path, 'config.json')
@@ -1969,22 +2093,23 @@ class MrBayesPlugin(BasePlugin):
         
         # 保存输出文件
         self.current_output_files = output_files
-        
-        # 检测并发送MCMC链文件
-        self._detect_and_emit_chain_files(output_files)
-        
-        # 检测并发送系统发育树文件
-        self._detect_and_emit_phylogeny_files(output_files)
-        
+
         # 显示结果
         self.display_results(output_files)
-        
+
         # 切换到输出标签页
         self.tab_widget.setCurrentIndex(1)
-        
+
+        # 仅当宿主订阅了标准结果通道时才显示导入按钮
+        if (self.import_from in ["YR_MPEA", "DATASET_MANAGER"]
+                or self.result_has_consumer()):
+            self.import_to_platform_btn.setVisible(True)
+        else:
+            self.import_to_platform_btn.setVisible(False)
+
         # 添加控制台消息
         self.add_console_message(f"Phylogenetic inference completed successfully! Found {len(output_files)} result file(s)", "info")
-        
+
         QMessageBox.information(self, "Completed", "Phylogenetic inference completed!")
     
     def _detect_and_emit_phylogeny_files(self, output_files):
@@ -2052,17 +2177,27 @@ class MrBayesPlugin(BasePlugin):
     
     def stop_analysis(self):
         """停止分析"""
-        if self.analysis_thread and self.analysis_thread.isRunning():
-            # 停止线程
-            self.analysis_thread.stop()
+        thread = getattr(self, "analysis_thread", None)
+        if thread is not None and thread.isRunning():
+            # Disconnect first so a killed process cannot report a false error.
+            for signal_name in ("progress", "result_ready", "finished",
+                                "error", "console_output"):
+                signal = getattr(thread, signal_name, None)
+                if signal is None:
+                    continue
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
             self.add_console_message("Analysis stopped by user", "info")
-            
+
         self.is_running = False
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        
-        QMessageBox.information(self, "Stopped", "Analysis has been stopped.")
+
     
     def get_mb_data_block(self):
         """生成MrBayes数据块内容"""
@@ -2241,66 +2376,136 @@ class MrBayesPlugin(BasePlugin):
             QMessageBox.critical(self, "Error", error_msg)
     
     def display_results(self, output_files):
-        """显示分析结果，使用IcyTree插件显示系统发育树"""
+        """Show the consensus tree and the produced files without a web view."""
         if not output_files:
             self.output_info.setText("No output files generated")
+            self.output_preview.clear()
             return
 
-        # 查找.con.tre文件（共识树文件）
         con_tre_files = [f for f in output_files if f.endswith('.con.tre')]
-        
-        if con_tre_files:
-            tree_file = con_tre_files[0]
+        if not con_tre_files:
+            self.output_info.setText(
+                "No consensus tree (.con.tre) found. Generated %d file(s)."
+                % len(output_files)
+            )
+            self.output_preview.setPlainText(
+                "\n".join(os.path.basename(path) for path in output_files)
+            )
+            return
+
+        tree_file = con_tre_files[0]
+        try:
+            trees = read_nexus_trees(tree_file)
+        except OSError as exc:
+            self.output_info.setText("Cannot read %s: %s" % (os.path.basename(tree_file), exc))
+            self.output_preview.clear()
+            return
+        if not trees:
+            self.output_info.setText(
+                "No tree could be parsed from %s." % os.path.basename(tree_file)
+            )
+            self.output_preview.clear()
+            return
+
+        chain_count = len([path for path in output_files
+                           if path.endswith('.p') and os.path.basename(path) != '.p'])
+        self.output_info.setText(
+            "Consensus tree: %s · %d chain file(s) · %d output file(s)"
+            % (os.path.basename(tree_file), chain_count, len(output_files))
+        )
+        self.output_preview.setPlainText("\n".join(trees))
+
+    def _build_result_spec(self):
+        files = list(getattr(self, "current_output_files", []) or [])
+        if not files:
+            raise ValueError("No MrBayes output is available.")
+
+        p_files = [path for path in files if path.endswith('.p')]
+
+        items = []
+        artifacts = []
+        for path in files:
+            name = os.path.basename(path)
+            if name.endswith('.con.tre'):
+                trees = read_nexus_trees(path)
+                if not trees:
+                    raise ValueError(
+                        "No tree could be parsed from %s." % name
+                    )
+                items.append(DatasetItemSpec(
+                    loci_name=os.path.splitext(name)[0],
+                    item_type="phylogeny",
+                    file_path=str(path),
+                    format="nexus",
+                    data={"newick": trees[0], "trees": trees},
+                    metadata={"source": self.plugin_name, "tool": "MrBayes",
+                              "tree_type": "consensus"},
+                ))
+            else:
+                artifacts.append(str(path))
+
+        by_run = {}
+        for path in p_files:
+            name = os.path.basename(path)
             try:
-                # 读取树文件内容
-                with open(tree_file, 'r') as f:
-                    tree_content = f.read().strip()
-                
-                # 确保树内容不为空
-                if not tree_content:
-                    self.output_info.setText("Tree file is empty")
-                    return
-                
-                # 导入IcyTree插件
-                from ..icytree import IcyTreePlugin
-                import os
-                
-                # 创建IcyTree插件实例
-                plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
-                icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
-                
-                # 设置Newick字符串并显示
-                icytree_plugin.set_newick_string(tree_content)
-                
-                # 在输出标签页中显示IcyTree
-                output_layout = self.output_tab.layout()
-                if output_layout:
-                    # 隐藏web_view（如果存在）
-                    if hasattr(self, 'web_view'):
-                        self.web_view.setVisible(False)
-                    
-                    # 查找并移除之前的IcyTree插件（如果有）
-                    for i in reversed(range(output_layout.count())):
-                        widget = output_layout.itemAt(i).widget()
-                        if widget and widget != self.output_info and widget != self.report_combo.parentWidget():
-                            widget.setParent(None)
-                    
-                    # 添加IcyTree插件到输出标签页
-                    output_layout.addWidget(icytree_plugin)
-                
-                self.output_info.setText(f"Consensus tree visualization ready: {os.path.basename(tree_file)}")
-                
-            except ImportError:
-                # 如果无法导入IcyTree插件，显示错误信息
-                self.output_info.setText("Error: IcyTree plugin not available")
-                
-            except Exception as e:
-                error_msg = f"Error processing tree file: {str(e)}"
-                self.output_info.setText(error_msg)
-                self.add_console_message(error_msg, "error")
-        else:
-            # 没有找到共识树文件，显示信息
-            self.output_info.setText(f"No consensus tree (.con.tre) found. Generated {len(output_files)} file(s).")
+                run_number = int(name.split('.run')[1].split('.')[0])
+            except (IndexError, ValueError):
+                run_number = 1
+            by_run.setdefault(run_number, []).append(str(path))
+
+        for run_number in sorted(by_run):
+            paths = sorted(by_run[run_number])
+            items.append(DatasetItemSpec(
+                loci_name="MrBayes run %d" % run_number,
+                item_type="chain",
+                file_path=paths[0],
+                format="mrbayes",
+                data={
+                    "file_paths": paths,
+                    "run_number": run_number,
+                    "chain_count": len(paths),
+                    "tool": "mrbayes",
+                },
+                metadata={"source": self.plugin_name, "tool": "MrBayes"},
+            ))
+
+        if not items:
+            raise ValueError("MrBayes produced no tree or chain item.")
+
+        dataset = DatasetSpec(
+            name="MrBayes result",
+            items=items,
+            description="%d tree/chain item(s)" % len(items),
+            source="mrbayes",
+            summary={"items": len(items)},
+            metadata={
+                "input": self.imported_files[0] if len(self.imported_files) == 1 else "",
+                "parameters": self.get_parameters(),
+            },
+        )
+        return ResultSpec(source="mrbayes", datasets=[dataset], artifacts=artifacts)
+
+    def import_to_platform(self):
+        if not getattr(self, "current_output_files", None):
+            QMessageBox.warning(self, "No result", "Run MrBayes first.")
+            return
+        if not self.result_has_consumer():
+            QMessageBox.warning(
+                self, "No workspace",
+                "This window is not connected to a YR-MPE workspace."
+            )
+            return
+        try:
+            result = self._build_result_spec()
+        except Exception as exc:
+            QMessageBox.critical(self, "Export failed", str(exc))
+            return
+        if self.export_result(result):
+            self.import_to_platform_btn.setEnabled(False)
+            self.import_to_platform_btn.setText("Sent to workspace")
+            QMessageBox.information(
+                self, "Success", "MrBayes result sent to the current workspace."
+            )
 
 class MolecularDatingSettingsDialog(QDialog):
     """分子钟定年设置对话框"""
@@ -3108,183 +3313,6 @@ class MrBayesHighlighter(QSyntaxHighlighter):
             
             pos = index + len(matched_str)
             index = self.settings_regex_spacing.indexIn(text, pos)
-
-    def copy_mb_data_block(self):
-        """复制MrBayes数据块到剪贴板"""
-        try:
-            data_block = self.get_mb_data_block()
-            QApplication.clipboard().setText(data_block)
-            self.add_console_message("MrBayes data block copied to clipboard", "info")
-            QMessageBox.information(self, "Success", "MrBayes data block copied to clipboard!")
-        except Exception as e:
-            error_msg = f"Error copying MrBayes data block: {str(e)}"
-            self.add_console_message(error_msg, "error")
-            QMessageBox.critical(self, "Error", error_msg)
-    
-    def display_results(self, output_files):
-        """显示分析结果，使用IcyTree插件显示系统发育树"""
-        if not output_files:
-            self.output_info.setText("No output files generated")
-            return
-
-        # 查找.con.tre文件（共识树文件）
-        con_tre_files = [f for f in output_files if f.endswith('.con.tre')]
-        
-        if con_tre_files:
-            tree_file = con_tre_files[0]
-            try:
-                # 读取树文件内容
-                with open(tree_file, 'r') as f:
-                    tree_content = f.read().strip()
-                
-                # 确保树内容不为空
-                if not tree_content:
-                    self.output_info.setText("Tree file is empty")
-                    return
-                
-                # 导入IcyTree插件
-                from ..icytree import IcyTreePlugin
-                import os
-                
-                # 创建IcyTree插件实例
-                plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
-                icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
-                
-                # 设置Newick字符串并显示
-                icytree_plugin.set_newick_string(tree_content)
-                
-                # 在输出标签页中显示IcyTree
-                output_layout = self.output_tab.layout()
-                if output_layout:
-                    # 清除现有部件
-                    for i in reversed(range(output_layout.count())):
-                        widget = output_layout.itemAt(i).widget()
-                        if widget and widget != self.output_info:
-                            widget.setParent(None)
-                
-                # 添加IcyTree插件到输出标签页
-                output_layout.addWidget(icytree_plugin)
-                
-                self.output_info.setText(f"Consensus tree visualization ready: {os.path.basename(tree_file)}")
-                
-            except ImportError:
-                # 如果无法导入IcyTree插件，回退到显示文件列表
-                self.output_info.setText("IcyTree plugin not available, showing file list instead")
-                
-                html_content = f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>MrBayes Result</title>
-                    <style>
-                        body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                        h1 {{ color: #2c3e50; }}
-                        .info {{ background-color: #e8f4f8; padding: 10px; border-radius: 5px; }}
-                    </style>
-                </head>
-                <body>
-                    <h1>MrBayes Analysis Result</h1>
-                    <div class="info">
-                        <p><strong>Consensus Tree File:</strong> {os.path.basename(tree_file)}</p>
-                        <p><strong>Total Output Files:</strong> {len(output_files)}</p>
-                    </div>
-                    <h2>Tree Content (Newick Format)</h2>
-                    <pre>{tree_content}</pre>
-                    <h2>All Output Files</h2>
-                    <ul>
-                """
-                
-                for f in output_files:
-                    html_content += f'<li>{os.path.basename(f)}</li>'
-                
-                html_content += """
-                    </ul>
-                </body>
-                </html>
-                """
-                
-                html_file = self.create_temp_file(suffix='.html')
-                with open(html_file, 'w', encoding='utf-8') as f:
-                    f.write(html_content)
-                
-                self.reports = [html_file]
-                self.update_report_combo()
-                self.show_current_report()
-                
-            except Exception as e:
-                error_msg = f"Error processing tree file: {str(e)}"
-                self.output_info.setText(error_msg)
-                self.add_console_message(error_msg, "error")
-                
-                # 创建错误信息的HTML页面
-                html_content = f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Error Display</title>
-                    <style>
-                        body {{ 
-                            font-family: Arial, sans-serif; 
-                            margin: 20px; 
-                            background-color: #ffe6e6; 
-                            color: #d00;
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <h1>Error Processing Tree File</h1>
-                    <p>{error_msg}</p>
-                </body>
-                </html>
-                """
-                
-                html_file = self.create_temp_file(suffix='.html')
-                with open(html_file, 'w', encoding='utf-8') as f:
-                    f.write(html_content)
-                
-                self.reports = [html_file]
-                self.update_report_combo()
-                self.show_current_report()
-        else:
-            self.output_info.setText(f"No consensus tree found. Generated {len(output_files)} file(s).")
-            
-            # 显示所有文件
-            html_content = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>MrBayes Result</title>
-                <style>
-                    body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                    h1 {{ color: #2c3e50; }}
-                    .info {{ background-color: #e8f4f8; padding: 10px; border-radius: 5px; }}
-                </style>
-            </head>
-            <body>
-                <h1>MrBayes Analysis Result</h1>
-                <div class="info">
-                    <p><strong>Total Output Files:</strong> {len(output_files)}</p>
-                </div>
-                <h2>Output Files</h2>
-                <ul>
-            """
-            
-            for f in output_files:
-                html_content += f'<li>{os.path.basename(f)}</li>'
-            
-            html_content += """
-                </ul>
-            </body>
-            </html>
-            """
-            
-            html_file = self.create_temp_file(suffix='.html')
-            with open(html_file, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-            
-            self.reports = [html_file]
-            self.update_report_combo()
-            self.show_current_report()
 
 class MrBayesPluginEntry:
     def __init__(self, config=None, plugin_path=None):

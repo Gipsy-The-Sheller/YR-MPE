@@ -536,3 +536,49 @@ def _apply_complete_deletion(sequences: List[SeqRecord]) -> List[SeqRecord]:
         ))
     
     return cleaned_sequences
+
+def jc69_distance(p_dist, gamma_shape=None):
+    if gamma_shape is None:
+        return - 0.75 * np.log(1 - 4 * p_dist / 3)
+    elif gamma_shape > 0:
+        return 0.75 * gamma_shape * ((1 - 4 * p_dist / 3) ** (- 1 / gamma_shape) - 1)
+    else:
+        raise ValueError("Invalid gamma shape")
+
+def k2p_distance(ts, tv, gamma_shape=None):
+    if gamma_shape is None:
+        return - 0.5 * np.log(1 - 2 * ts - tv) - 0.25 * np.log(1 - 2 * tv)
+    elif gamma_shape > 0:
+        return (gamma_shape * 0.5) * ((1 - 2 * ts - tv) ** (- 1 / gamma_shape) + 0.5 * (1 - 2 * tv) ** (- 1 / gamma_shape) - 1.5)
+    else:
+        raise ValueError("Invalid gamma shape")
+
+def tn93_distance(p1, p2, q, ga, gt, gc, gg, gamma_shape=None):
+    gr = ga + gg
+    gy = gt + gc
+
+    if gamma_shape is None:
+        return (
+            - 2 * ga * gg / gr * np.log(1 - gr * p1 / (2 * ga * gg) - q / (2 * gr))
+            - 2 * gt * gc / gy * np.log(1 - gy * p2 / (2 * gt * gc) - q / (2 * gy))
+            - 2 * (gr * gy - ga * gg * gy / gr - gt * gc * gr / gy) * np.log(1 - q / (2 * gr + 2 * gy))
+        )
+    
+    elif gamma_shape > 0:
+        return (
+            2 * gamma_shape * (
+                ga * gg / gr * (1 - gr * p1 / (2 * ga * gg) - q / (2 * gr)) ** (- 1 / gamma_shape)
+                + gt * gc / gy * (1 - gy * p2 / (2 * gt * gc) - q / (2 * gy)) ** (- 1 / gamma_shape)
+                + (gr * gy - ga * gg * gy / gr - gt * gc * gr / gy) * (1 - q / (2 * gr + 2 * gy) ) ** (- 1 / gamma_shape)
+                - ga * gg - gt * gc - gr * gy
+            )
+        )
+    else:
+        raise ValueError("Invalid gamma shape")
+def poisson_distance(p_dist, gamma_shape=None):
+    if gamma_shape is None:
+        return - np.log(1 - p_dist)
+    elif gamma_shape > 0:
+        return gamma_shape * ((1 - p_dist) ** (- 1 / gamma_shape) - 1)
+    else:
+        raise ValueError("Invalid gamma shape")

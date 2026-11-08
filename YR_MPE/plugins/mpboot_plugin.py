@@ -25,8 +25,10 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 import tempfile
 import os
+from pathlib import Path
 from typing import List, Optional, Dict
 
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
 import subprocess
@@ -153,10 +155,15 @@ class MPBootAdvancedDialog(QDialog):
 
 
 class MPBootThread(BaseProcessThread):
-    """MPBoot系统发育推断线程类"""
-    
-    def __init__(self, tool_path, input_files, parameters, imported_files=None):
-        super().__init__(tool_path, input_files, parameters, imported_files)
+    """MPBoot phylogenetic inference worker."""
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, input_files, parameters,
+                 imported_files=None, workdir=None):
+        super().__init__(
+            tool_path, input_files, parameters, imported_files, workdir=workdir
+        )
     
     def get_tool_name(self):
         """返回工具名称"""
@@ -184,11 +191,14 @@ class MPBootThread(BaseProcessThread):
                 ]
                 
                 # 执行命令
-                result = self.execute_command(cmd)
-                
+                result = self.execute_command(cmd, cwd=str(Path(input_file).parent))
+                detail = (result.stderr or "").strip()
                 if result.returncode != 0:
-                    self.error.emit(f"MPBoot execution failed for file {i+1}: {result.stderr}")
-                    return
+                    raise RuntimeError(
+                        "MPBoot failed for %s%s"
+                        % (os.path.basename(input_file),
+                           ": " + detail if detail else "")
+                    )
                 
                 # 查找生成的.treefile文件
                 treefile = input_file + ".treefile"
@@ -213,10 +223,11 @@ class MPBootThread(BaseProcessThread):
                     output_files.append(contree_file)
             
             self.progress.emit("Phylogenetic inference completed")
+            self.result_ready.emit({"output_files": output_files})
             self.finished.emit(output_files, [])
             
-        except Exception as e:
-            self.error.emit(f"Phylogenetic inference exception: {str(e)}")
+        except Exception as exc:
+            self.error.emit("Phylogenetic inference exception: %s" % exc)
 
 
 class MPBootPlugin(BasePlugin):
@@ -229,8 +240,9 @@ class MPBootPlugin(BasePlugin):
         """初始化MPBoot插件"""
         super().__init__(import_from, import_data, **kwargs)
         
-        # 特别处理YR-MPEA导入的数据
-        if import_from == "YR_MPEA" and import_data is not None:
+        if import_data is not None and (
+            not isinstance(import_data, list) or import_from != "YR_MPEA"
+        ):
             self.handle_import_data(import_data)
         
         # 初始化高级参数的默认值（用于 get_parameters 方法）
@@ -255,11 +267,54 @@ class MPBootPlugin(BasePlugin):
         """初始化插件信息"""
         self.plugin_name = "MPBoot Phylogeny"
         self.tool_name = "MPBoot"
-        self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        self.citation = []
+        self.citation_keys = ["hoang2018mpboot"]
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], "PHYLIP": ["phy"]}
         self.output_types = {"Newick Tree": ".treefile", "MPBoot Report": ".mpboot"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
-    
+
+    def control_bindings(self):
+        """Top-level MPBoot controls mapped to the command line."""
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input alignment", "kind": "path",
+             "cli": ["-s", "{value}"],
+             "notes": "Batch mode runs one MPBoot process per alignment."},
+            {"id": "seq_type", "widget": "seq_type_combo",
+             "label": "Sequence type", "kind": "choice",
+             "choices": {"AUTO": "", "BIN": "BIN", "DNA": "DNA",
+                         "AA": "AA", "CODON": "CODON", "MORPH": "MORPH"},
+             "cli": ["-st", "{value}"]},
+            {"id": "threads", "widget": "threads_spinbox",
+             "label": "Threads", "kind": "int",
+             "cli": ["-nt", "{value}"], "omit_values": [1]},
+            {"id": "ufboot", "widget": "ufboot_checkbox",
+             "label": "Ultrafast bootstrap", "kind": "bool", "cli": [],
+             "notes": "Enables -bb and the UFBoot tuning options."},
+            {"id": "ufboot_replicates", "widget": "ufboot_spinbox",
+             "label": "UFBoot replicates", "kind": "int",
+             "cli": ["-bb", "{value}"], "enabled_by": "ufboot_checkbox"},
+            {"id": "ufboot_max_iter", "widget": "nm_spinbox",
+             "label": "UFBoot max iterations", "kind": "int",
+             "cli": ["-nm", "{value}"], "enabled_by": "ufboot_checkbox"},
+            {"id": "ufboot_stop", "widget": "nstep_spinbox",
+             "label": "UFBoot stopping iterations", "kind": "int",
+             "cli": ["-nstep", "{value}"], "enabled_by": "ufboot_checkbox"},
+            {"id": "ufboot_corr", "widget": "bcor_doublespinbox",
+             "label": "UFBoot min correlation", "kind": "float",
+             "cli": ["-bcor", "{value}"], "enabled_by": "ufboot_checkbox"},
+            {"id": "ufboot_epsilon", "widget": "beps_doublespinbox",
+             "label": "RELL epsilon", "kind": "float",
+             "cli": ["-beps", "{value}"], "enabled_by": "ufboot_checkbox"},
+            {"id": "consensus_threshold", "widget": "t_threshold_doublespinbox",
+             "label": "Consensus threshold", "kind": "float",
+             "cli": ["-t", "{value}"], "omit_values": [0.0],
+             "notes": "0 means extended consensus; 0.5 is majority-rule."},
+            {"id": "consensus_burnin", "widget": "bi_spinbox",
+             "label": "Consensus burn-in", "kind": "int",
+             "cli": ["-bi", "{value}"], "omit_values": [0]},
+        ]
+
     def setup_input_tab(self):
         """设置输入和参数标签页"""
         layout = QVBoxLayout()
@@ -635,22 +690,23 @@ class MPBootPlugin(BasePlugin):
             self.sequence_text.setEnabled(True)
     
     def setup_output_tab(self):
-        """设置输出标签页"""
-        layout = QVBoxLayout()
-        self.output_tab.setLayout(layout)
-        
-        # 添加状态信息标签
+        layout = QVBoxLayout(self.output_tab)
+        layout.setContentsMargins(12, 12, 12, 12)
         self.output_info = QLabel("No tree available yet.")
-        self.output_info.setAlignment(Qt.AlignCenter)
-        self.output_info.setStyleSheet("color: #6c757d; font-style: italic; padding: 20px;")
+        self.output_info.setWordWrap(True)
+        self.output_info.setStyleSheet("color: palette(mid);")
         layout.addWidget(self.output_info)
-    
+        self.output_preview = QTextEdit()
+        self.output_preview.setReadOnly(True)
+        self.output_preview.setFont(QFont("Courier", 10))
+        layout.addWidget(self.output_preview, 1)
+
     def setup_control_panel(self):
         """设置控制面板"""
         super().setup_control_panel()
         
         # 添加导入到平台按钮
-        self.import_to_platform_btn = QPushButton("Import to Current Platform")
+        self.import_to_platform_btn = QPushButton("Send to workspace")
         self.import_to_platform_btn.clicked.connect(self.import_to_platform)
         self.import_to_platform_btn.setVisible(False)  # 初始隐藏
         
@@ -793,15 +849,20 @@ class MPBootPlugin(BasePlugin):
         
         # 创建并启动线程
         self.analysis_thread = MPBootThread(
-            self.tool_path, input_files, self.get_parameters(), self.imported_files
+            self.tool_path, input_files, self.get_parameters(), self.imported_files,
+            workdir=self.workdir,
         )
         
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
+        self.analysis_thread.result_ready.connect(self._on_result)
         self.analysis_thread.finished.connect(self.analysis_finished)
         self.analysis_thread.error.connect(self.analysis_error)
         self.analysis_thread.console_output.connect(self.add_console_message)
         self.analysis_thread.start()
     
+    def _on_result(self, payload):
+        self._payload = payload
+
     def analysis_finished(self, output_files, html_files):
         """分析完成处理"""
         self.is_running = False
@@ -822,7 +883,7 @@ class MPBootPlugin(BasePlugin):
         self.add_console_message(f"Phylogenetic inference completed successfully! Found {len(output_files)} result file(s)", "info")
         
         # 显示导入按钮（仅在从平台导入数据时显示）
-        if self.import_from == "YR_MPEA":
+        if self.import_from == "YR_MPEA" or self.result_has_consumer():
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)
@@ -842,132 +903,116 @@ class MPBootPlugin(BasePlugin):
         QMessageBox.critical(self, "Error", f"Phylogenetic inference failed: {error_message}")
     
     def stop_analysis(self):
-        """停止分析"""
-        if hasattr(self, 'analysis_thread') and self.analysis_thread.isRunning():
-            self.analysis_thread.terminate()
-            self.analysis_thread.wait()
-            
+        if hasattr(self, "analysis_thread") and self.analysis_thread.isRunning():
+            thread = self.analysis_thread
+            for signal in (
+                thread.progress, thread.result_ready, thread.finished,
+                thread.error, thread.console_output,
+            ):
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
         self.is_running = False
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        
-        QMessageBox.information(self, "Stopped", "Phylogenetic inference has been aborted.")
-    
+        self.add_console_message("Phylogenetic inference stopped by user.", "warning")
+
     def display_results(self, output_files):
-        """显示结果，使用IcyTree展示系统发育树"""
-        if not output_files:
-            QMessageBox.warning(self, "Error", "No output files generated")
-            return
-            
-        # 查找.treefile文件并显示
-        treefile = None
-        for file in output_files:
-            if file.endswith('.treefile'):
-                treefile = file
-                break
-                
+        treefile = next(
+            (path for path in output_files if path.endswith(".treefile")), None
+        )
         if treefile:
             try:
-                # 读取树文件内容
-                with open(treefile, 'r', encoding='utf-8') as f:
-                    tree_content = f.read().strip()
-                
-                # 确保树内容不为空
-                if not tree_content:
-                    QMessageBox.warning(self, "Error", "Tree file is empty")
-                    return
-                
-                # 导入IcyTree插件（使用正确的相对路径）
-                from ..icytree import IcyTreePlugin
-                
-                # 创建IcyTree插件实例
-                plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
-                icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
-                
-                # 连接信号，在树加载后移除 output_info 标签
-                icytree_plugin.status_changed.connect(lambda status: self._on_icytree_status_changed(status, icytree_plugin))
-                
-                # 设置Newick字符串并显示
-                icytree_plugin.set_newick_string(tree_content)
-                
-                # 在输出标签页中显示IcyTree
-                output_layout = self.output_tab.layout()
-                if output_layout:
-                    # 清除现有部件（除了 output_info）
-                    for i in reversed(range(output_layout.count())):
-                        widget = output_layout.itemAt(i).widget()
-                        if widget and widget != self.output_info:
-                            widget.setParent(None)
-                
-                # 添加IcyTree插件到输出标签页
-                output_layout.addWidget(icytree_plugin)
-                
-                # 添加控制台消息
-                self.add_console_message(f"Phylogenetic tree loaded: {os.path.basename(treefile)}", "info")
-                
-            except ImportError:
-                # 如果无法导入IcyTree插件，显示错误信息
-                if hasattr(self, 'output_info') and self.output_info:
-                    self.output_info.setText("Error: IcyTree plugin not available")
-                
-            except Exception as e:
-                error_msg = f"Error processing tree file: {str(e)}"
-                self.add_console_message(error_msg, "error")
-                if hasattr(self, 'output_info') and self.output_info:
-                    self.output_info.setText(error_msg)
-        else:
-            # 没有找到树文件，显示信息
-            msg = f"No treefile found. Generated {len(output_files)} file(s)."
-            self.add_console_message(msg, "warning")
-            if hasattr(self, 'output_info') and self.output_info:
-                self.output_info.setText(msg)
-    
-    def _on_icytree_status_changed(self, status, icytree_plugin):
-        """Handle IcyTree status changes"""
-        if status == "Tree loaded to IcyTree":
-            # Remove the "No tree available yet." label when tree is loaded
-            if hasattr(self, 'output_info') and self.output_info:
-                self.output_info.setParent(None)
-                self.output_info = None
-    
-    def import_to_platform(self):
-        """将结果导入到当前平台"""
-        if not hasattr(self, 'current_output_files') or not self.current_output_files:
-            QMessageBox.warning(self, "Warning", "No phylogenetic results to import.")
-            return
-
-        try:
-            # 读取系统发育树文件内容
-            phylogenies = []
-            for output_file in self.current_output_files:
-                if output_file.endswith('.treefile'):
-                    with open(output_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        phylogenies.append({
-                            'filename': os.path.basename(output_file),
-                            'content': content,
-                            'file_path': output_file  # 添加文件路径
-                        })
-
-            if not phylogenies:
-                QMessageBox.warning(self, "Warning", "No phylogenetic trees found in results.")
+                text = Path(treefile).read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                self.output_info.setText("Cannot read tree: %s" % exc)
+                self.output_preview.clear()
                 return
+            self.output_info.setText("Tree: %s" % Path(treefile).name)
+            self.output_preview.setPlainText(text)
+        else:
+            self.output_info.setText("No .treefile found in the MPBoot output.")
+            self.output_preview.clear()
 
-            # 发送信号将数据导入到平台
+    def _build_result_spec(self):
+        files = list(getattr(self, "current_output_files", []) or [])
+        if not files:
+            raise ValueError("No MPBoot output is available.")
+        items = []
+        artifacts = []
+        for path in files:
+            if path.endswith(".treefile"):
+                text = Path(path).read_text(encoding="utf-8", errors="replace").strip()
+                if not text:
+                    continue
+                trees = [line.strip() for line in text.splitlines() if line.strip()]
+                if len(trees) > 1:
+                    items.append(DatasetItemSpec(
+                        loci_name=Path(path).stem,
+                        item_type="treeset",
+                        file_path=str(path),
+                        format="newick",
+                        data={"data": [{"content": tree} for tree in trees]},
+                        metadata={"source": self.plugin_name, "tool": "MPBoot"},
+                    ))
+                else:
+                    items.append(DatasetItemSpec(
+                        loci_name=Path(path).stem,
+                        item_type="phylogeny",
+                        file_path=str(path),
+                        format="newick",
+                        data={"newick": text},
+                        metadata={"source": self.plugin_name, "tool": "MPBoot"},
+                    ))
+            else:
+                artifacts.append(str(path))
+        if not items:
+            raise ValueError("MPBoot produced no treefile.")
+        dataset = DatasetSpec(
+            name="MPBoot tree" if len(items) == 1 else "MPBoot trees",
+            items=items,
+            description="%d maximum-parsimony tree(s)" % len(items),
+            source="mpboot",
+            summary={"trees": len(items)},
+            metadata={
+                "input": self.imported_files[0] if len(self.imported_files) == 1 else "",
+                "parameters": self.get_parameters(),
+            },
+        )
+        return ResultSpec(source="mpboot", datasets=[dataset], artifacts=artifacts)
+
+    def import_to_platform(self):
+        if not getattr(self, "current_output_files", None):
+            QMessageBox.warning(self, "No result", "Run MPBoot first.")
+            return
+        if self.result_has_consumer():
+            try:
+                result = self._build_result_spec()
+            except Exception as exc:
+                QMessageBox.critical(self, "Export failed", str(exc))
+                return
+            if self.export_result(result):
+                self.import_to_platform_btn.setEnabled(False)
+                self.import_to_platform_btn.setText("Sent to workspace")
+                QMessageBox.information(
+                    self, "Success", "MPBoot tree sent to the current workspace."
+                )
+            return
+        phylogenies = []
+        for path in self.current_output_files:
+            if path.endswith(".treefile"):
+                phylogenies.append({
+                    "filename": os.path.basename(path),
+                    "content": Path(path).read_text(encoding="utf-8"),
+                    "file_path": path,
+                })
+        if phylogenies:
             self.import_phylogenies_to_platform(phylogenies)
 
-            # 显示成功消息
-            QMessageBox.information(self, "Success", f"Successfully imported {len(phylogenies)} phylogenetic tree(s) to the platform.")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to import phylogenetic trees: {str(e)}")
-    
-    def import_phylogenies_to_platform(self, phylogenies):
-        """将系统发育树导入到平台的工作区"""
-        # 发送信号将数据导入到平台
-        self.export_phylogeny_result_signal.emit({"type": "phylogeny", "data": phylogenies})
-    
     def handle_import_data(self, import_data):
         """处理从YR-MPEA导入的数据"""
         if isinstance(import_data, list):

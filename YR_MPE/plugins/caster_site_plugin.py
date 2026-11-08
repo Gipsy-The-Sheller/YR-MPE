@@ -8,16 +8,22 @@ import tempfile
 import os
 from typing import List, Optional
 
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
+from .components.nexus_tree import read_tree_file
 import subprocess
 
 
 class CasterSiteThread(BaseProcessThread):
     """CASTER-site分析线程类"""
-    
-    def __init__(self, tool_path, input_files, parameters, imported_files=None, output_file=None):
-        super().__init__(tool_path, input_files, parameters, imported_files)
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, input_files, parameters, imported_files=None,
+                 output_file=None, workdir=None):
+        super().__init__(tool_path, input_files, parameters, imported_files,
+                         workdir=workdir)
         self.output_file = output_file
     
     def get_tool_name(self):
@@ -51,19 +57,26 @@ class CasterSiteThread(BaseProcessThread):
                 ]
                 
                 # 执行命令
-                result = self.execute_command(cmd)
-                
+                result = self.execute_command(
+                    cmd, cwd=self.workdir if self.workdir else None
+                )
+
                 if result.returncode != 0:
-                    self.error.emit(f"CASTER-site execution failed: {result.stderr}")
-                    return
-                
-                # 将stdout写入输出文件
+                    detail = (result.stderr or "").strip()
+                    raise RuntimeError(
+                        "CASTER-site failed%s" % (": " + detail if detail else "")
+                    )
+
+                # ASTER writes the tree to stdout.
                 with open(output_file, 'w', encoding='utf-8') as f:
-                    f.write(result.stdout)
-                
+                    f.write(result.stdout or "")
+                if not (os.path.exists(output_file) and os.path.getsize(output_file) > 0):
+                    raise RuntimeError("CASTER-site produced no tree output.")
+
                 output_files.append(output_file)
-            
+
             self.progress.emit("CASTER-site analysis completed")
+            self.result_ready.emit({"output_files": output_files})
             self.finished.emit(output_files, [])
             
         except Exception as e:
@@ -264,14 +277,15 @@ class AdvancedOptionsDialog(QDialog):
 class CasterSitePlugin(BasePlugin):
     """CASTER-site插件：用于物种树估计的coalescence感知的基于比对的工具"""
     
-    def __init__(self, import_from=None, import_data=None):
-        super().__init__(import_from, import_data)
-    
+    def __init__(self, import_from=None, import_data=None, **kwargs):
+        super().__init__(import_from, import_data, **kwargs)
+
     def init_plugin_info(self):
         """初始化插件信息"""
         self.plugin_name = "CASTER-site"
         self.tool_name = "caster-site"
         self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        self.citation_keys = ["zhang2025aster", "zhang2025caster"]
         self.input_types = {
             "FASTA": ["fas", "fna", "fa", "fasta"],
             "List": ["txt"],
@@ -282,6 +296,75 @@ class CasterSitePlugin(BasePlugin):
         }
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
 
+
+    def control_bindings(self):
+        """GUI controls mapped to the CASTER-site command line."""
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input alignment", "kind": "path", "cli": [],
+             "notes": "Positional input, appended last."},
+            {"id": "format", "widget": "format_combo",
+             "label": "Input format", "kind": "choice",
+             "choices": {"auto": "", "fasta": "fasta", "list": "list",
+                         "phylip": "phylip"},
+             "cli": ["--format", "{value}"],
+             "notes": "auto lets CASTER detect the format."},
+            {"id": "threads", "widget": "thread_spin",
+             "label": "Threads", "kind": "int",
+             "cli": ["--thread", "{value}"]},
+            {"id": "output", "widget": "output_path_edit",
+             "label": "Output tree", "kind": "path",
+             "cli": ["--output", "{value}"],
+             "notes": "Optional; a temporary tree is used if empty."},
+            {"id": "support", "widget": "support_combo",
+             "label": "Support option", "kind": "choice",
+             "choices": {
+                 "0 - No branch or support": "0",
+                 "1 - Length and support only": "1",
+                 "2 - Detailed": "2",
+             },
+             "cli": ["--support", "{value}"]},
+            {"id": "subsample", "widget": "advanced_dialog.subsample_spin",
+             "label": "Subsample rounds", "kind": "int",
+             "cli": ["--subsample", "{value}"], "omit_values": [4]},
+            {"id": "constraint", "widget": "advanced_dialog.constraint_edit",
+             "label": "Constraint tree", "kind": "path",
+             "cli": ["--constraint", "{value}"]},
+            {"id": "guide", "widget": "advanced_dialog.guide_edit",
+             "label": "Guide trees", "kind": "path",
+             "cli": ["--guide", "{value}"]},
+            {"id": "rounds", "widget": "advanced_dialog.round_spin",
+             "label": "Rounds", "kind": "int",
+             "cli": ["--round", "{value}"], "omit_values": [4]},
+            {"id": "mapping", "widget": "advanced_dialog.mapping_edit",
+             "label": "Gene-to-taxon map", "kind": "path",
+             "cli": ["--mapping", "{value}"]},
+            {"id": "root", "widget": "advanced_dialog.root_edit",
+             "label": "Root taxon", "kind": "text",
+             "cli": ["--root", "{value}"]},
+            {"id": "proportion", "widget": "advanced_dialog.proportion_spin",
+             "label": "Subsample proportion", "kind": "float",
+             "cli": ["--proportion", "{value}"], "omit_values": [0.25]},
+            {"id": "seed", "widget": "advanced_dialog.seed_spin",
+             "label": "Seed", "kind": "int",
+             "cli": ["--seed", "{value}"], "omit_values": [233]},
+            {"id": "chunk", "widget": "advanced_dialog.chunk_spin",
+             "label": "Chunk size", "kind": "int",
+             "cli": ["--chunk", "{value}"], "omit_values": [10000]},
+            {"id": "ambiguity", "widget": "advanced_dialog.ambiguity_combo",
+             "label": "Ambiguity handling", "kind": "choice",
+             "choices": {"0": "0", "1": "1"},
+             "cli": ["--ambiguity", "{value}"], "omit_values": ["0"],
+             "notes": "0 treats ambiguity codes as N; 1 treats them as diploid."},
+            {"id": "length", "widget": "advanced_dialog.length_combo",
+             "label": "Branch lengths", "kind": "choice",
+             "choices": {"SULength": "SULength", "CULength": "CULength"},
+             "cli": ["--length", "{value}"], "omit_values": ["SULength"]},
+            {"id": "scoring", "widget": "scoring_checkbox",
+             "label": "Scoring only", "kind": "bool", "cli": ["--scoring"]},
+            {"id": "moreround", "widget": "moreround_checkbox",
+             "label": "More rounds", "kind": "bool", "cli": ["--moreround"]},
+        ]
 
     def setup_input_tab(self):
         """设置输入标签页"""
@@ -386,7 +469,11 @@ class CasterSitePlugin(BasePlugin):
         self.output_preview.setFont(QFont("Courier", 10))
         layout.addWidget(QLabel("Phylogenetic Tree Preview (Newick Format):"))
         layout.addWidget(self.output_preview)
-        
+        self.import_to_platform_btn = QPushButton("Send to workspace")
+        self.import_to_platform_btn.setVisible(False)
+        self.import_to_platform_btn.clicked.connect(self.import_to_platform)
+        layout.addWidget(self.import_to_platform_btn)
+
     def show_advanced_options(self):
         """显示高级选项对话框"""
         result = self.advanced_dialog.exec_()
@@ -421,10 +508,6 @@ class CasterSitePlugin(BasePlugin):
     def run_analysis(self):
         """运行CASTER-site分析"""
         # 调试信息
-        print(f"[CasterSitePlugin] run_analysis called")
-        print(f"[CasterSitePlugin] tool_path: {self.tool_path}")
-        print(f"[CasterSitePlugin] tool_path exists: {os.path.exists(self.tool_path) if self.tool_path else 'None'}")
-        print(f"[CasterSitePlugin] plugin_path: {self.plugin_path}")
 
         # 检查工具路径
         if not self.tool_path or not os.path.exists(self.tool_path):
@@ -511,10 +594,12 @@ class CasterSitePlugin(BasePlugin):
             [input_file],
             params,
             self.imported_files,
-            output_file if output_file else None
+            output_file if output_file else None,
+            workdir=self.workdir,
         )
 
         self.analysis_thread.progress.connect(self.update_progress)
+        self.analysis_thread.result_ready.connect(self._on_result)
         self.analysis_thread.console_output.connect(self.add_console_message)
         self.analysis_thread.error.connect(self.handle_error)
         self.analysis_thread.finished.connect(self.handle_finished)
@@ -525,15 +610,29 @@ class CasterSitePlugin(BasePlugin):
         self.stop_button.setEnabled(True)
         self.progress_bar.setVisible(True)
 
+    def _on_result(self, payload):
+        self._result_payload = payload
+
     def stop_analysis(self):
         """停止分析"""
-        if hasattr(self, 'analysis_thread') and self.analysis_thread:
-            self.analysis_thread.stop()
-            self.is_running = False
-            self.run_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-            self.progress_bar.setVisible(False)
+        thread = getattr(self, 'analysis_thread', None)
+        if thread is not None and thread.isRunning():
+            for signal_name in ("progress", "result_ready", "finished",
+                                "error", "console_output"):
+                signal = getattr(thread, signal_name, None)
+                if signal is None:
+                    continue
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
             self.add_console_message("Analysis stopped by user", "info")
+        self.is_running = False
+        self.run_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.progress_bar.setVisible(False)
 
     def handle_error(self, error_msg):
         """处理错误"""
@@ -544,64 +643,101 @@ class CasterSitePlugin(BasePlugin):
         self.progress_bar.setVisible(False)
 
     def display_results(self, output_files):
-        """显示结果到输出标签页"""
-        if not output_files:
-            QMessageBox.warning(self, "Error", "No output files generated")
-            return
-
+        """Show the inferred species tree without embedding a web view."""
         treefile = None
-        for file in output_files:
-            # 支持多种树文件扩展名
-            if file.endswith('.nwk') or file.endswith('.tre') or file.endswith('.tree') or file.endswith('.newick'):
-                treefile = file
+        for path in output_files:
+            if path.endswith((".nwk", ".tre", ".tree", ".newick")):
+                treefile = path
                 break
+        if treefile is None:
+            self.output_info.setText(
+                "No tree file found. Generated %d file(s)." % len(output_files)
+            )
+            self.output_preview.clear()
+            return
+        try:
+            trees = read_tree_file(treefile)
+        except OSError as exc:
+            self.output_info.setText("Cannot read %s: %s" % (treefile, exc))
+            self.output_preview.clear()
+            return
+        if not trees:
+            self.output_info.setText(
+                "No tree could be parsed from %s." % os.path.basename(treefile)
+            )
+            self.output_preview.clear()
+            return
+        self.output_info.setText(
+            "Species tree: %s · %d output file(s)"
+            % (os.path.basename(treefile), len(output_files))
+        )
+        self.output_preview.setPlainText("\n".join(trees))
 
-        if treefile:
-            try:
-                with open(treefile, 'r', encoding='utf-8') as f:
-                    tree_content = f.read().strip()
+    def _build_result_spec(self):
+        files = list(getattr(self, "current_output_files", []) or [])
+        if not files:
+            raise ValueError("No CASTER-site output is available.")
+        items = []
+        artifacts = []
+        for path in files:
+            name = os.path.basename(path)
+            if name.endswith((".nwk", ".tre", ".tree", ".newick")):
+                trees = read_tree_file(path)
+                if not trees:
+                    raise ValueError("No tree could be parsed from %s." % name)
+                if len(trees) > 1:
+                    items.append(DatasetItemSpec(
+                        loci_name=os.path.splitext(name)[0],
+                        item_type="treeset",
+                        file_path=str(path),
+                        format="newick",
+                        data={"data": [{"content": tree} for tree in trees]},
+                        metadata={"source": self.plugin_name, "tool": "CASTER-site"},
+                    ))
+                else:
+                    items.append(DatasetItemSpec(
+                        loci_name=os.path.splitext(name)[0],
+                        item_type="phylogeny",
+                        file_path=str(path),
+                        format="newick",
+                        data={"newick": trees[0]},
+                        metadata={"source": self.plugin_name, "tool": "CASTER-site"},
+                    ))
+            else:
+                artifacts.append(str(path))
+        if not items:
+            raise ValueError("CASTER-site produced no tree item.")
+        dataset = DatasetSpec(
+            name="CASTER-site species tree",
+            items=items,
+            description="%d tree item(s)" % len(items),
+            source="caster_site",
+            summary={"items": len(items)},
+            metadata={"input": self.file_path_edit.text()},
+        )
+        return ResultSpec(source="caster_site", datasets=[dataset], artifacts=artifacts)
 
-                if not tree_content:
-                    QMessageBox.warning(self, "Error", "Tree file is empty")
-                    return
-
-                # 导入并创建IcyTree插件
-                from .icytree import IcyTreePlugin
-                plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
-                icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
-
-                # 连接IcyTree状态变化信号
-                icytree_plugin.status_changed.connect(lambda status: self._on_icytree_status_changed(status, icytree_plugin))
-
-                # 设置newick字符串
-                icytree_plugin.set_newick_string(tree_content)
-
-                # 清理output_tab布局中的现有组件（保留output_info）
-                output_layout = self.output_tab.layout()
-                if output_layout:
-                    for i in reversed(range(output_layout.count())):
-                        widget = output_layout.itemAt(i).widget()
-                        if widget and widget != self.output_info:
-                            widget.setParent(None)
-
-                # 添加IcyTree插件到输出标签页
-                output_layout.addWidget(icytree_plugin)
-
-            except ImportError:
-                QMessageBox.warning(self, "Error", "IcyTree plugin not available")
-                # 如果IcyTree不可用，显示原始文本
-                if hasattr(self, 'output_preview'):
-                    with open(treefile, 'r', encoding='utf-8') as f:
-                        self.output_preview.setText(f.read())
-                    if hasattr(self, 'output_info'):
-                        self.output_info.setParent(None)
-                        self.output_info = None
-            except Exception as e:
-                error_msg = f"Error processing tree file: {str(e)}"
-                QMessageBox.warning(self, "Error", error_msg)
-                self.add_console_message(error_msg, "error")
-        else:
-            QMessageBox.warning(self, "Error", f"No tree file found. Generated {len(output_files)} file(s).")
+    def import_to_platform(self):
+        if not getattr(self, "current_output_files", None):
+            QMessageBox.warning(self, "No result", "Run CASTER-site first.")
+            return
+        if not self.result_has_consumer():
+            QMessageBox.warning(
+                self, "No workspace",
+                "This window is not connected to a YR-MPE workspace."
+            )
+            return
+        try:
+            result = self._build_result_spec()
+        except Exception as exc:
+            QMessageBox.critical(self, "Export failed", str(exc))
+            return
+        if self.export_result(result):
+            self.import_to_platform_btn.setEnabled(False)
+            self.import_to_platform_btn.setText("Sent to workspace")
+            QMessageBox.information(
+                self, "Success", "CASTER-site species tree sent to the current workspace."
+            )
 
     def _on_icytree_status_changed(self, status, icytree_plugin):
         """处理IcyTree状态变化"""
@@ -627,6 +763,12 @@ class CasterSitePlugin(BasePlugin):
         if hasattr(self, 'tab_widget'):
             self.tab_widget.setCurrentIndex(1)
 
+        if (self.import_from in ["YR_MPEA", "DATASET_MANAGER"]
+                or self.result_has_consumer()):
+            self.import_to_platform_btn.setVisible(True)
+        else:
+            self.import_to_platform_btn.setVisible(False)
+
         self.add_console_message(f"CASTER-site analysis completed! Output saved to: {', '.join(output_files)}", "info")
         QMessageBox.information(self, "Completed", f"CASTER-site analysis completed! Output saved to: {', '.join(output_files)}")
 
@@ -636,5 +778,8 @@ class CasterSitePlugin(BasePlugin):
         self.progress_bar.setValue(0)  # 无限进度条
 
 class CasterSitePluginEntry:
-    def run(self, import_from=None, import_data=None):
-        return CasterSitePlugin(import_from=import_from, import_data=import_data)
+    def run(self, import_from=None, import_data=None, workdir=None, **kwargs):
+        return CasterSitePlugin(
+            import_from=import_from, import_data=import_data,
+            workdir=workdir, **kwargs,
+        )

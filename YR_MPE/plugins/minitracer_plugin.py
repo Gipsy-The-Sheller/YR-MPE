@@ -23,9 +23,12 @@ import numpy as np
 from PyQt5.QtWidgets import (QWidget, QSplitter, QVBoxLayout, QHBoxLayout, 
                              QTableWidget, QTableWidgetItem, QPushButton, 
                              QTabWidget, QFileDialog, QMessageBox, QHeaderView,
-                             QSizePolicy)
+                             QSizePolicy, QCheckBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QColor
+from .components.boxplot import BoxPlot
+from .components.harmonic_compare import HarmonicMeanPanel
+from .components.skyline import SkylinePlot
 from .components.traceplot import TracePlot
 from .components.tracecomp import TraceComp
 from .components.summary_table import SummaryTable
@@ -33,6 +36,10 @@ from .components.methods.mcmc_utils import calculate_ESS
 
 
 class MiniTracerPlugin(QWidget):
+    def help_doc(self):
+        from ..runtime.skills import SkillLibrary
+        return SkillLibrary().get_skill("minitracer") or {}
+
     """
     MiniTracer Plugin for comprehensive MCMC trace diagnostics.
     Provides a unified interface for loading, analyzing, and comparing MCMC chains.
@@ -44,6 +51,9 @@ class MiniTracerPlugin(QWidget):
         self.mcmc_data = {}   # Dictionary to store parsed data for each file
         self.trace_plots = {}  # Dictionary to store pre-initialized TracePlot components: {file_path: {param_name: TracePlot}}
         self.current_trace_plot = None  # Currently displayed TracePlot component
+        self.box_plot = BoxPlot()
+        self.skyline_plot = SkylinePlot()
+        self._param_selection_order = []
         self.init_ui()
         
     def init_ui(self):
@@ -123,7 +133,10 @@ class MiniTracerPlugin(QWidget):
         self.stats_table.setColumnCount(3)
         self.stats_table.setHorizontalHeaderLabels(['Parameter', 'Mean', 'ESS'])
         self.stats_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.stats_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.stats_table.setSelectionMode(QTableWidget.ExtendedSelection)
+        self.stats_table.setToolTip(
+            "Ctrl/Shift-click several parameters to show a Tracer-style box plot."
+        )
         
         # Apply compact styling similar to TraceComp
         self.stats_table.setFont(font)
@@ -169,9 +182,16 @@ class MiniTracerPlugin(QWidget):
         single_layout = QVBoxLayout()
         self.single_chain_tab.setLayout(single_layout)
         
+        self.skyline_checkbox = QCheckBox("Visualize as skyline plot")
+        self.skyline_checkbox.setToolTip(
+            "Connect the selected parameters across each posterior sample; "
+            "dashed lines mark the 95% HPD bounds."
+        )
+        single_layout.addWidget(self.skyline_checkbox)
+
         # Create summary table for statistics
         self.summary_table = SummaryTable()
-        single_layout.addWidget(self.summary_table, 1)  # Add with stretch factor
+        single_layout.addWidget(self.summary_table, 0)  # compact form, no stretch
         
         # Create trace plot container
         self.trace_plot_container = QWidget()
@@ -187,7 +207,11 @@ class MiniTracerPlugin(QWidget):
         compare_layout = QVBoxLayout()
         self.compare_chains_tab.setLayout(compare_layout)
         self.trace_comp = TraceComp(burnin_fraction=0.1)
-        compare_layout.addWidget(self.trace_comp)
+        compare_layout.addWidget(self.trace_comp, 3)
+        self.harmonic_panel = HarmonicMeanPanel()
+        # Share the right column with the statistics table so the interval
+        # plot matches the table's width instead of spanning the whole tab.
+        self.trace_comp.add_right_widget(self.harmonic_panel)
         
         # Connect tab change signal to update plot when switching tabs
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
@@ -206,8 +230,12 @@ class MiniTracerPlugin(QWidget):
         # Connect file table item changes for burn-in editing
         self.file_table.itemChanged.connect(self.on_file_table_item_changed)
         
-        # Connect stats table selection change
+        # Connect stats table selection change; track click order for skyline.
         self.stats_table.itemSelectionChanged.connect(self.on_stats_selection_changed)
+        self.stats_table.selectionModel().selectionChanged.connect(
+            self._track_param_selection_order
+        )
+        self.skyline_checkbox.toggled.connect(self._refresh_parameter_plot)
         
         # Set initial splitter sizes (3:7 ratio)
         splitter.addWidget(left_panel)
@@ -705,26 +733,47 @@ class MiniTracerPlugin(QWidget):
         # If a file is selected and there's a parameter selected, show the corresponding trace plot
         file_selected_rows = set(item.row() for item in self.file_table.selectedItems())
         stats_selected_rows = set(item.row() for item in self.stats_table.selectedItems())
-        if len(file_selected_rows) == 1 and len(stats_selected_rows) == 1:
-            file_row = next(iter(file_selected_rows))
-            stats_row = next(iter(stats_selected_rows))
-            self.show_trace_plot_for_selection(file_row, stats_row)
+        if len(file_selected_rows) == 1 and stats_selected_rows:
+            self._refresh_parameter_plot()
         
+    def _track_param_selection_order(self, selected, deselected):
+        """Keep parameter rows in the order the user selected them."""
+        removed = {index.row() for index in deselected.indexes()}
+        self._param_selection_order = [
+            row for row in self._param_selection_order if row not in removed
+        ]
+        for index in selected.indexes():
+            row = index.row()
+            if row not in self._param_selection_order:
+                self._param_selection_order.append(row)
+
+    def _selected_param_rows(self):
+        selected = {item.row() for item in self.stats_table.selectedItems()}
+        ordered = [row for row in self._param_selection_order if row in selected]
+        return ordered or sorted(selected)
+
+    def _refresh_parameter_plot(self):
+        file_rows = {item.row() for item in self.file_table.selectedItems()}
+        param_rows = self._selected_param_rows()
+        if len(file_rows) != 1 or not param_rows:
+            return
+        file_row = next(iter(file_rows))
+        if len(param_rows) == 1:
+            self.show_trace_plot_for_selection(file_row, param_rows[0])
+        elif self.skyline_checkbox.isChecked():
+            self.show_skyline_plot_for_selection(file_row, param_rows)
+        else:
+            self.show_box_plot_for_selection(file_row, param_rows)
+
     def on_stats_selection_changed(self):
         """Handle statistics table selection changes."""
-        selected_rows = set(item.row() for item in self.stats_table.selectedItems())
-        file_selected_rows = set(item.row() for item in self.file_table.selectedItems())
-        
-        if len(selected_rows) == 1:
-            if len(file_selected_rows) == 1:
-                # Single file selection - show trace plot
-                file_row = next(iter(file_selected_rows))
-                stats_row = next(iter(selected_rows))
-                self.show_trace_plot_for_selection(file_row, stats_row)
-            elif len(file_selected_rows) == 2:
-                # Two files selected - update chain comparison
-                self.update_analysis_tabs()
-    
+        file_rows = {item.row() for item in self.file_table.selectedItems()}
+        param_rows = self._selected_param_rows()
+        if len(file_rows) == 1 and param_rows:
+            self._refresh_parameter_plot()
+        elif len(file_rows) == 2 and len(param_rows) == 1:
+            self.update_analysis_tabs()
+
     def show_trace_plot_for_selection(self, file_row, param_row):
         """Show the TracePlot component for the selected file and parameter, creating it if necessary."""
         if file_row >= len(self.mcmc_files):
@@ -787,14 +836,17 @@ class MiniTracerPlugin(QWidget):
                         burnin_samples = int(len(param_values) * burnin_frac)
                         displayed_samples = param_values[burnin_samples:]
                         self.summary_table.set_data(displayed_samples)
+                        self.summary_table.setVisible(True)
                     
             except Exception:
                 return
         
-        # Remove current trace plot if exists
-        if self.current_trace_plot:
-            self.trace_plot_layout.removeWidget(self.current_trace_plot)
-            self.current_trace_plot.hide()
+        # Remove whichever plot is currently shown.
+        for candidate in (self.current_trace_plot, self.box_plot,
+                          self.skyline_plot):
+            if candidate is not None and candidate.parent() is not None:
+                self.trace_plot_layout.removeWidget(candidate)
+                candidate.hide()
             
         # Show the selected trace plot
         if param_name in self.trace_plots[file_path]:
@@ -810,6 +862,98 @@ class MiniTracerPlugin(QWidget):
             # 设置布局的拉伸因子
             self.trace_plot_layout.setStretch(0, 1)
             
+    def show_box_plot_for_selection(self, file_row, param_rows):
+        """Show one box per selected parameter, after burn-in (Tracer style)."""
+        if file_row >= len(self.mcmc_files):
+            return
+        file_path = self.mcmc_files[file_row]
+        data = self.mcmc_data.get(file_path)
+        if data is None or data.empty:
+            return
+
+        burnin_frac = 0.1
+        burnin_item = self.file_table.item(file_row, 2)
+        if burnin_item:
+            try:
+                burnin_frac = max(0.0, min(0.999, float(burnin_item.text())))
+            except ValueError:
+                burnin_frac = 0.1
+
+        labels = []
+        samples = []
+        for row in sorted(param_rows):
+            item = self.stats_table.item(row, 0)
+            if item is None:
+                continue
+            name = item.text()
+            if name not in data.columns:
+                continue
+            values = pd.to_numeric(data[name], errors="coerce").dropna()
+            if len(values) == 0:
+                continue
+            labels.append(name)
+            samples.append(values.to_numpy(dtype=float))
+        if not labels:
+            return
+
+        if hasattr(self, "summary_table"):
+            self.summary_table.set_data(None)
+            self.summary_table.setVisible(False)
+
+        self.box_plot.set_data(labels, samples, burnin_frac)
+        for candidate in (self.current_trace_plot, self.box_plot,
+                          self.skyline_plot):
+            if candidate is not None and candidate.parent() is not None:
+                self.trace_plot_layout.removeWidget(candidate)
+                candidate.hide()
+        self.trace_plot_layout.addWidget(self.box_plot)
+        self.box_plot.show()
+        self.trace_plot_layout.setStretch(0, 1)
+
+    def show_skyline_plot_for_selection(self, file_row, param_rows):
+        """Draw one translucent line per posterior sample across parameters."""
+        if file_row >= len(self.mcmc_files):
+            return
+        data = self.mcmc_data.get(self.mcmc_files[file_row])
+        if data is None or data.empty:
+            return
+        burnin_frac = 0.1
+        burnin_item = self.file_table.item(file_row, 2)
+        if burnin_item:
+            try:
+                burnin_frac = max(0.0, min(0.999, float(burnin_item.text())))
+            except ValueError:
+                burnin_frac = 0.1
+
+        labels = []
+        samples = []
+        for row in param_rows:
+            item = self.stats_table.item(row, 0)
+            if item is None:
+                continue
+            name = item.text()
+            if name not in data.columns:
+                continue
+            values = pd.to_numeric(data[name], errors="coerce").to_numpy(dtype=float)
+            labels.append(name)
+            samples.append(values)
+        if len(labels) < 2:
+            return
+
+        if hasattr(self, "summary_table"):
+            self.summary_table.set_data(None)
+            self.summary_table.setVisible(False)
+
+        for candidate in (self.current_trace_plot, self.box_plot,
+                          self.skyline_plot):
+            if candidate is not None and candidate.parent() is not None:
+                self.trace_plot_layout.removeWidget(candidate)
+                candidate.hide()
+        self.skyline_plot.set_data(labels, samples, burnin_frac)
+        self.trace_plot_layout.addWidget(self.skyline_plot)
+        self.skyline_plot.show()
+        self.trace_plot_layout.setStretch(0, 1)
+
     def update_single_chain_analysis(self, file_row, param_row=None):
         """Update single chain analysis tab - now handled by show_trace_plot_for_selection."""
         # This method is now primarily used for compatibility, but the actual display logic
@@ -820,6 +964,8 @@ class MiniTracerPlugin(QWidget):
         """Update the comparison analysis for two selected files."""
         if not hasattr(self, 'trace_comp') or self.trace_comp is None:
             return
+        if hasattr(self, "harmonic_panel"):
+            self.harmonic_panel.clear()
             
         # Get the selected files - use mcmc_files list instead of file table text
         # because mcmc_data dictionary uses full file paths as keys
@@ -923,6 +1069,11 @@ class MiniTracerPlugin(QWidget):
                 
             print(f"Debug: Setting data with {len(chain1_data_valid)} and {len(chain2_data_valid)} points")
             self.trace_comp.set_data(chain1_data_valid, chain1_iterations_valid, chain2_data_valid, chain2_iterations_valid)
+            self.harmonic_panel.set_data(
+                [os.path.basename(file1), os.path.basename(file2)],
+                [param_data1.values, param_data2.values],
+                param_name,
+            )
             
         except Exception as e:
             # Handle any errors during data preparation
@@ -945,6 +1096,8 @@ class MiniTracerPlugin(QWidget):
             else:
                 # Clear the comparison display when not exactly 2 files are selected
                 self.trace_comp.set_data(None, None, None, None)
+                if hasattr(self, "harmonic_panel"):
+                    self.harmonic_panel.clear()
         
     def get_tool_name(self):
         """Return the tool name for plugin registration."""

@@ -26,24 +26,32 @@ from PyQt5.QtGui import QIcon, QFont
 import tempfile
 import os
 import re
+from pathlib import Path
 from typing import List, Optional, Dict
 from Bio import SeqIO
 
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
 import subprocess
 
 # 导入分区模式相关模块
+from .components.alignment_common import collect_partition_sequences
 from .partition_mode import PartitionDefinition, PartitionMode, create_partition_from_dict
 from .model_finder_partition_ui import ModelFinderPartitionDialog
 from .model_finder_partition_thread import ModelFinderPartitionThread
 
 
 class ModelFinderThread(BaseProcessThread):
-    """ModelFinder线程类"""
-    
-    def __init__(self, tool_path, input_files, parameters, imported_files=None):
-        super().__init__(tool_path, input_files, parameters, imported_files)
+    """Run IQ-TREE ModelFinder and return .iqtree reports."""
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, input_files, parameters,
+                 imported_files=None, workdir=None):
+        super().__init__(
+            tool_path, input_files, parameters, imported_files, workdir=workdir
+        )
     
     def get_tool_name(self):
         """返回工具名称"""
@@ -73,11 +81,14 @@ class ModelFinderThread(BaseProcessThread):
                 ]
                 
                 # 执行命令
-                result = self.execute_command(cmd)
-                
+                result = self.execute_command(cmd, cwd=str(Path(input_file).parent))
+                detail = (result.stderr or "").strip()
                 if result.returncode != 0:
-                    self.error.emit(f"IQ-TREE ModelFinder execution failed for file {i+1}: {result.stderr}")
-                    return
+                    raise RuntimeError(
+                        "IQ-TREE ModelFinder failed for %s%s"
+                        % (os.path.basename(input_file),
+                           ": " + detail if detail else "")
+                    )
                 
                 # 查找生成的.iqtree文件
                 iqtree_file = input_file + ".iqtree"
@@ -92,10 +103,11 @@ class ModelFinderThread(BaseProcessThread):
                         self.console_output.emit(f"Warning: Could not find .iqtree file for {input_file}", "warning")
             
             self.progress.emit("Model finding completed")
+            self.result_ready.emit({"output_files": output_files})
             self.finished.emit(output_files, [])
             
-        except Exception as e:
-            self.error.emit(f"Model finding exception: {str(e)}")
+        except Exception as exc:
+            self.error.emit("Model finding exception: %s" % exc)
 
 
 class ModelFinderPlugin(BasePlugin):
@@ -105,30 +117,30 @@ class ModelFinderPlugin(BasePlugin):
     import_alignment_signal = pyqtSignal(list)  # 导入比对结果信号
     export_model_result_signal = pyqtSignal(dict)  # 导出模型结果信号
     
-    def __init__(self, import_from=None, import_data=None):
-        """初始化ModelFinder插件"""
-        super().__init__(import_from, import_data)
-
-        # 初始化分区模式相关变量
+    def __init__(self, import_from=None, import_data=None, **kwargs):
         self.partition_mode_enabled = False
         self.partition_definitions: List[PartitionDefinition] = []
         self.partition_mode = PartitionMode.EL
         self.partition_rcluster = False
         self.partition_rcluster_percent = None
         self.partition_dialog = None
+        self._payload = None
+        super().__init__(import_from, import_data, **kwargs)
+        if import_data is not None and (
+            not isinstance(import_data, list) or import_from != "YR_MPEA"
+        ):
+            if import_from == "DATASET_MANAGER":
+                self.handle_dataset_import(import_data)
+            else:
+                self.handle_import_data(import_data)
+        self.run_button.setText("Run ModelFinder")
 
-        # 处理不同来源的导入数据
-        if import_from == "YR_MPEA" and import_data is not None:
-            self.handle_import_data(import_data)
-        elif import_from == "DATASET_MANAGER" and import_data is not None:
-            self.handle_dataset_import(import_data)
-        
     def init_plugin_info(self):
         """初始化插件信息"""
         self.plugin_name = "IQ-TREE ModelFinder"
         self.tool_name = "IQ-Tree 3"
         self.citation = []  # citation text lives in YR_MPE/citations/*.bib
-        self.citation_keys = ["kalyaanamoorthy2017modelfinder"]
+        self.citation_keys = ["kalyaanamoorthy2017modelfinder", "wong2026iqtree"]
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], "PHYLIP": ["phy"]}
         self.output_types = {"IQ-TREE": ".iqtree"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
@@ -201,23 +213,27 @@ class ModelFinderPlugin(BasePlugin):
             partition_definitions = []
             current_pos = 1
             
-            # 获取所有序列名称（假设所有 partition 有相同的序列）
-            if selected_items:
-                all_seq_names = [seq.id for seq in selected_items[0].sequences]
-            else:
-                all_seq_names = []
-            
+            # Use the union of taxa across all partitions, not the first one.
+            all_seq_names, records_by_item = collect_partition_sequences(
+                selected_items
+            )
+            partition_lengths = []
+            for item, records in zip(selected_items, records_by_item):
+                length = item.length
+                if not length and records:
+                    length = max(len(str(record.seq)) for record in records)
+                partition_lengths.append(length)
+
             # 合并序列
             for seq_name in all_seq_names:
                 supermatrix_seq = ""
-                for item in selected_items:
-                    # 找到对应的序列
-                    seq = next((s for s in item.sequences if s.id == seq_name), None)
+                for records, length in zip(records_by_item, partition_lengths):
+                    seq = next((s for s in records if s.id == seq_name), None)
                     if seq:
                         supermatrix_seq += str(seq.seq)
                     else:
                         # 如果某个 partition 缺少该序列，用 ? 填充
-                        supermatrix_seq += "?" * item.length
+                        supermatrix_seq += "?" * length
                 supermatrix_sequences[seq_name] = supermatrix_seq
             
             # 创建 supermatrix 临时文件
@@ -231,8 +247,8 @@ class ModelFinderPlugin(BasePlugin):
             self.imported_files = [temp_file]
             
             # 计算 partition 坐标并创建 partition definitions
-            for item in selected_items:
-                end_pos = current_pos + item.length - 1
+            for item, length in zip(selected_items, partition_lengths):
+                end_pos = current_pos + length - 1
                 partition_def = PartitionDefinition(
                     name=item.loci_name,
                     file_path="",  # 空字符串表示使用 supermatrix 的坐标
@@ -660,9 +676,11 @@ class ModelFinderPlugin(BasePlugin):
         self.output_tab.setLayout(layout)
         
         # 说明文字
-        info_label = QLabel("Model selection results will be displayed here after analysis completes.")
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
+        self.info_label = QLabel(
+            "Model selection results will be displayed here after analysis completes."
+        )
+        self.info_label.setWordWrap(True)
+        layout.addWidget(self.info_label)
         
         # 结果表格
         self.results_table = QTableWidget()
@@ -732,6 +750,61 @@ class ModelFinderPlugin(BasePlugin):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Prepare input files failed: {e}")
             return None
+
+    def control_bindings(self):
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input alignment", "kind": "path",
+             "cli": ["-s", "{value}"],
+             "notes": "Partition mode uses a generated supermatrix."},
+            {"id": "seq_type", "widget": "seq_type_combo",
+             "label": "Sequence type", "kind": "choice",
+             "choices": {"AUTO": "", "DNA": "DNA", "PROT": "AA"},
+             "cli": ["-st", "{value}"],
+             "notes": "AUTO omits -st."},
+            {"id": "criterion", "widget": "criterion_combo",
+             "label": "Criterion", "kind": "choice",
+             "choices": {"BIC": [], "AICc": ["-AICc"], "AIC": ["-AIC"]},
+             "cli": ["{value}"],
+             "notes": "BIC is the default and adds no option."},
+            {"id": "threads", "widget": "threads_spinbox",
+             "label": "Threads", "kind": "int",
+             "cli": ["-nt", "{value}"],
+             "omit_values": [1],
+             "notes": "Value 1 omits -nt in the actual command."},
+            {"id": "partition_mode", "widget": "partition_mode_checkbox",
+             "label": "Partition mode", "kind": "bool",
+             "cli": [],
+             "notes": "GUI-only switch; the partition thread builds -p/-q."},
+            {"id": "partition_linkage", "widget": "",
+             "label": "Partition linkage", "kind": "choice",
+             "choices": {
+                 "Edge-linked Proportional (-p)": "-p",
+                 "Edge-linked Equal (-q)": "-q",
+                 "Edge-unlinked (-Q)": "-Q",
+                 "Topo-unlinked (-S)": "-S",
+             },
+             "cli": [],
+             "notes": "Set in Configure Partitions; the flag consumes the "
+                      "generated partition file."},
+            {"id": "rcluster", "widget": "",
+             "label": "RCluster", "kind": "composite",
+             "cli": ["--rcluster", "{value}"],
+             "notes": "Set in Configure Partitions; value is the percentage."},
+        ]
+
+    def cli_preview(self):
+        input_file = (self.imported_files[0] if self.imported_files
+                      else self.file_path_edit.text().strip() or "<input>")
+        parameters = self.get_parameters()
+        if isinstance(parameters, dict):
+            return [
+                self.tool_path or "iqtree3",
+                "-s", "<supermatrix>", "-m", "TESTONLY",
+                "<partition-mode options>",
+            ]
+        return ([self.tool_path or "iqtree3", "-s", input_file,
+                 "-m", "TESTONLY"] + parameters)
 
     def get_parameters(self):
         """获取命令行参数"""
@@ -940,7 +1013,9 @@ class ModelFinderPlugin(BasePlugin):
         """在输出标签页中显示结果"""
         if not iqtree_files:
             self.results_table.setRowCount(0)
+            self.info_label.setVisible(True)
             return
+        self.info_label.setVisible(False)
         
         # 根据是否启用分区模式选择不同的显示方式
         if self.partition_mode_enabled:
@@ -1156,15 +1231,21 @@ class ModelFinderPlugin(BasePlugin):
         else:
             # 使用常规线程
             self.analysis_thread = ModelFinderThread(
-                self.tool_path, input_files, params, self.imported_files
+                self.tool_path, input_files, params, self.imported_files,
+                workdir=self.workdir,
             )
         
         self.analysis_thread.progress.connect(self.progress_bar.setFormat)
+        if hasattr(self.analysis_thread, "result_ready"):
+            self.analysis_thread.result_ready.connect(self._on_result)
         self.analysis_thread.finished.connect(self.analysis_finished)
         self.analysis_thread.error.connect(self.analysis_error)
         self.analysis_thread.console_output.connect(self.add_console_message)
         self.analysis_thread.start()
     
+    def _on_result(self, payload):
+        self._payload = payload
+
     def analysis_finished(self, output_files, html_files):
         """分析完成处理"""
         self.is_running = False
@@ -1185,7 +1266,8 @@ class ModelFinderPlugin(BasePlugin):
         self.analysis_output_files = output_files
         
         # 显示导入按钮（分区模式下总是显示，普通模式仅从平台导入时显示）
-        if self.partition_mode_enabled or self.import_from == "YR_MPEA":
+        if (self.partition_mode_enabled or self.import_from == "YR_MPEA"
+                or self.result_has_consumer()):
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)
@@ -1208,17 +1290,25 @@ class ModelFinderPlugin(BasePlugin):
         QMessageBox.critical(self, "Error", f"ModelFinder failed: {error_message}")
     
     def stop_analysis(self):
-        """停止分析"""
-        if hasattr(self, 'analysis_thread') and self.analysis_thread.isRunning():
-            self.analysis_thread.terminate()
-            self.analysis_thread.wait()
-            
+        if hasattr(self, "analysis_thread") and self.analysis_thread.isRunning():
+            thread = self.analysis_thread
+            for signal in (
+                thread.progress, getattr(thread, "result_ready", None),
+                thread.finished, thread.error, thread.console_output,
+            ):
+                if signal is None:
+                    continue
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
         self.is_running = False
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        
-        QMessageBox.information(self, "Stopped", "ModelFinder has been aborted.")
+        self.add_console_message("ModelFinder stopped by user.", "warning")
 
     def import_alignment_to_platform(self, sequences):
         """将比对结果导入到平台的工作区"""
@@ -1243,7 +1333,68 @@ class ModelFinderPlugin(BasePlugin):
         
         QMessageBox.information(self, "Success", f"Best model '{best_model_data['Model']}' exported to YR-MPEA successfully!")
 
+    def _build_result_spec(self):
+        files = list(getattr(self, "analysis_output_files", []) or [])
+        if not files:
+            raise ValueError("No ModelFinder .iqtree output is available.")
+        items = []
+        for path in files:
+            if self.partition_mode_enabled:
+                data = self.parse_partition_results(path) or {}
+                best = data.get("overall_model", "")
+            else:
+                models = self.parse_iqtree_file(path)
+                data = {"models": models}
+                best = models[0].get("Model", "") if models else ""
+            items.append(DatasetItemSpec(
+                loci_name=Path(path).stem,
+                item_type="model",
+                file_path=str(path),
+                format="iqtree",
+                data={
+                    "best_model": best,
+                    "partitioned": bool(self.partition_mode_enabled),
+                    "results": data,
+                },
+                metadata={"source": self.plugin_name, "tool": "IQ-TREE ModelFinder"},
+            ))
+        dataset = DatasetSpec(
+            name="ModelFinder models",
+            items=items,
+            description="%d model report(s)" % len(items),
+            source="modelfinder",
+            summary={
+                "reports": len(items),
+                "partitioned": bool(self.partition_mode_enabled),
+            },
+            metadata={
+                "input": (self.imported_files[0] if len(self.imported_files) == 1 else ""),
+                "parameters": self.get_parameters() if isinstance(self.get_parameters(), list) else {},
+                "partition_mode": self.partition_mode.value if self.partition_mode_enabled else "",
+            },
+        )
+        return ResultSpec(
+            source="modelfinder",
+            datasets=[dataset],
+            artifacts=[str(path) for path in files],
+        )
+
     def export_table_to_mpea(self):
+        if self.result_has_consumer():
+            try:
+                result = self._build_result_spec()
+            except Exception as exc:
+                QMessageBox.critical(self, "Export failed", str(exc))
+                return
+            if self.export_result(result):
+                QMessageBox.information(
+                    self, "Success",
+                    "Model report sent to the current workspace.",
+                )
+            return
+        # Legacy signal fallback follows.
+
+
         """导出完整模型表到YR-MPEA"""
         if self.results_table.rowCount() == 0:
             QMessageBox.warning(self, "Warning", "No model results to export.")
@@ -1335,5 +1486,8 @@ class ModelFinderPluginEntry:
         self.config = config
         self.plugin_path = plugin_path
     
-    def run(self, import_from=None, import_data=None):
-        return ModelFinderPlugin(import_from, import_data)
+    def run(self, import_from=None, import_data=None, workdir=None, **kwargs):
+        return ModelFinderPlugin(
+            import_from=import_from, import_data=import_data,
+            workdir=workdir, **kwargs,
+        )

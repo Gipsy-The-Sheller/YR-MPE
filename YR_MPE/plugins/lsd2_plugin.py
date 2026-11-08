@@ -17,14 +17,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                            QMessageBox, QLabel, QFileDialog, QDialog)
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+                            QMessageBox, QLabel, QFileDialog, QDialog, QTextEdit)
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QFont
 import os
 import tempfile
 
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
+from .components.nexus_tree import read_tree_file
 from .components.lsd2_ui import LSD2UI
 from .components.icytree_dialog import IcyTreeDialog
 from .components.tip_dating_dialog import TipDatingDialog
@@ -34,7 +37,7 @@ from .components.md_mrca import MDMRCA
 class LSD2Plugin(BasePlugin):
     """LSD2分子钟定年插件主类"""
     
-    def __init__(self, import_from=None, import_data=None):
+    def __init__(self, import_from=None, import_data=None, **kwargs):
         # 首先创建控制面板
         self.control_panel = LSD2UI()
         
@@ -44,7 +47,7 @@ class LSD2Plugin(BasePlugin):
         self.control_panel.open_md_mrca_dialog_callback = self.open_md_mrca_dialog
         
         # 调用父类初始化
-        super().__init__(import_from, import_data)
+        super().__init__(import_from, import_data, **kwargs)
     
     def init_plugin_info(self):
         """初始化插件信息"""
@@ -62,7 +65,59 @@ class LSD2Plugin(BasePlugin):
             "Result File": ".result"
         }
         self.citation = []  # citation text lives in YR_MPE/citations/*.bib
-    
+        self.citation_keys = ["to2016fast"]
+
+    def control_bindings(self):
+        """GUI controls mapped to the LSD2 command line."""
+        return [
+            {"id": "tree", "widget": "control_panel.tree_file_path",
+             "label": "Input tree", "kind": "path",
+             "cli": ["-i", "{value}"],
+             "notes": "Rooted or unrooted Newick tree."},
+            {"id": "sequence_file", "widget": "control_panel.seq_file_path",
+             "label": "Sequence file", "kind": "path", "cli": [],
+             "notes": "GUI-only: used to compute sequence length."},
+            {"id": "sequence_length_mode",
+             "widget": "control_panel.seq_length_combo",
+             "label": "Sequence length mode", "kind": "choice", "cli": [],
+             "notes": "Disabled/Manual/From sequence file; the runner always "
+                      "passes -s with the resolved length (1000 if disabled)."},
+            {"id": "sequence_length",
+             "widget": "control_panel.sequence_length_spin",
+             "label": "Manual sequence length", "kind": "int",
+             "cli": ["-s", "{value}"],
+             "enabled_when": {"widget": "control_panel.seq_length_combo",
+                              "equals": "Manual"}},
+            {"id": "root_chosen",
+             "widget": "control_panel.use_chosen_root_radio",
+             "label": "Use chosen root", "kind": "bool",
+             "cli": ["-r", "l"],
+             "notes": "Requires a rooted tree loaded from IcyTree."},
+            {"id": "root_estimate",
+             "widget": "control_panel.estimate_root_radio",
+             "label": "Estimate the root", "kind": "bool",
+             "cli": ["-r", "a"]},
+            {"id": "confidence_interval",
+             "widget": "control_panel.calculate_ci_checkbox",
+             "label": "Confidence intervals", "kind": "bool",
+             "cli": ["-f", "100"],
+             "notes": "The plugin uses 100 bootstrap trees."},
+            {"id": "lognormal_std",
+             "widget": "control_panel.lognormal_std_edit",
+             "label": "Lognormal std", "kind": "float",
+             "cli": ["-q", "{value}"],
+             "enabled_by": "control_panel.calculate_ci_checkbox"},
+            {"id": "calibrations",
+             "widget": "control_panel.calibration_table",
+             "label": "Node calibrations", "kind": "table", "cli": [],
+             "notes": "Written to a temporary calibration file and passed "
+                      "with -d."},
+            {"id": "tip_dates",
+             "widget": "control_panel.use_tip_dates_checkbox",
+             "label": "Use tip dates", "kind": "bool", "cli": [],
+             "notes": "Tip calibrations are merged into the -d file."},
+        ]
+
     def config(self):
         """检查插件配置"""
         # 调用父类的config()方法检查LSD2
@@ -91,6 +146,14 @@ class LSD2Plugin(BasePlugin):
         self.output_info_label = QLabel("Run LSD2 analysis to see results here.")
         self.output_info_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.output_info_label)
+        self.output_preview = QTextEdit()
+        self.output_preview.setReadOnly(True)
+        self.output_preview.setFont(QFont("Courier", 10))
+        layout.addWidget(self.output_preview)
+        self.import_to_platform_btn = QPushButton("Send to workspace")
+        self.import_to_platform_btn.setVisible(False)
+        self.import_to_platform_btn.clicked.connect(self.import_to_platform)
+        layout.addWidget(self.import_to_platform_btn)
     
     def open_icytree_dialog(self, newick_str):
         """打开IcyTree置根对话框"""
@@ -306,8 +369,11 @@ class LSD2Plugin(BasePlugin):
                 return
         
         # 启动LSD2线程
-        self.lsd2_thread = LSD2Thread(self.tool_path, [tree_file], parameters)
+        self.lsd2_thread = LSD2Thread(
+            self.tool_path, [tree_file], parameters, workdir=self.workdir
+        )
         self.lsd2_thread.progress.connect(self.update_progress)
+        self.lsd2_thread.result_ready.connect(self._on_result)
         self.lsd2_thread.console_output.connect(self.add_console_message)
         self.lsd2_thread.finished.connect(self.on_lsd2_finished)
         self.lsd2_thread.error.connect(self.on_lsd2_error)
@@ -317,11 +383,24 @@ class LSD2Plugin(BasePlugin):
         self.stop_button.setEnabled(True)
         self.lsd2_thread.start()
     
+    def _on_result(self, payload):
+        self._result_payload = payload
+
     def stop_analysis(self):
         """停止分析"""
-        if hasattr(self, 'lsd2_thread') and self.lsd2_thread.isRunning():
-            self.lsd2_thread.stop()
-        
+        thread = getattr(self, 'lsd2_thread', None)
+        if thread is not None and thread.isRunning():
+            for signal_name in ("progress", "result_ready", "finished",
+                                "error", "console_output"):
+                signal = getattr(thread, signal_name, None)
+                if signal is None:
+                    continue
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
         self.is_running = False
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
@@ -338,10 +417,12 @@ class LSD2Plugin(BasePlugin):
         
         if output_files:
             self.imported_files.extend(output_files)
+            self.current_output_files = output_files
             self.add_console_message(f"LSD2 analysis completed. Generated {len(output_files)} files.", "success")
-            
-            # 解析和显示结果
             self.parse_lsd2_results(output_files)
+            if (self.import_from in ["YR_MPEA", "DATASET_MANAGER"]
+                    or self.result_has_consumer()):
+                self.import_to_platform_btn.setVisible(True)
         else:
             self.add_console_message("LSD2 analysis completed but no output files found.", "warning")
     
@@ -398,39 +479,77 @@ class LSD2Plugin(BasePlugin):
             self.add_console_message(f"Failed to parse tree file: {str(e)}", "error")
     
     def visualize_time_tree(self, newick_str):
-        """可视化时间树"""
+        """Show the dated tree in the native output preview."""
+        self.tab_widget.setCurrentWidget(self.output_tab)
+        self.output_info_label.setText("LSD2 time tree")
+        self.output_preview.setPlainText(newick_str)
+
+    def _build_result_spec(self):
+        files = list(getattr(self, "current_output_files", []) or [])
+        if not files:
+            raise ValueError("No LSD2 output is available.")
+        items = []
+        artifacts = []
+        for path in files:
+            name = os.path.basename(path)
+            if name.endswith((".nwk", ".tre", ".tree", ".newick")):
+                trees = read_tree_file(path)
+                if not trees:
+                    raise ValueError("No tree could be parsed from %s." % name)
+                items.append(DatasetItemSpec(
+                    loci_name=os.path.splitext(name)[0],
+                    item_type="phylogeny",
+                    file_path=str(path),
+                    format="newick",
+                    data={"newick": trees[0], "dated": True},
+                    metadata={"source": self.plugin_name, "tool": "LSD2"},
+                ))
+            else:
+                artifacts.append(str(path))
+        if not items:
+            raise ValueError("LSD2 produced no dated tree item.")
+        dataset = DatasetSpec(
+            name="LSD2 time tree",
+            items=items,
+            description="%d dated tree item(s)" % len(items),
+            source="lsd2",
+            summary={"items": len(items)},
+            metadata={"input": self.control_panel.get_original_tree_file()},
+        )
+        return ResultSpec(source="lsd2", datasets=[dataset], artifacts=artifacts)
+
+    def import_to_platform(self):
+        if not getattr(self, "current_output_files", None):
+            QMessageBox.warning(self, "No result", "Run LSD2 first.")
+            return
+        if not self.result_has_consumer():
+            QMessageBox.warning(
+                self, "No workspace",
+                "This window is not connected to a YR-MPE workspace."
+            )
+            return
         try:
-            # 切换到输出标签页
-            self.tab_widget.setCurrentWidget(self.output_tab)
-            
-            # 使用IcyTree显示时间树
-            from .icytree import IcyTreePlugin
-            
-            # 清空输出标签页
-            output_layout = self.output_tab.layout()
-            while output_layout.count():
-                child = output_layout.takeAt(0)
-                if child.widget():
-                    child.widget().deleteLater()
-            
-            # 创建IcyTree实例
-            icytree = IcyTreePlugin(plugin_path=self.plugin_path)
-            icytree.set_newick_string(newick_str)
-            output_layout.addWidget(icytree)
-            
-            self.add_console_message("Time tree visualization completed.", "success")
-            
-        except ImportError as e:
-            self.add_console_message(f"Could not import IcyTree: {str(e)}", "warning")
-        except Exception as e:
-            self.add_console_message(f"Failed to visualize time tree: {str(e)}", "error")
+            result = self._build_result_spec()
+        except Exception as exc:
+            QMessageBox.critical(self, "Export failed", str(exc))
+            return
+        if self.export_result(result):
+            self.import_to_platform_btn.setEnabled(False)
+            self.import_to_platform_btn.setText("Sent to workspace")
+            QMessageBox.information(
+                self, "Success", "LSD2 time tree sent to the current workspace."
+            )
 
 
 class LSD2Thread(BaseProcessThread):
     """LSD2分子钟定年线程类"""
-    
-    def __init__(self, tool_path, input_files, parameters, imported_files=None):
-        super().__init__(tool_path, input_files, parameters, imported_files)
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, input_files, parameters, imported_files=None,
+                 workdir=None):
+        super().__init__(tool_path, input_files, parameters, imported_files,
+                         workdir=workdir)
     
     def get_tool_name(self):
         """返回工具名称"""
@@ -450,25 +569,29 @@ class LSD2Thread(BaseProcessThread):
             self.console_output.emit(f"Processing tree file: {os.path.basename(tree_file)}", "info")
             
             # 构建命令
+            base_name = os.path.splitext(tree_file)[0]
+            file_dir = os.path.dirname(tree_file) or "."
+            file_name = os.path.basename(tree_file)
             cmd = [
                 self.tool_path,
                 "-i", tree_file,
                 *self.parameters
             ]
-            
+
             self.console_output.emit(f"Executing LSD2 command: {' '.join(cmd)}", "command")
-            
+
             # 执行命令
-            result = self.execute_command(cmd)
-            
+            result = self.execute_command(
+                cmd, cwd=self.workdir if self.workdir else file_dir
+            )
+
             if result.returncode != 0:
-                self.error.emit(f"LSD2 execution failed with return code {result.returncode}\n{result.stderr}")
-                return
-            
+                detail = (result.stderr or "").strip()
+                raise RuntimeError(
+                    "LSD2 failed%s" % (": " + detail if detail else "")
+                )
+
             # 查找生成的输出文件
-            base_name = os.path.splitext(tree_file)[0]
-            file_dir = os.path.dirname(tree_file)
-            file_name = os.path.basename(tree_file)
             
             # LSD2主要输出文件
             result_file = base_name + ".result"
@@ -492,10 +615,12 @@ class LSD2Thread(BaseProcessThread):
                     self.console_output.emit(f"Found dated tree file: {dated_tree_file}", "info")
             
             if not output_files:
-                self.console_output.emit(f"Warning: Could not find LSD2 output files for {tree_file}", "warning")
-                self.console_output.emit("Please check the LSD2 output in the working directory.", "warning")
-            
+                raise RuntimeError(
+                    "LSD2 produced no .result or dated tree output."
+                )
+
             self.progress.emit("Molecular dating completed")
+            self.result_ready.emit({"output_files": output_files})
             self.finished.emit(output_files, [])
             
         except Exception as e:
@@ -505,10 +630,13 @@ class LSD2Thread(BaseProcessThread):
 # 插件入口点
 class LSD2PluginEntry:
     """LSD2插件入口点"""
-    
+
     def __init__(self, config=None, plugin_path=None):
         self.config = config
         self.plugin_path = plugin_path
-    
-    def run(self, import_from=None, import_data=None):
-        return LSD2Plugin(import_from=import_from, import_data=import_data)
+
+    def run(self, import_from=None, import_data=None, workdir=None, **kwargs):
+        return LSD2Plugin(
+            import_from=import_from, import_data=import_data,
+            workdir=workdir, **kwargs,
+        )

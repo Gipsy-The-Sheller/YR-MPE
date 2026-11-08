@@ -13,44 +13,46 @@ from typing import List, Optional
 import subprocess
 from Bio import SeqIO
 
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
+from .components.nexus_tree import read_tree_file
 
 import logging
 
 
 class BpcompThread(BaseProcessThread):
     """Bpcomp共识分析线程类"""
-    
-    def __init__(self, tool_path, chain_files, parameters, imported_files=None):
-        super().__init__(tool_path, chain_files, parameters, imported_files)
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, chain_files, parameters, imported_files=None, workdir=None):
+        super().__init__(tool_path, chain_files, parameters, imported_files, workdir=workdir)
         self.chain_files = chain_files
         self.parameters = parameters
-    
+
     def get_tool_name(self):
         """返回工具名称"""
         return "Bpcomp Consensus Analysis"
-        
+
     def execute_commands(self):
         """执行Bpcomp共识分析命令"""
         try:
-            output_files = []
-            
             # 构建bpcomp命令
             # 替换工具路径中的pb_mpi为bpcomp
             bpcomp_path = self.tool_path.replace("pb_mpi", "bpcomp")
-            
+
             cmd = [bpcomp_path]
-            
+
             # 添加参数
             cutoff = self.parameters.get('cutoff', 0.5)
             if cutoff != 0.5:  # 默认值是0.5
                 cmd.extend(["-c", str(cutoff)])
-            
+
             burnin = self.parameters.get('burnin', 0)
             every = self.parameters.get('every', 1)
             until = self.parameters.get('until', 0)
-            
+
             if burnin > 0 or every > 1 or until > 0:
                 cmd.append("-x")
                 cmd.append(str(burnin))
@@ -58,104 +60,104 @@ class BpcompThread(BaseProcessThread):
                     cmd.append(str(every))
                     if until > 0:
                         cmd.append(str(until))
-            
-            # 确定工作目录和链文件路径
-            if self.chain_files:
-                first_chain = self.chain_files[0]
-                chain_dir = os.path.dirname(first_chain)
-                
-                # 使用固定前缀 "output" 作为输出文件名
-                output_prefix = os.path.join(chain_dir, "output")
-                cmd.extend(["-o", "output"])  # 只传递前缀名，不带路径
-                # 输出文件包括 .con.tre 和 .bplist
-                output_files.append(f"{output_prefix}.con.tre")
-                output_files.append(f"{output_prefix}.bplist")
-                
-                # 添加链文件路径（保持用户输入的格式）
-                # 如果是绝对路径，转换为相对路径
-                relative_chain_paths = []
-                for chain_file in self.chain_files:
-                    rel_path = os.path.relpath(chain_file, chain_dir)
-                    relative_chain_paths.append(rel_path)
-                cmd.extend(relative_chain_paths)
-                
-                # 在链文件所在的目录下执行命令
-                cwd = chain_dir
-            else:
-                cwd = None
-            
+
+            if not self.chain_files:
+                raise RuntimeError("No PhyloBayes chains were selected for bpcomp.")
+
+            chain_dir = self.workdir or os.path.dirname(self.chain_files[0])
+            output_prefix = os.path.join(chain_dir, "output")
+            cmd.extend(["-o", "output"])
+
+            relative_chain_paths = [
+                os.path.relpath(chain_file, chain_dir)
+                for chain_file in self.chain_files
+            ]
+            cmd.extend(relative_chain_paths)
+
             self.console_output.emit(f"Running BPCOMP command: {' '.join(cmd)}", "command")
-            if cwd:
-                self.console_output.emit(f"Working directory: {cwd}", "info")
-            
-            # 执行命令
-            result = self.execute_command(cmd, cwd=cwd)
-            
+            self.console_output.emit(f"Working directory: {chain_dir}", "info")
+
+            result = self.execute_command(cmd, cwd=chain_dir)
+
             if result.returncode != 0:
-                self.error.emit(f"Bpcomp execution failed: {result.stderr}")
-                return
-            
-            # 发送结果到控制台
+                detail = (result.stderr or "").strip()
+                raise RuntimeError(
+                    "Bpcomp failed%s" % (": " + detail if detail else "")
+                )
+
             self.console_output.emit(f"Bpcomp output:\n{result.stdout}", "info")
-            
+
+            output_files = [output_prefix + ".con.tre", output_prefix + ".bplist"]
+            missing = [path for path in output_files if not os.path.isfile(path)]
+            if missing:
+                raise RuntimeError(
+                    "Bpcomp did not write %s"
+                    % ", ".join(os.path.basename(path) for path in missing)
+                )
+
             self.progress.emit("Bpcomp consensus analysis completed")
+            self.result_ready.emit({"output_files": output_files})
             self.finished.emit(output_files, [])
-            
+
         except Exception as e:
             self.error.emit(f"Bpcomp analysis exception: {str(e)}")
 
 
 class PhyloBayesThread(BaseProcessThread):
     """PhyloBayes-MPI系统发育推断线程类"""
-    
-    def __init__(self, tool_path, mpirun_path, input_files, parameters, imported_files=None, chain_number=1, chain_prefix=""):
-        super().__init__(tool_path, input_files, parameters, imported_files)
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, mpirun_path, input_files, parameters, imported_files=None, chain_number=1, chain_prefix="", workdir=None):
+        super().__init__(tool_path, input_files, parameters, imported_files, workdir=workdir)
         self.mpirun_path = mpirun_path
         self.chains = []  # 保存链名称
         self.chain_number = chain_number  # 链编号
         self.chain_prefix = chain_prefix  # 链日志前缀
-    
+
     def get_tool_name(self):
         """返回工具名称"""
         return "PhyloBayes-MPI Phylogeny"
-    
+
     def _add_chain_prefix(self, message):
         """添加链前缀到消息"""
         if self.chain_prefix:
             return f"{self.chain_prefix} {message}"
         return message
-        
+
     def execute_commands(self):
         """执行PhyloBayes-MPI系统发育推断命令"""
         try:
             output_files = []
-            
-            # 清空chains列表
             self.chains = []
-            
+
+            run_dir = self.workdir or tempfile.mkdtemp(prefix='phylobayes_')
+            os.makedirs(run_dir, exist_ok=True)
+
             # 分别处理每个输入文件
             total_files = len(self.input_files)
             for i, input_file in enumerate(self.input_files):
                 if not self.is_running:
                     break
-                    
+
                 self.progress.emit(f"Processing file {i+1}/{total_files}...")
                 self.console_output.emit(self._add_chain_prefix(f"Processing file {i+1}/{total_files}: {os.path.basename(input_file)}"), "info")
-                
+
                 # 获取参数
                 params = self.parameters.copy()
-                
+
                 # 获取MPI并行数
                 mpi_parallel = params.pop(0)  # 第一个参数是并行数
-                chain_name = os.path.join(os.path.dirname(os.path.abspath(input_file)), os.path.basename(input_file) + "_chain")
-                
+                stem = os.path.splitext(os.path.basename(input_file))[0]
+                chain_name = os.path.join(run_dir, stem + "_chain")
+
                 # 如果有多个链，添加链编号到链名称
                 if self.chain_number > 1:
                     chain_name = f"{chain_name}_{self.chain_number}"
-                
+
                 # 保存链名称
                 self.chains.append(chain_name)
-                
+
                 # 构建MPI命令
                 cmd = [
                     self.mpirun_path,
@@ -165,31 +167,35 @@ class PhyloBayesThread(BaseProcessThread):
                     *params,  # 其他参数
                     chain_name  # 链名称作为最后一个参数
                 ]
-                
+
                 self.console_output.emit(self._add_chain_prefix(f"Starting PhyloBayes with chain name: {os.path.basename(chain_name)}"), "info")
-                
+
                 # 执行命令
-                result = self.execute_command(cmd)
-                
+                result = self.execute_command(cmd, cwd=run_dir)
+
                 if result.returncode != 0:
-                    self.error.emit(self._add_chain_prefix(f"PhyloBayes-MPI execution failed for file {i+1}: {result.stderr}"))
-                    return
-                
+                    detail = (result.stderr or "").strip()
+                    raise RuntimeError(
+                        "PhyloBayes failed for %s%s"
+                        % (os.path.basename(input_file),
+                           ": " + detail if detail else "")
+                    )
+
                 # 查找生成的链文件
-                # 根据链名称模式查找输出文件
                 import glob
-                chain_pattern = f"{chain_name}*"
-                chain_files = glob.glob(os.path.join(os.path.dirname(input_file), chain_pattern))
-                
-                if chain_files:
-                    output_files.extend(chain_files)
-                    self.console_output.emit(self._add_chain_prefix(f"Found {len(chain_files)} chain files"), "info")
-                else:
-                    self.console_output.emit(self._add_chain_prefix(f"Warning: Could not find chain files for {input_file}"), "warning")
-                        
+                chain_files = glob.glob(chain_name + "*")
+                if not chain_files:
+                    raise RuntimeError(
+                        "PhyloBayes produced no chain files for %s."
+                        % os.path.basename(input_file)
+                    )
+                output_files.extend(sorted(chain_files))
+                self.console_output.emit(self._add_chain_prefix(f"Found {len(chain_files)} chain files"), "info")
+
             self.progress.emit(self._add_chain_prefix("Phylogenetic inference completed"))
+            self.result_ready.emit({"output_files": output_files})
             self.finished.emit(output_files, [])
-            
+
         except Exception as e:
             self.error.emit(self._add_chain_prefix(f"Phylogenetic inference exception: {str(e)}"))
 
@@ -216,9 +222,64 @@ class PhyloBayesPlugin(BasePlugin):
         self.plugin_name = "PhyloBayes-MPI Phylogeny"
         self.tool_name = "PhyloBayes-MPI"
         self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        self.citation_keys = ["lartillot2013phylobayes", "lartillot2009phylobayes"]
         self.input_types = {"PHYLIP": ["phy"], "Chain File": [""]}
         self.output_types = {"Chain File": [".chain"], "Tree File": [".con.tre"], "Tree List": [".treelist"]}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
+
+    def control_bindings(self):
+        """GUI controls mapped to the pb_mpi command."""
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Phylip alignment", "kind": "path",
+             "cli": ["-d", "{value}"],
+             "notes": "One pb_mpi run per alignment; chain name is appended "
+                      "as the final positional argument."},
+            {"id": "mpi_processes", "widget": "n_mpi_parallel",
+             "label": "MPI processes", "kind": "int",
+             "cli": ["-np", "{value}"],
+             "notes": "Passed to mpirun before the pb_mpi executable."},
+            {"id": "parallel_chains", "widget": "n_parallel_chains",
+             "label": "Parallel chains", "kind": "int", "cli": [],
+             "notes": "GUI-only: launches this many independent chains."},
+            {"id": "cat", "widget": "use_CAT_model",
+             "label": "CAT mixture", "kind": "bool", "cli": [],
+             "notes": "Enables -cat or -ncat."},
+            {"id": "cat_infinite", "widget": "use_inf_CAT",
+             "label": "Infinite CAT", "kind": "bool", "cli": ["-cat"],
+             "enabled_by": "use_CAT_model"},
+            {"id": "cat_finite", "widget": "use_finite_CAT",
+             "label": "Finite CAT", "kind": "bool", "cli": [],
+             "notes": "Enables -ncat with the mixture count."},
+            {"id": "ncat", "widget": "mix_number_spinbox",
+             "label": "nCAT components", "kind": "int",
+             "cli": ["-ncat", "{value}"],
+             "enabled_when": {"widget": "use_finite_CAT", "equals": True}},
+            {"id": "gamma", "widget": "use_Gamma_model",
+             "label": "Discrete Gamma", "kind": "bool", "cli": [],
+             "notes": "Enables -dgam with the category count."},
+            {"id": "gamma_categories", "widget": "gamma_categories_spinbox",
+             "label": "Gamma categories", "kind": "int",
+             "cli": ["-dgam", "{value}"],
+             "enabled_by": "use_Gamma_model"},
+            {"id": "substitution_model", "widget": "subst_model_combo",
+             "label": "Substitution model", "kind": "choice",
+             "choices": {
+                 "GTR": "-gtr",
+                 "Poisson (Protein only)": "-poisson",
+                 "JTT (Protein only)": "-jtt",
+                 "WAG (Protein only)": "-wag",
+                 "LG (Protein only)": "-lg",
+             },
+             "cli": ["{value}"]},
+            {"id": "sampling_frequency", "widget": "sampling_frequency",
+             "label": "Sampling frequency", "kind": "int", "cli": [],
+             "notes": "Combined with generations as -x <frequency> <generations>."},
+            {"id": "generations", "widget": "n_mcmc_generations",
+             "label": "MCMC generations", "kind": "int", "cli": [],
+             "notes": "Combined with sampling frequency as -x <frequency> "
+                      "<generations>; -1 means effectively unlimited."},
+        ]
 
     def setup_input_tab(self):
         """设置输入标签页"""
@@ -694,24 +755,36 @@ class PhyloBayesPlugin(BasePlugin):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # 未知进度
         
+        # Create one fresh session directory; every parallel chain writes there
+        # so bpcomp can address all chains with one working directory.
+        self._session_dir = tempfile.mkdtemp(
+            prefix='phylobayes_', dir=self.workdir if self.workdir else None
+        )
+
         # 创建多个PhyloBayesThread实例
         self.analysis_threads = []
         self.all_output_files = []
         self.all_chains = []
+        self._thread_results = []
         self.completed_threads = 0
-        
+
         for chain_num in range(1, n_parallel_chains + 1):
             chain_prefix = f"[Chain {chain_num}]"
             thread = PhyloBayesThread(
-                self.tool_path, mpirun_path, input_files, self.get_parameters(), 
-                self.imported_files, chain_number=chain_num, chain_prefix=chain_prefix
+                self.tool_path, mpirun_path, input_files, self.get_parameters(),
+                self.imported_files, chain_number=chain_num, chain_prefix=chain_prefix,
+                workdir=self._session_dir,
             )
             thread.progress.connect(self.progress_bar.setFormat)
+            thread.result_ready.connect(self._on_result)
             thread.finished.connect(lambda files, htmls, num=chain_num: self.thread_finished(files, htmls, num))
             thread.error.connect(lambda err, num=chain_num: self.thread_error(err, num))
             thread.console_output.connect(self.add_console_message)
             self.analysis_threads.append(thread)
             thread.start()
+
+    def _on_result(self, payload):
+        self._thread_results.append(payload)
     
     def thread_finished(self, output_files, html_files, chain_num):
         """单个线程完成处理"""
@@ -746,26 +819,25 @@ class PhyloBayesPlugin(BasePlugin):
         
         # 保存所有链名称
         self.current_chains = self.all_chains
-        
-        # 检测并发送MCMC链文件
-        self._detect_and_emit_chain_files(self.all_output_files)
-        
+        self.current_output_files = list(self.all_output_files)
+
         # 显示结果
         if self.all_output_files:
             self.add_console_message(f"Analysis completed! Generated {len(self.all_output_files)} file(s)", "success")
             self.display_results(self.all_output_files)
         else:
             self.add_console_message("Analysis completed but no output files found", "warning")
-        
+
         # 切换到输出标签页
         self.tab_widget.setCurrentIndex(1)
-        
-        # 显示导入按钮（仅在从平台导入数据时显示）
-        if self.import_from == "YR_MPEA":
+
+        # 显示导入按钮（仅在宿主订阅标准结果通道时）
+        if (self.import_from in ["YR_MPEA", "DATASET_MANAGER"]
+                or self.result_has_consumer()):
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)
-        
+
         QMessageBox.information(self, "Completed", "Phylogenetic inference completed!")
     
     def _detect_and_emit_chain_files(self, output_files):
@@ -842,18 +914,26 @@ class PhyloBayesPlugin(BasePlugin):
 
     def stop_analysis(self):
         """停止分析"""
-        if hasattr(self, 'analysis_threads'):
-            for thread in self.analysis_threads:
-                if thread.isRunning():
-                    thread.terminate()
-                    thread.wait()
-        
+        for thread in getattr(self, 'analysis_threads', []) or []:
+            if not thread.isRunning():
+                continue
+            for signal_name in ("progress", "result_ready", "finished",
+                                "error", "console_output"):
+                signal = getattr(thread, signal_name, None)
+                if signal is None:
+                    continue
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
+
         self.is_running = False
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        
-        QMessageBox.information(self, "Stopped", "Phylogenetic inference has been aborted.")
+        self.add_console_message("Phylogenetic inference stopped by user.", "warning")
 
     def restore_sequence_ids(self, tree_content):
         """
@@ -890,115 +970,123 @@ class PhyloBayesPlugin(BasePlugin):
             return tree_content
 
     def display_results(self, output_files):
-        """显示分析结果，使用IcyTree插件显示系统发育树"""
+        """Show the bpcomp consensus tree in the native preview."""
         if not output_files:
             self.output_preview.setPlainText("No output files generated")
             return
 
-        # 查找树文件（.tre或.con.tre）
-        tree_files = [f for f in output_files if f.endswith('.tre') or f.endswith('.con.tre')]
-        
-        if tree_files:
-            tree_file = tree_files[0]
-            try:
-                # 读取树文件内容
-                with open(tree_file, 'r', encoding='utf-8') as f:
-                    tree_content = f.read().strip()
-                
-                # 确保树内容不为空
-                if not tree_content:
-                    self.output_preview.setPlainText("Tree file is empty")
-                    return
-                
-                # 还原序列ID（将taxonN替换回完整的序列ID）
-                tree_content = self.restore_sequence_ids(tree_content)
-                
-                # 导入IcyTree插件
-                from ..icytree import IcyTreePlugin
-                import os
-                
-                # 创建IcyTree插件实例
-                plugin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
-                icytree_plugin = IcyTreePlugin(plugin_path=plugin_path)
-                
-                # 设置Newick字符串并显示
-                icytree_plugin.set_newick_string(tree_content)
-                
-                # 在输出标签页中显示IcyTree
-                output_layout = self.output_tab.layout()
-                if output_layout:
-                    # 隐藏output_preview
-                    self.output_preview.setVisible(False)
-                    
-                    # 查找并移除之前的IcyTree插件（如果有）
-                    for i in reversed(range(output_layout.count())):
-                        widget = output_layout.itemAt(i).widget()
-                        if widget and widget != self.output_preview:
-                            widget.setParent(None)
-                    
-                    # 添加IcyTree插件到输出标签页
-                    output_layout.addWidget(icytree_plugin)
-                
-                self.output_preview.setPlainText(f"Consensus tree visualization ready: {os.path.basename(tree_file)}")
-                
-            except ImportError:
-                # 如果无法导入IcyTree插件，显示错误信息
-                self.output_preview.setPlainText("Error: IcyTree plugin not available")
-                self.output_preview.setVisible(True)
-                
-            except Exception as e:
-                error_msg = f"Error processing tree file: {str(e)}"
-                self.output_preview.setPlainText(error_msg)
-                self.output_preview.setVisible(True)
-                self.add_console_message(error_msg, "error")
-        else:
-            # 没有找到树文件，显示信息
-            self.output_preview.setPlainText(f"No tree file (.tre/.con.tre) found. Generated {len(output_files)} file(s).")
-            self.output_preview.setVisible(True)
+        tree_files = [f for f in output_files if f.endswith('.con.tre')]
+        if not tree_files:
+            tree_files = [f for f in output_files if f.endswith('.tre')]
+        if not tree_files:
+            self.output_preview.setPlainText(
+                "No tree file (.tre/.con.tre) found. Generated %d file(s)."
+                % len(output_files)
+            )
+            return
+
+        tree_file = tree_files[0]
+        try:
+            trees = read_tree_file(tree_file)
+        except OSError as exc:
+            self.output_preview.setPlainText(
+                "Cannot read %s: %s" % (os.path.basename(tree_file), exc)
+            )
+            return
+        if not trees:
+            self.output_preview.setPlainText(
+                "No tree could be parsed from %s." % os.path.basename(tree_file)
+            )
+            return
+
+        content = "\n".join(self.restore_sequence_ids(tree) for tree in trees)
+        self.output_preview.setPlainText(content)
+
+    def _build_result_spec(self):
+        files = list(getattr(self, "current_output_files", []) or [])
+        if not files:
+            raise ValueError("No PhyloBayes output is available.")
+
+        items = []
+        artifacts = []
+        for path in files:
+            name = os.path.basename(path)
+            if name.endswith('.con.tre'):
+                trees = [
+                    self.restore_sequence_ids(tree)
+                    for tree in read_tree_file(path)
+                ]
+                if not trees:
+                    raise ValueError(
+                        "No tree could be parsed from %s." % name
+                    )
+                items.append(DatasetItemSpec(
+                    loci_name=os.path.splitext(name)[0],
+                    item_type="phylogeny",
+                    file_path=str(path),
+                    format="newick",
+                    data={"newick": trees[0], "trees": trees},
+                    metadata={"source": self.plugin_name, "tool": "PhyloBayes",
+                              "tree_type": "consensus"},
+                ))
+            else:
+                artifacts.append(str(path))
+
+        trace_files = [str(path) for path in files if path.endswith('.trace')]
+        if trace_files:
+            items.append(DatasetItemSpec(
+                loci_name="PhyloBayes chains",
+                item_type="chain",
+                file_path=trace_files[0],
+                format="phylobayes",
+                data={
+                    "file_paths": trace_files,
+                    "run_number": 1,
+                    "chain_count": len(trace_files),
+                    "tool": "phylobayes",
+                },
+                metadata={"source": self.plugin_name, "tool": "PhyloBayes"},
+            ))
+
+        if not items:
+            raise ValueError("PhyloBayes produced no tree or chain item.")
+
+        dataset = DatasetSpec(
+            name="PhyloBayes result",
+            items=items,
+            description="%d tree/chain item(s)" % len(items),
+            source="phylobayes",
+            summary={"items": len(items)},
+            metadata={
+                "input": self.imported_files[0] if len(self.imported_files) == 1 else "",
+                "parameters": self.get_parameters(),
+                "chains": list(getattr(self, "current_chains", []) or []),
+            },
+        )
+        return ResultSpec(source="phylobayes", datasets=[dataset], artifacts=artifacts)
 
     def import_to_platform(self):
-        """将结果导入到当前平台"""
-        if not hasattr(self, 'current_output_files') or not self.current_output_files:
+        """将结果通过标准 ResultSpec 通道导入到当前平台"""
+        if not getattr(self, "current_output_files", None):
             QMessageBox.warning(self, "Warning", "No phylogenetic results to import.")
             return
-            
+        if not self.result_has_consumer():
+            QMessageBox.warning(
+                self, "No workspace",
+                "This window is not connected to a YR-MPE workspace."
+            )
+            return
         try:
-            # 查找.con.tre文件
-            con_tre_files = [f for f in self.current_output_files if f.endswith('.con.tre')]
-            
-            if not con_tre_files:
-                QMessageBox.warning(self, "Warning", "No consensus tree (.con.tre) found in results.")
-                return
-            
-            # 只处理第一个con.tre文件
-            tree_file = con_tre_files[0]
-            
-            # 读取树文件内容并还原序列ID
-            with open(tree_file, 'r', encoding='utf-8') as f:
-                tree_content = f.read()
-                tree_content = self.restore_sequence_ids(tree_content)
-            
-            # 创建临时文件保存还原后的树
-            temp_tree_file = self.create_temp_file(suffix='.tre')
-            with open(temp_tree_file, 'w', encoding='utf-8') as f:
-                f.write(tree_content)
-            
-            # 创建系统发育树数据字典（与MrBayes格式一致）
-            phylogeny_data = {
-                'file_path': temp_tree_file,
-                'file_type': 'newick',
-                'tool': 'phylobayes',
-                'tree_type': 'consensus'
-            }
-            
-            # 发送信号将数据导入到平台
-            self.export_phylogeny_result_signal.emit(phylogeny_data)
-            
-            # 显示成功消息
-            QMessageBox.information(self, "Success", "Successfully imported consensus tree to the platform.")
-            
+            result = self._build_result_spec()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to import phylogenetic tree: {str(e)}")
+            return
+        if self.export_result(result):
+            self.import_to_platform_btn.setEnabled(False)
+            self.import_to_platform_btn.setText("Sent to workspace")
+            QMessageBox.information(
+                self, "Success", "Successfully imported consensus tree to the platform."
+            )
 
     def handle_import_data(self, import_data):
         """处理从YR-MPEA导入的数据"""
@@ -1094,9 +1182,12 @@ class PhyloBayesPlugin(BasePlugin):
         # 在单独的线程中运行Bpcomp
         # 传递用户的原始输入（用于bpcomp命令）
         self.bpcomp_thread = BpcompThread(
-            self.tool_path, valid_chain_inputs, params, self.imported_files
+            self.tool_path, valid_chain_inputs, params, self.imported_files,
+            workdir=self._session_dir if getattr(self, "_session_dir", None)
+            else os.path.dirname(valid_chain_inputs[0]),
         )
         self.bpcomp_thread.progress.connect(self.progress_bar.setFormat)
+        self.bpcomp_thread.result_ready.connect(self._on_result)
         self.bpcomp_thread.finished.connect(self.bpcomp_finished)
         self.bpcomp_thread.error.connect(self.bpcomp_error)
         self.bpcomp_thread.console_output.connect(self.add_console_message)
@@ -1110,20 +1201,25 @@ class PhyloBayesPlugin(BasePlugin):
         """bpcomp分析完成处理"""
         self.progress_bar.setVisible(False)
         
-        # 保存输出文件
-        self.current_output_files = output_files
-        
+        # Keep the chain files so one import carries the consensus tree and
+        # the traces that produced it.
+        combined = list(getattr(self, "all_output_files", []) or [])
+        combined.extend(path for path in output_files if path not in combined)
+        self.current_output_files = combined
+
         # 显示结果
         self.display_results(output_files)
-        
+
         # 切换到输出标签页
         self.tab_widget.setCurrentIndex(1)
-        
+
         # 添加控制台消息
         self.add_console_message(f"Bpcomp consensus analysis completed successfully! Found {len(output_files)} result file(s)", "info")
-        
+
         # 显示导入按钮
-        self.import_to_platform_btn.setVisible(True)
+        if (self.import_from in ["YR_MPEA", "DATASET_MANAGER"]
+                or self.result_has_consumer()):
+            self.import_to_platform_btn.setVisible(True)
         
         QMessageBox.information(self, "Completed", "Bpcomp consensus analysis completed!")
 

@@ -158,3 +158,92 @@ if __name__ == "__main__":
     # Test 95% HPD
     hpd = calculate_95HPD(independent_samples)
     print(f"95% HPD: [{hpd[0]:.2f}, {hpd[1]:.2f}]")
+
+def calculate_psrf(chain1, chain2):
+    """Gelman--Rubin potential scale reduction factor (PSRF, R-hat).
+
+    The two chains are truncated to the shorter post-burn-in length, which is
+    the conservative choice when the runs were sampled at different
+    frequencies.  A value near 1 indicates that the between-chain variance is
+    small relative to the within-chain variance.  The function returns
+    ``None`` when fewer than two paired samples are available.
+
+    Parameters
+    ----------
+    chain1, chain2 : array-like
+        Post-burn-in samples for one parameter from two independent chains.
+
+    Returns
+    -------
+    float or None
+        PSRF, ``inf`` for two constant but different chains, or ``None`` when
+        the statistic is undefined.
+    """
+    first = np.asarray(chain1, dtype=float).ravel()
+    second = np.asarray(chain2, dtype=float).ravel()
+    first = first[np.isfinite(first)]
+    second = second[np.isfinite(second)]
+
+    length = min(len(first), len(second))
+    if length < 2:
+        return None
+
+    first = first[:length]
+    second = second[:length]
+
+    means = np.array([first.mean(), second.mean()])
+    variances = np.array([first.var(ddof=1), second.var(ddof=1)])
+    within = float(variances.mean())
+
+    if within <= 0.0:
+        if np.allclose(first, second):
+            return 1.0
+        return float("inf")
+
+    between = float(length * means.var(ddof=1))
+    variance_hat = ((length - 1.0) / length) * within + between / length
+    return float(np.sqrt(max(variance_hat / within, 0.0)))
+
+
+def is_log_statistic(name):
+    """Best-effort detection of log-scale trace columns (lnL, logPopSize...)."""
+    if not name:
+        return False
+    normalized = "".join(ch for ch in name.lower() if ch.isalnum())
+    if normalized.startswith(("ln", "log")):
+        return True
+    return any(marker in normalized
+               for marker in ("lnl", "logl", "loglik", "lnlik", "loglike", "lnlike"))
+
+
+def calculate_harmonic_mean(samples, effective_n=None):
+    """Log-space harmonic mean and its delta-method standard error.
+
+    Every likelihood trace is reported in log space, so the statistic is
+    computed as log(HM(exp(x))): exponentiate, take the harmonic mean in
+    linear space, then log the result. The standard error is transformed with
+    the delta method and stays on the log scale.
+
+    This is a descriptive statistic only; the harmonic-mean marginal-
+    likelihood estimator is numerically unstable and not recommended for
+    model comparison.
+    """
+    values = np.asarray(samples, dtype=float)
+    values = values[np.isfinite(values)]
+    if len(values) == 0:
+        return None, None
+
+    # Stable log-sum-exp form of HM(exp(x)).
+    scaled = -values
+    maximum = float(np.max(scaled))
+    weights = np.exp(scaled - maximum)
+    mean_weight = float(np.mean(weights))
+    harmonic = -(maximum + float(np.log(mean_weight)))
+    if len(values) < 2:
+        return harmonic, 0.0
+    count = len(values)
+    if effective_n is not None:
+        count = max(1.0, min(float(effective_n), float(count)))
+    variance = float(np.var(weights, ddof=1))
+    stderr = float(np.sqrt(variance / count) / mean_weight)
+    return harmonic, stderr

@@ -44,6 +44,7 @@ import matplotlib.pyplot as plt
 from scipy import stats
 
 from ..templates.base_plugin_ui import BasePlugin
+from ..templates.base_process_thread import BaseProcessThread
 
 # 相对导入距离计算工具
 distance_utils_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
@@ -313,15 +314,61 @@ class OverviewCanvas(FigureCanvas):
         self.draw()
 
 
+class SaturationThread(BaseProcessThread):
+    """Compute saturation metrics off the GUI thread."""
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, input_files, parameters, imported_files=None, workdir=None):
+        super().__init__("", input_files, parameters, imported_files,
+                         workdir=workdir)
+
+    def get_tool_name(self):
+        return "Substitution saturation"
+
+    def execute_commands(self):
+        results = []
+        total = len(self.input_files)
+        for index, input_file in enumerate(self.input_files):
+            if not self.is_running:
+                break
+            self.progress.emit("Processing file %d/%d..." % (index + 1, total))
+            self.console_output.emit(
+                "Processing file %d/%d: %s"
+                % (index + 1, total, os.path.basename(input_file)),
+                "info",
+            )
+            sequences = list(SeqIO.parse(input_file, "fasta"))
+            is_valid, message = validate_sequences(sequences)
+            if not is_valid:
+                self.console_output.emit("Validation error: %s" % message, "error")
+                continue
+            metrics = calculate_saturation_metrics(
+                sequences,
+                gap_treatment=self.parameters.get("gap_treatment", "pairwise"),
+            )
+            metrics["filename"] = os.path.basename(input_file)
+            metrics["filepath"] = input_file
+            metrics["gap_treatment"] = self.parameters.get("gap_treatment", "pairwise")
+            results.append(metrics)
+            self.console_output.emit(
+                "Analysis completed for %d sequences" % len(sequences), "info"
+            )
+        if not results:
+            raise RuntimeError("No saturation result was produced.")
+        self.result_ready.emit(results)
+        self.finished.emit([], [])
+
+
 class SubstitutionSaturationPlugin(BasePlugin):
     """替代饱和度分析插件"""
     
     # 定义信号
     import_alignment_signal = pyqtSignal(list)  # 导入比对结果信号
     
-    def __init__(self, import_from=None, import_data=None):
+    def __init__(self, import_from=None, import_data=None, **kwargs):
         """初始化替代饱和度分析插件"""
-        super().__init__(import_from, import_data)
+        super().__init__(import_from, import_data, **kwargs)
         
         # 初始化用于存储计算结果的属性
         self.saturation_results = None
@@ -335,7 +382,7 @@ class SubstitutionSaturationPlugin(BasePlugin):
         self.plugin_name = "Substitution Saturation Analysis"
         self.tool_name = "Built-in Python Implementation (BaCoCa Method)"
         self.citation = []  # citation text lives in YR_MPE/citations/*.bib
-        self.citation_keys = ["kuck2014bacoca"]
+        self.citation_keys = ["struck2008cvalue", "kuck2014bacoca"]
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"], "NEXUS": ["nex", "nexus"]}
         self.output_types = {"Saturation Plot": ".png", "Report": ".txt"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
@@ -695,99 +742,60 @@ class SubstitutionSaturationPlugin(BasePlugin):
     
     def run_analysis(self):
         """运行饱和度分析"""
-        # 检查输入
         if not self.imported_files and not self.sequence_text.toPlainText().strip():
             QMessageBox.warning(self, "Warning", "Please provide alignment files or sequence text!")
             return
-            
-        # 添加控制台消息
         self.add_console_message("Starting substitution saturation analysis...", "info")
-        
-        # 准备输入文件
         input_files = self.prepare_input_files()
         if not input_files:
             return
-        
-        # 获取参数
         params = self.get_parameters()
-        
-        # 设置运行状态
+
+        self.saturation_results = []
+        self._result_payload = None
         self.is_running = True
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # 未知进度
+        self.progress_bar.setRange(0, 0)
         self.export_plot_btn.setEnabled(False)
-        
-        try:
-            # 初始化结果存储
-            self.saturation_results = []
-            
-            # 处理每个输入文件
-            for i, input_file in enumerate(input_files):
-                if not self.is_running:
-                    break
-                
-                self.progress_bar.setFormat(f"Processing file {i+1}/{len(input_files)}...")
-                self.add_console_message(f"Processing file {i+1}/{len(input_files)}: {os.path.basename(input_file)}", "info")
-                
-                # 读取序列
-                sequences = list(SeqIO.parse(input_file, "fasta"))
-                
-                # 验证序列
-                is_valid, msg = validate_sequences(sequences)
-                if not is_valid:
-                    self.add_console_message(f"Validation error: {msg}", "error")
+
+        self.analysis_thread = SaturationThread(
+            input_files, params, self.imported_files, workdir=self.workdir
+        )
+        self.analysis_thread.progress.connect(self._on_progress)
+        self.analysis_thread.result_ready.connect(self._on_result)
+        self.analysis_thread.console_output.connect(self.add_console_message)
+        self.analysis_thread.finished.connect(self.analysis_finished)
+        self.analysis_thread.error.connect(self.analysis_error)
+        self.analysis_thread.start()
+
+    def _on_progress(self, text):
+        self.progress_bar.setFormat(text)
+
+    def _on_result(self, payload):
+        self._result_payload = payload
+
+    def stop_analysis(self):
+        thread = getattr(self, "analysis_thread", None)
+        if thread is not None and thread.isRunning():
+            for signal_name in ("progress", "result_ready", "finished",
+                                "error", "console_output"):
+                signal = getattr(thread, signal_name, None)
+                if signal is None:
                     continue
-                
-                # 计算饱和度指标
-                results = calculate_saturation_metrics(
-                    sequences,
-                    gap_treatment=params['gap_treatment']
-                )
-                
-                # 添加文件名到结果中
-                results['filename'] = os.path.basename(input_file)
-                results['filepath'] = input_file
-                results['gap_treatment'] = params['gap_treatment']
-                
-                # 保存结果
-                self.saturation_results.append(results)
-                
-                self.add_console_message(f"Analysis completed for {len(sequences)} sequences", "info")
-            
-            # 所有文件处理完成后，更新UI
-            if self.saturation_results:
-                # 更新文件选择Combobox
-                self.file_combo.clear()
-                for result in self.saturation_results:
-                    self.file_combo.addItem(result['filename'])
-                
-                # 如果有多个文件，显示文件选择器
-                if len(self.saturation_results) > 1:
-                    self.file_combo_label.setVisible(True)
-                    self.file_combo.setVisible(True)
-                    
-                    # 更新总体柱状图
-                    file_names = [result['filename'] for result in self.saturation_results]
-                    c_values = [result['c_value'] for result in self.saturation_results]
-                    self.overview_canvas.plot_c_values(file_names, c_values)
-                else:
-                    self.file_combo_label.setVisible(False)
-                    self.file_combo.setVisible(False)
-                
-                # 显示第一个文件的结果
-                self.on_file_selection_changed(0)
-                
-                # 启用导出按钮
-                self.export_plot_btn.setEnabled(True)
-            
-            # 分析完成
-            self.analysis_finished([], [])
-            
-        except Exception as e:
-            self.analysis_error(str(e))
-    
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
+        self.is_running = False
+        self.run_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.progress_bar.setVisible(False)
+        self.add_console_message("Substitution saturation analysis stopped.", "warning")
+
     def display_single_result(self, results: Dict, filename: str):
         """显示单个文件的结果"""
         try:
@@ -874,8 +882,24 @@ https://doi.org/10.1016/j.ympev.2013.09.011
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.progress_bar.setFormat("")
-        
-        # 显示完成消息
+
+        self.saturation_results = list(self._result_payload or [])
+        if self.saturation_results:
+            self.file_combo.clear()
+            for result in self.saturation_results:
+                self.file_combo.addItem(result["filename"])
+            if len(self.saturation_results) > 1:
+                self.file_combo_label.setVisible(True)
+                self.file_combo.setVisible(True)
+                file_names = [result["filename"] for result in self.saturation_results]
+                c_values = [result["c_value"] for result in self.saturation_results]
+                self.overview_canvas.plot_c_values(file_names, c_values)
+            else:
+                self.file_combo_label.setVisible(False)
+                self.file_combo.setVisible(False)
+            self.on_file_selection_changed(0)
+            self.export_plot_btn.setEnabled(True)
+
         QMessageBox.information(self, "Completed", "Substitution saturation analysis completed successfully!")
     
     def analysis_error(self, error_msg):
@@ -957,10 +981,13 @@ https://doi.org/10.1016/j.ympev.2013.09.011
 # 插件入口点
 class SubstitutionSaturationPluginEntry:
     """替代饱和度分析插件入口点"""
-    
+
     def __init__(self, config=None, plugin_path=None):
         self.config = config
         self.plugin_path = plugin_path
-    
-    def run(self, import_from=None, import_data=None):
-        return SubstitutionSaturationPlugin(import_from=import_from, import_data=import_data)
+
+    def run(self, import_from=None, import_data=None, workdir=None, **kwargs):
+        return SubstitutionSaturationPlugin(
+            import_from=import_from, import_data=import_data,
+            workdir=workdir, **kwargs,
+        )

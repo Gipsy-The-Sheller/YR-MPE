@@ -17,146 +17,250 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, 
-                             QMessageBox, QGroupBox, QFormLayout, QLineEdit, 
+from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog,
+                             QMessageBox, QGroupBox, QFormLayout, QLineEdit,
                              QSpinBox, QCheckBox, QLabel, QComboBox, QScrollArea,
-                             QWidget, QFrame, QTextEdit, QToolButton, QDialog, QDoubleSpinBox, QRadioButton)
+                             QWidget, QFrame, QTextEdit, QPlainTextEdit, QDialog,
+                             QDoubleSpinBox, QRadioButton)
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QIcon
-import tempfile
 import os
-from typing import List, Optional
+from pathlib import Path
 
-from Bio import SeqIO
+from Bio import AlignIO, SeqIO
 
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
-import subprocess
+
+
+def _alignment_locus_name(output_file, output_suffix=""):
+    """Derive a stable locus name from a MAFFT output path.
+
+    MAFFT output keeps the whole input name and appends the GUI suffix and
+    ``.fas`` (``OG0000008.cds.fna_mafft.fas``). Dataset items are named with
+    compound sequence suffixes stripped (``OG0000008``), so normalize here to
+    let alignment results update the item they came from.
+    """
+    name = os.path.basename(str(output_file))
+    name = os.path.splitext(name)[0]
+    if output_suffix and name.endswith(output_suffix):
+        name = name[: -len(output_suffix)]
+    lower = name.lower()
+    for suffix in (
+        ".cds.fna", ".cds.fasta", ".cds.fa",
+        ".fna", ".fasta", ".fas", ".fa",
+        ".phy", ".nex", ".nexus",
+    ):
+        if lower.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _strip_direction_prefix(records):
+    """Remove MAFFT's ``_R_`` marker from reversed-direction records.
+
+    ``--adjustdirection`` prefixes the affected sequence names with ``_R_``.
+    The marker is useful inside MAFFT but must not become part of the taxon
+    label used by downstream dataset/concatenation code.
+    """
+    for record in records:
+        for attribute in ("id", "name", "description"):
+            value = str(getattr(record, attribute, "") or "")
+            if value.startswith("_R_"):
+                setattr(record, attribute, value[3:])
+    return records
 
 
 class MAFFTThread(BaseProcessThread):
-    """MAFFT比对线程类"""
-    
-    def __init__(self, tool_path, input_files, parameters, imported_files=None, suffix=None):
-        super().__init__(tool_path, input_files, parameters, imported_files)
-        if suffix:
-            self.output_suffix = suffix
-    
+    """MAFFT alignment worker."""
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, tool_path, input_files, parameters, imported_files=None,
+                 suffix=None, workdir=None):
+        super().__init__(
+            tool_path, input_files, parameters, imported_files, workdir=workdir
+        )
+        self.output_suffix = suffix or ""
+        self.clustal_output = "--clustalout" in (parameters or [])
+
     def get_tool_name(self):
-        """返回工具名称"""
         return "MAFFT"
-        
+
+    def _output_path(self, input_file):
+        if self.output_suffix:
+            suffix = ".aln" if self.clustal_output else ".fas"
+            return Path(f"{input_file}{self.output_suffix}{suffix}")
+        suffix = ".aln" if self.clustal_output else ".fas"
+        return Path(self.create_temp_file(suffix=suffix))
+
+    def _strip_reversed_headers(self, output_file):
+        if not any(str(param).startswith("--adjustdirection")
+                   for param in self.parameters):
+            return
+        try:
+            if self.clustal_output:
+                alignment = AlignIO.read(str(output_file), "clustal")
+                _strip_direction_prefix(alignment)
+                AlignIO.write(alignment, str(output_file), "clustal")
+            else:
+                records = list(SeqIO.parse(str(output_file), "fasta"))
+                _strip_direction_prefix(records)
+                SeqIO.write(records, str(output_file), "fasta")
+        except Exception as exc:
+            self.console_output.emit(
+                "Could not normalize MAFFT direction prefixes: %s" % exc,
+                "warning",
+            )
+
     def execute_commands(self):
-        """执行MAFFT比对命令"""
         try:
             output_files = []
-            html_files = []
-            
-            # 分别处理每个输入文件
             total_files = len(self.input_files)
-            for i, input_file in enumerate(self.input_files):
+            for index, input_file in enumerate(self.input_files):
                 if not self.is_running:
                     break
-                    
-                self.progress.emit(f"Processing file {i+1}/{total_files}...")
-                self.console_output.emit(f"Processing file {i+1}/{total_files}: {os.path.basename(input_file)}", "info")
-                
-                # 创建输出文件
-                # 如果是从UI传递过来的suffix参数，则使用它来构造输出文件名
-                if self.output_suffix:
-                    # 构造带后缀的输出文件名
-                    output_file = f"{input_file}{self.output_suffix}.fas"
-                else:
-                    output_file = self.create_temp_file(suffix='.fas')
-                
-                # 构建命令 (MAFFT输出到stdout)
-                cmd = [
-                    self.tool_path,
-                    *self.parameters,
-                    input_file
-                ]
-                
-                # 执行命令
-                result = self.execute_command(cmd)
-                
+
+                self.progress.emit(
+                    "Processing file %d/%d..." % (index + 1, total_files)
+                )
+                self.console_output.emit(
+                    "Processing file %d/%d: %s"
+                    % (index + 1, total_files, os.path.basename(input_file)),
+                    "info",
+                )
+
+                output_file = self._output_path(input_file)
+                output_file.parent.mkdir(parents=True, exist_ok=True)
+                cmd = [self.tool_path, *self.parameters, input_file]
+
+                result = self.execute_command(
+                    cmd, cwd=str(output_file.parent)
+                )
+                detail = (result.stderr or "").strip()
                 if result.returncode != 0:
-                    self.error.emit(f"MAFFT execution failed for file {i+1}: {result.stderr}")
-                    return
-                
-                # 将stdout写入输出文件
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    f.write(result.stdout)
-                
-                # 从FASTA输出生成HTML报告
-                self.console_output.emit(f"Generating HTML report for file {i+1}...", "info")
-                
-                output_files.append(output_file)
-            
+                    raise RuntimeError(
+                        "MAFFT failed for %s%s"
+                        % (
+                            os.path.basename(input_file),
+                            ": " + detail if detail else "",
+                        )
+                    )
+                if not (result.stdout or "").strip():
+                    raise RuntimeError(
+                        "MAFFT produced empty output for %s"
+                        % os.path.basename(input_file)
+                    )
+
+                output_file.write_text(result.stdout, encoding="utf-8")
+                self._strip_reversed_headers(output_file)
+                if output_file.stat().st_size == 0:
+                    raise RuntimeError(
+                        "MAFFT wrote an empty file: %s" % output_file
+                    )
+                output_files.append(str(output_file))
+
             self.progress.emit("All alignments completed")
+            self.result_ready.emit({"output_files": output_files})
             self.finished.emit(output_files, [])
-            
-        except Exception as e:
-            self.error.emit(f"Alignment exception: {str(e)}")
+
+        except Exception as exc:
+            self.error.emit("Alignment exception: %s" % exc)
 
 
 class MAFFTPlugin(BasePlugin):
-    """MAFFT插件类"""
+    """MAFFT plugin: standard ResultSpec output, legacy signals retained."""
+    # Deprecated compatibility channels. New callers use BasePlugin.result_ready
+    # and the host's _connect_plugin_result(); the legacy path remains only for
+    # external callers that still connect these signals.
     import_alignment_signal = pyqtSignal(list)
     batch_import_alignment_signal = pyqtSignal(list)
-    def __init__(self, import_from=None, import_data=None):
-        """初始化MAFFT插件"""
-        super().__init__(import_from, import_data)
+    def __init__(self, import_from=None, import_data=None, **kwargs):
+        """Initialize the MAFFT plugin."""
         self.batch_mode = False
-        if import_from in ["YR_MPEA", "seq_viewer", "DATASET_MANAGER"] and import_data is not None:
+        # When MAFFT is launched from a workspace dataset, write the
+        # alignments back into that dataset instead of creating a detached
+        # "MAFFT alignment" dataset.
+        self._source_dataset_id = None
+        super().__init__(import_from, import_data, **kwargs)
+        # BasePlugin handles a plain list only when import_from == "YR_MPEA".
+        # Structured payloads (dataset items, paths, batched lists) need the
+        # MAFFT-specific handler here.
+        if import_data is not None and (
+            not isinstance(import_data, list) or import_from != "YR_MPEA"
+        ):
             self.handle_import_data(import_data)
-    
+
+    def _records_temp(self, records, label="import"):
+        temp_file = self.create_temp_file(suffix="_%s.fas" % label)
+        with open(temp_file, "w", encoding="utf-8") as handle:
+            SeqIO.write(list(records), handle, "fasta")
+        self.temp_files.append(temp_file)
+        return temp_file
+
+    def _items_to_files(self, items):
+        files = []
+        for item in items:
+            path = getattr(item, "file_path", "") or ""
+            if path and os.path.exists(path):
+                files.append(path)
+                continue
+            records = list(getattr(item, "sequences", []) or [])
+            if records:
+                files.append(self._records_temp(records, "dataset_item"))
+        return files
+
     def handle_import_data(self, import_data):
-        """处理从YR-MPEA或Dataset Manager导入的数据"""
-        if isinstance(import_data, list):
-            # 判断是否为批量模式：[[SeqRecord, ...], [SeqRecord, ...]]
-            if len(import_data) > 0 and isinstance(import_data[0], list):
-                # 批量模式
-                self.batch_mode = True
-                self.temp_files = []
-                self.imported_files = []
-                
-                for i, seq_list in enumerate(import_data):
-                    temp_file = self.create_temp_file(suffix=f'_batch_{i}.fas')
-                    with open(temp_file, 'w') as f:
-                        for seq in seq_list:
-                            f.write(f">{seq.id}\n{seq.seq}\n")
-                    self.temp_files.append(temp_file)
-                    self.imported_files.append(temp_file)
-                    
-                # 更新UI显示
-                if hasattr(self, 'file_path_edit') and self.file_path_edit:
-                    self.file_path_edit.setText(f"{len(import_data)} files selected")
-                    self.file_path_edit.setEnabled(False)
-                    
+        """Accept SeqRecords, batched lists, paths, or dataset-item dicts."""
+        files = []
+        batch_mode = False
+
+        if isinstance(import_data, dict):
+            dataset_config = import_data.get("dataset_config", {}) or {}
+            self._source_dataset_id = dataset_config.get("dataset_id")
+            items = import_data.get("dataset_items")
+            if items is not None:
+                files = self._items_to_files(items)
+                batch_mode = len(files) > 1
+            elif import_data.get("file_path"):
+                files = [str(import_data["file_path"])]
+            elif import_data.get("files"):
+                files = [str(path) for path in import_data["files"]]
+            elif import_data.get("sequences"):
+                files = [self._records_temp(import_data["sequences"], "import")]
+        elif isinstance(import_data, str):
+            files = [import_data]
+        elif isinstance(import_data, (list, tuple)):
+            if import_data and isinstance(import_data[0], (list, tuple)):
+                batch_mode = True
+                for index, records in enumerate(import_data):
+                    files.append(self._records_temp(records, "batch_%d" % index))
+            elif import_data and isinstance(import_data[0], dict):
+                files = self._items_to_files(import_data)
+                batch_mode = len(files) > 1
+            elif import_data and hasattr(import_data[0], "seq"):
+                files = [self._records_temp(import_data, "import")]
+
+        files = [path for path in files if path and os.path.exists(path)]
+        self.batch_mode = batch_mode
+        self.imported_files = files
+        self.import_file = files[0] if len(files) == 1 else None
+
+        if hasattr(self, "file_path_edit") and self.file_path_edit is not None:
+            if not files:
+                self.file_path_edit.clear()
+            elif len(files) == 1:
+                self.file_path_edit.setText(files[0])
             else:
-                # 单文件模式
-                self.batch_mode = False
-                # 创建临时文件来存储导入的序列数据
-                temp_file = self.create_temp_file(suffix='.fas')
-                with open(temp_file, 'w') as f:
-                    for seq in import_data:
-                        f.write(f">{seq.id}\n{seq.seq}\n")
-                self.temp_files.append(temp_file)
-                self.import_file = temp_file
-                self.imported_files = [temp_file]
-                
-                # 更新UI显示导入的文件
-                if hasattr(self, 'file_path_edit') and self.file_path_edit:
-                    self.file_path_edit.setText(temp_file)
-        else:
-            self.import_file = None
-            self.imported_files = []
-        
+                self.file_path_edit.setText("%d files selected" % len(files))
+                self.file_path_edit.setEnabled(False)
+
     def init_plugin_info(self):
         """初始化插件信息"""
         self.plugin_name = "MAFFT Aligner"
         self.tool_name = "MAFFT"
         self.citation = []  # citation text lives in YR_MPE/citations/*.bib
+        self.citation_keys = ["katoh2013mafft"]
         self.input_types = {"FASTA": ["fas", "fna", "fa", "fasta"]}
         self.output_types = {"FASTA": ".fas"}
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
@@ -241,7 +345,7 @@ class MAFFTPlugin(BasePlugin):
         output_settings_group.setContentsMargins(0, 0, 0, 0)
         output_radio_group = QWidget()
         output_radio_group.setLayout(QHBoxLayout())
-        self.save_to_cwd = QRadioButton("Current Directory")
+        self.save_to_cwd = QRadioButton("Beside input")
         self.save_to_cwd.setChecked(True)
         self.save_to_tmp = QRadioButton("Temporary File")
         output_radio_group.layout().addWidget(self.save_to_cwd)
@@ -257,6 +361,40 @@ class MAFFTPlugin(BasePlugin):
         input_layout.addRow("Save to:", output_settings_group)
         
         layout.addStretch()
+
+    def setup_output_tab(self):
+        """Show a lightweight FASTA preview without embedding a web view."""
+        layout = QVBoxLayout(self.output_tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        self.summary_label = QLabel("No alignment yet.")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setStyleSheet("font-weight: 600;")
+        layout.addWidget(self.summary_label)
+        self.preview_text = QPlainTextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setPlaceholderText(
+            "The aligned FASTA output will appear here."
+        )
+        layout.addWidget(self.preview_text, 1)
+
+    def _show_alignment_preview(self, output_files):
+        if not output_files:
+            self.summary_label.setText("No alignment output.")
+            self.preview_text.clear()
+            return
+        first = Path(output_files[0])
+        self.summary_label.setText(
+            "%d alignment file(s) · %s"
+            % (len(output_files), first.name)
+        )
+        try:
+            text = first.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            self.preview_text.setPlainText("Cannot read %s: %s" % (first, exc))
+            return
+        if len(text) > 200_000:
+            text = text[:200_000] + "\n... (preview truncated)"
+        self.preview_text.setPlainText(text)
 
     def setup_control_panel(self):
         """设置控制面板"""
@@ -285,6 +423,43 @@ class MAFFTPlugin(BasePlugin):
         elif self.save_to_tmp.isChecked():
             self.output_suffix_edit.setEnabled(False)
             self.output_suffix_edit.setVisible(False)
+
+    def control_bindings(self):
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input sequences", "kind": "path",
+             "cli": ["{value}"],
+             "notes": "Positional input appended after all options."},
+            {"id": "mode", "widget": "mode_combo",
+             "label": "Alignment mode", "kind": "choice",
+             "choices": {
+                 "Auto mode (--auto)": ["--auto"],
+                 "High speed (default)": [],
+                 "High accuracy - localpair (--localpair)":
+                     ["--maxiterate", "1000", "--localpair"],
+                 "High accuracy - genafpair (--genafpair)":
+                     ["--maxiterate", "1000", "--genafpair"],
+                 "High accuracy - globalpair (--globalpair)":
+                     ["--maxiterate", "1000", "--globalpair"],
+                 "Fast (--retree 1)": ["--retree", "1"],
+             },
+             "cli": ["{value}"]},
+            {"id": "threads", "widget": "thread_spinbox",
+             "label": "Threads", "kind": "int",
+             "cli": ["--thread", "{value}"],
+             "omit_values": [-1],
+             "notes": "-1 means automatic and is omitted."},
+            {"id": "output_suffix", "widget": "output_suffix_edit",
+             "label": "Output suffix", "kind": "text",
+             "cli": [],
+             "notes": "GUI-only: MAFFT writes to stdout, the plugin writes "
+                      "the file beside the input."},
+        ]
+
+    def cli_preview(self):
+        input_file = (self.imported_files[0] if self.imported_files
+                      else self.file_path_edit.text().strip() or "<input>")
+        return [self.tool_path or "mafft"] + self.get_parameters() + [input_file]
 
     def get_parameters(self):
         """获取MAFFT命令参数"""
@@ -345,20 +520,34 @@ class MAFFTPlugin(BasePlugin):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # 未知进度
         
-        # 如果需要添加输出文件后缀，则设置suffix属性
+        # Output suffix: beside the input file. Temporary mode ignores it.
         suffix = None
         if self.save_to_cwd.isChecked():
             suffix = self.output_suffix_edit.text()
-        
-        # 在单独的线程中运行比对
+            if any(separator in suffix for separator in ("/", "\\")):
+                QMessageBox.warning(
+                    self, "Invalid suffix",
+                    "The output suffix must not contain a path separator.",
+                )
+                return
+
+        self._mafft_payload = None
+        self.import_to_platform_btn.setEnabled(True)
+        self.import_to_platform_btn.setText("Import to Current Platform")
+        self.progress_bar.setFormat("Running MAFFT...")
         self.alignment_thread = MAFFTThread(
-            self.tool_path, input_files, self.get_parameters(), self.imported_files, suffix=suffix
+            self.tool_path, input_files, self.get_parameters(),
+            self.imported_files, suffix=suffix, workdir=self.workdir,
         )
         self.alignment_thread.progress.connect(self.progress_bar.setFormat)
+        self.alignment_thread.result_ready.connect(self._on_result)
         self.alignment_thread.finished.connect(self.analysis_finished)
         self.alignment_thread.error.connect(self.analysis_error)
         self.alignment_thread.console_output.connect(self.add_console_message)
         self.alignment_thread.start()
+
+    def _on_result(self, payload):
+        self._mafft_payload = payload
 
     def analysis_finished(self, output_files, html_files):
         """分析完成处理"""
@@ -366,27 +555,22 @@ class MAFFTPlugin(BasePlugin):
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        
-        # Save output files and reports
-        self.reports = html_files
-        self.update_report_combo()
-        
-        # Show results
-        if html_files:
-            self.show_current_report()
-            self.tab_widget.setCurrentIndex(1)  # Switch to output preview tab
-        
+        self.alignment_output_files = output_files
+
+        # HTML reports were removed from this plugin; the base report combo
+        # no longer exists, so do not touch it here.
+        self.reports = []
+        self._show_alignment_preview(output_files)
+        self.tab_widget.setCurrentIndex(1)
+
         self.add_console_message("Alignment completed successfully!", "info")
         QMessageBox.information(self, "Success", "Alignment completed successfully!")
-        
-        # 显示导入按钮（支持多种来源）
-        if self.import_from in ["YR_MPEA", "seq_viewer", "DATASET_MANAGER"]:
+
+        if (self.import_from in ["YR_MPEA", "seq_viewer", "DATASET_MANAGER"]
+                or self.result_has_consumer()):
             self.import_to_platform_btn.setVisible(True)
         else:
             self.import_to_platform_btn.setVisible(False)
-        
-        # 保存输出文件路径供导入使用
-        self.alignment_output_files = output_files
 
     def analysis_error(self, error_msg):
         """分析错误处理"""
@@ -394,22 +578,33 @@ class MAFFTPlugin(BasePlugin):
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        
+
         self.add_console_message(error_msg, "error")
         QMessageBox.critical(self, "Error", f"Alignment failed: {error_msg}")
-        self.tab_widget.setCurrentIndex(2)  # Switch to console tab
+        self.tab_widget.setCurrentIndex(2)
+
     def stop_analysis(self):
-        """停止分析"""
-        if hasattr(self, 'alignment_thread') and self.alignment_thread.isRunning():
-            self.alignment_thread.terminate()
-            self.alignment_thread.wait()
-            
+        """Stop MAFFT without terminating the QThread object."""
+        if hasattr(self, "alignment_thread") and self.alignment_thread.isRunning():
+            thread = self.alignment_thread
+            # A killed process can surface a non-zero return code; suppress
+            # the completion/error callbacks because the user initiated stop.
+            for signal in (
+                thread.progress, thread.result_ready, thread.finished,
+                thread.error, thread.console_output,
+            ):
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            thread.stop()
+            thread.wait()
+
         self.is_running = False
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
-        
-        QMessageBox.information(self, "Stopped", "Alignment has been aborted.")
+        self.add_console_message("Alignment stopped by user.", "warning")
 
     def browse_files(self):
         """浏览选择文件"""
@@ -434,46 +629,39 @@ class MAFFTPlugin(BasePlugin):
     def add_file_tag(self, file_path):
         """添加文件标签"""
         self.imported_files.append(file_path)
-        
+        self.import_file = (
+            self.imported_files[0] if len(self.imported_files) == 1 else None
+        )
+        self.batch_mode = len(self.imported_files) > 1
+
         # Create file tag widget
         tag_widget = QFrame()
-        tag_widget.setFrameStyle(QFrame.Box)
-        tag_widget.setStyleSheet("""
-            QFrame {
-                background-color: #e9ecef;
-                border-radius: 15px;
-                margin: 2px;
-            }
-        """)
-        
+        tag_widget.setFrameStyle(QFrame.NoFrame)
+        tag_widget.setStyleSheet(
+            "QFrame {"
+            "  background-color: palette(base);"
+            "  border: 1px solid palette(mid);"
+            "  border-radius: 12px;"
+            "  margin: 2px;"
+            "}"
+        )
+
         tag_layout = QHBoxLayout()
         tag_layout.setContentsMargins(8, 4, 8, 4)
         tag_widget.setLayout(tag_layout)
-        
+
         # Get display name (handle duplicate names)
         display_name = self.get_display_name(file_path)
-        
+
         # File name label
         name_label = QLabel(display_name)
-        name_label.setStyleSheet("color: #495057;")
         tag_layout.addWidget(name_label)
-        
+
         # Close button
         close_btn = QPushButton("×")
         close_btn.setFixedSize(20, 20)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #dc3545;
-                color: white;
-                border: none;
-                border-radius: 10px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #c82333;
-            }
-        """)
+        close_btn.setToolTip("Remove this file")
+        close_btn.setFlat(True)
         close_btn.clicked.connect(lambda: self.remove_file_tag(file_path, tag_widget))
         tag_layout.addWidget(close_btn)
         
@@ -483,6 +671,45 @@ class MAFFTPlugin(BasePlugin):
         
         # Show container if it was hidden
         self.file_tags_container.setVisible(True)
+
+    def remove_file_tag(self, file_path, tag_widget):
+        """Remove one file from the input list and its tag widget."""
+        if file_path in self.imported_files:
+            self.imported_files.remove(file_path)
+        self.file_tags = [
+            entry for entry in self.file_tags
+            if entry[0] != file_path or entry[1] is not tag_widget
+        ]
+        tag_widget.setParent(None)
+        tag_widget.deleteLater()
+        self.batch_mode = len(self.imported_files) > 1
+        self.import_file = (
+            self.imported_files[0] if len(self.imported_files) == 1 else None
+        )
+        if self.imported_files:
+            if len(self.imported_files) == 1:
+                self.file_path_edit.setText(self.imported_files[0])
+            else:
+                self.file_path_edit.setText(
+                    "%d files selected" % len(self.imported_files)
+                )
+        else:
+            self.file_path_edit.clear()
+            self.file_tags_container.setVisible(False)
+            self.sequence_text.setVisible(True)
+            self.sequence_text.setEnabled(True)
+
+    def clear_all_file_tags(self):
+        """Remove every input tag; used when the user switches to text input."""
+        for file_path, tag_widget in list(self.file_tags):
+            tag_widget.setParent(None)
+            tag_widget.deleteLater()
+        self.file_tags = []
+        self.imported_files = []
+        self.import_file = None
+        self.batch_mode = False
+        self.file_path_edit.clear()
+        self.file_tags_container.setVisible(False)
 
     def on_text_changed(self):
         """Handle text input changes"""
@@ -535,10 +762,14 @@ class MAFFTPlugin(BasePlugin):
                 return [temp_file]
             
             elif self.save_to_cwd.isChecked():
-                # directly use input paths
-                temp_file = self.import_file
-                return [temp_file]
-            
+                if self.import_file:
+                    return [self.import_file]
+                QMessageBox.warning(
+                    self, "Warning",
+                    "No input file is available for this output mode.",
+                )
+                return None
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Prepare input files failed: {e}")
             return None
@@ -560,45 +791,136 @@ class MAFFTPlugin(BasePlugin):
         else:
             return filename
 
+    def _read_alignment(self, path):
+        records = _strip_direction_prefix(list(SeqIO.parse(str(path), "fasta")))
+        if records:
+            return records, "fasta"
+        try:
+            alignment = AlignIO.read(str(path), "clustal")
+        except Exception as exc:
+            raise ValueError(
+                "Cannot parse MAFFT output %s as FASTA or Clustal: %s"
+                % (path, exc)
+            )
+        return _strip_direction_prefix(list(alignment)), "clustal"
+
+    def _build_result_spec(self):
+        """Build the standard ResultSpec for one or more alignments."""
+        if not getattr(self, "alignment_output_files", None):
+            raise ValueError("No MAFFT alignment output is available.")
+
+        items = []
+        total_sequences = 0
+        max_length = 0
+        inputs = list(getattr(self, "imported_files", []) or [])
+        suffix = (self.output_suffix_edit.text()
+                  if self.save_to_cwd.isChecked() else "")
+        for index, output_file in enumerate(self.alignment_output_files):
+            records, file_format = self._read_alignment(output_file)
+            if len(records) < 2:
+                raise ValueError(
+                    "%s contains fewer than two aligned sequences." % output_file
+                )
+            lengths = {len(str(record.seq)) for record in records}
+            if len(lengths) > 1:
+                raise ValueError(
+                    "%s is not a rectangular alignment." % output_file
+                )
+            total_sequences += len(records)
+            max_length = max(max_length, max(lengths))
+            path = Path(output_file)
+            loci_name = _alignment_locus_name(path, suffix)
+            metadata = {"source": self.plugin_name}
+            if index < len(inputs):
+                metadata["input"] = inputs[index]
+            items.append(DatasetItemSpec(
+                loci_name=loci_name,
+                item_type="alignment",
+                sequences=records,
+                file_path=str(path),
+                format=file_format,
+                is_aligned=True,
+                length=max(lengths),
+                sequence_count=len(records),
+                data={
+                    "tool": "MAFFT",
+                    "parameters": self.get_parameters(),
+                },
+                metadata=metadata,
+            ))
+
+        dataset = DatasetSpec(
+            name="MAFFT alignment" if len(items) == 1 else "MAFFT alignments",
+            items=items,
+            dataset_id=getattr(self, "_source_dataset_id", None),
+            description=(
+                "%d alignment(s), %d sequences"
+                % (len(items), total_sequences)
+            ),
+            source="mafft",
+            summary={
+                "alignments": len(items),
+                "sequences": total_sequences,
+                "length": max_length,
+            },
+            metadata={
+                "input": inputs[0] if len(inputs) == 1 else "",
+                "input_files": inputs,
+                "parameters": self.get_parameters(),
+                "mode": self.mode_combo.currentText(),
+                "batch": bool(getattr(self, "batch_mode", False)),
+            },
+        )
+        return ResultSpec(source="mafft", datasets=[dataset])
+
     def import_to_platform(self):
-        """将比对结果导入到当前平台"""
+        """Send results through the standard result channel when connected."""
         if not hasattr(self, 'alignment_output_files') or not self.alignment_output_files:
             QMessageBox.warning(self, "Warning", "No alignment results to import.")
             return
-            
+
+        if self.result_has_consumer():
+            try:
+                result = self._build_result_spec()
+            except Exception as exc:
+                QMessageBox.critical(
+                    self, "Error",
+                    "Failed to build alignment result: %s" % exc,
+                )
+                return
+            if self.export_result(result):
+                self.import_to_platform_btn.setEnabled(False)
+                self.import_to_platform_btn.setText("Sent to workspace")
+                QMessageBox.information(
+                    self, "Success",
+                    "Alignment result sent to the current workspace.",
+                )
+            return
+
+        # Legacy fallback for callers that still connect the old signals.
         try:
-            # 判断是否为批量模式
             is_batch_mode = getattr(self, 'batch_mode', False)
-            
             if is_batch_mode:
-                # 批量模式：保持分组结构 [[SeqRecord, ...], [SeqRecord, ...]]
                 batch_sequences = []
                 for output_file in self.alignment_output_files:
-                    file_sequences = list(SeqIO.parse(output_file, "fasta"))
+                    file_sequences, _ = self._read_alignment(output_file)
                     batch_sequences.append(file_sequences)
                 self.batch_import_alignment_signal.emit(batch_sequences)
-                
             else:
-                # 单文件模式：扁平化列表 [SeqRecord, SeqRecord, ...]
                 sequences = []
                 for output_file in self.alignment_output_files:
-                    # 读取FASTA文件
-                    for record in SeqIO.parse(output_file, "fasta"):
-                        sequences.append(record)
-                
+                    file_sequences, _ = self._read_alignment(output_file)
+                    sequences.extend(file_sequences)
+
                 if not sequences:
                     QMessageBox.warning(self, "Warning", "No sequences found in alignment results.")
                     return
-                    
-                # 发送信号将数据导入到平台
                 self.import_alignment_signal.emit(sequences)
-            
-            # 显示成功消息
+
             if is_batch_mode:
                 QMessageBox.information(self, "Success", f"Successfully imported {len(self.alignment_output_files)} alignment files to the platform.")
             else:
                 QMessageBox.information(self, "Success", f"Successfully imported {len(sequences)} sequences to the platform.")
-            
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to import alignment results: {str(e)}")
 
@@ -750,5 +1072,10 @@ class MAFFTPluginEntry:
         self.config = config
         self.plugin_path = plugin_path
     
-    def run(self, import_from=None, import_data=None):
-        return MAFFTPlugin(import_from, import_data)
+    def run(self, import_from=None, import_data=None, workdir=None, **kwargs):
+        return MAFFTPlugin(
+            import_from=import_from,
+            import_data=import_data,
+            workdir=workdir,
+            **kwargs,
+        )

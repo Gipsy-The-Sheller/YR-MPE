@@ -44,7 +44,8 @@ class IQTreePartitionThread(BaseProcessThread):
         bootstrap_enabled: bool = True,
         bootstrap_replicates: int = 1000,
         sampling_type: str = "SITE",
-        output_prefix: Optional[str] = None
+        output_prefix: Optional[str] = None,
+        rcluster_percent: Optional[int] = None,
     ):
         """
         初始化IQ-TREE分区线程
@@ -69,6 +70,7 @@ class IQTreePartitionThread(BaseProcessThread):
         self.bootstrap_replicates = bootstrap_replicates
         self.sampling_type = sampling_type
         self.output_prefix = output_prefix or os.path.splitext(os.path.basename(input_file))[0]
+        self.rcluster_percent = rcluster_percent
     
     def get_tool_name(self):
         """返回工具名称"""
@@ -92,9 +94,26 @@ class IQTreePartitionThread(BaseProcessThread):
             
             # 执行命令
             result = self.execute_command(cmd)
-            
+
+            # IQ-TREE 3.0.1's partition merger can abort with "Fixing branch
+            # lengths not supported under specified site rate model". Retry
+            # once with RCluster, which takes a different merge path.
+            detail = (result.stderr or "") + "\n" + (result.stdout or "")
+            if (result.returncode != 0
+                    and "Fixing branch lengths not supported" in detail
+                    and "--rcluster" not in cmd):
+                self.console_output.emit(
+                    "IQ-TREE partition merger rejected the scheme; retrying "
+                    "with --rcluster 10.", "warning")
+                cmd = self.build_iqtree_command(partition_file,
+                                                rcluster_percent=10)
+                self.console_output.emit(
+                    "Executing retry: %s" % " ".join(cmd), "command")
+                result = self.execute_command(cmd)
+
             if result.returncode != 0:
-                self.error.emit(f"IQ-TREE execution failed: {result.stderr}")
+                message = (result.stderr or result.stdout or "").strip()
+                self.error.emit(f"IQ-TREE execution failed: {message}")
                 return
             
             # 收集输出文件
@@ -141,20 +160,30 @@ class IQTreePartitionThread(BaseProcessThread):
         
         return temp_file
     
-    def build_iqtree_command(self, partition_file: str) -> List[str]:
+    def build_iqtree_command(self, partition_file: str,
+                             rcluster_percent: Optional[int] = None) -> List[str]:
         """构建IQ-TREE分区命令"""
         # 根据IQ-Tree 3.0.1文档，正确的方式是：-s 指定超级矩阵文件，然后用 -p/-q/-Q/-S 指定分区文件
         cmd = [self.tool_path, "-s", self.input_file]
-        
+
         # 添加分区模式参数
         mode_flag = self.get_mode_flag()
         cmd.extend([mode_flag, partition_file])
-        
+
         # 添加模型参数（如果有）
         model = self.build_model_string()
         if model:  # 只有在 model 不为 None 时才添加 -m 参数
             cmd.extend(["-m", model])
-        
+            # IQ-TREE 3.0.1's partition merger can hit
+            # "Fixing branch lengths not supported under specified site rate
+            # model" for some merged schemes. RCluster changes the pair search
+            # and avoids that path; only relevant when merging.
+            percent = rcluster_percent
+            if percent is None:
+                percent = self.rcluster_percent
+            if "MERGE" in model and percent:
+                cmd.extend(["--rcluster", str(percent)])
+
         # 添加Bootstrap参数
         if self.bootstrap_enabled:
             cmd.extend(["-bb", str(self.bootstrap_replicates)])
