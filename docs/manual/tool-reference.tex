@@ -1,0 +1,1913 @@
+\documentclass[11pt]{report}
+\input{shared/preamble}
+\usepackage{lmodern}
+\begin{document}
+\supportingtitlepage{YPhylo Workbench Tool Reference}
+  {Plugin-by-plugin GUI, CLI and agent reference}
+\setcounter{tocdepth}{1}
+\tableofcontents
+\chapter*{Preface}
+\addcontentsline{toc}{chapter}{Preface}
+This reference is generated from the agent-facing skill files in \texttt{YR\_MPE/skills}. Each tool section states what the tool does, how the GUI controls map to command-line options or NEXUS directives, the recommended workflow, and the pitfalls that are easy to hit. Tools that are implemented entirely in Python or in the GUI say so explicitly instead of inventing a command line.
+
+The skill files remain the source of truth. Regenerate this document with \texttt{python docs/tools/build\_tool\_reference.py} from the repository root, then build it with \texttt{latexmk -lualatex manual/tool-reference.tex} from \texttt{docs/}.
+
+\chapter{Alignment and trimming}
+\section{MAFFT}
+\noindent\textit{Menu:} ALIGN $\rightarrow$ Align by... $\rightarrow$ MAFFT\\
+\noindent\textit{Skill id:} \texttt{mafft}
+
+\subsection{Purpose}
+
+Align nucleotide or protein FASTA files and import each alignment into the workspace.
+
+\subsection{GUI to CLI}
+
+\texttt{control\_bindings()} is the source of truth. The expected mapping is:
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+File input & positional & Appended after all options \\
+Alignment mode & \texttt{--auto}, \texttt{--localpair}, \texttt{--genafpair}, \texttt{--globalpair}, \texttt{--retree} & High-accuracy modes also add \texttt{--maxiterate 1000} \\
+Threads & \texttt{--thread} & \texttt{-1}/automatic is omitted \\
+Direction adjustment & \texttt{--adjustdirection} & Detects and reverse-complements sequences that appear reversed; marks them with \texttt{\_R\_} \\
+Direction adjustment (accurate) & \texttt{--adjustdirectionaccurately} & Slower, more reliable for divergent or long reads; also marks reversed records with \texttt{\_R\_} \\
+Advanced penalties & \texttt{--op}, \texttt{--ep}, \texttt{--maxiterate}, \texttt{--clustalout}, \texttt{--reorder}, ... & Set in Advanced Parameters \\
+Output suffix & none & GUI-only; MAFFT writes to stdout and the plugin saves it beside the input \\
+\bottomrule
+\end{longtable}
+
+Verify options with:
+
+\begin{lstlisting}
+mafft --help
+\end{lstlisting}
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Select an alignment/sequence or open \texttt{ALIGN -> Align by... -> MAFFT}.
+  \item Choose mode and threads; run.
+  \item Import the resulting alignment. When MAFFT was launched from a workspace dataset, each alignment updates the matching item in that same dataset (the dataset itself is not duplicated).
+  \item Continue with TrimAl/GBlocks, ModelTest-NG or ModelFinder, then RAxML-NG/ IQ-TREE.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item MAFFT writes to stdout; the plugin, not MAFFT's \texttt{-o}, creates the output file.
+  \item Batch mode runs one MAFFT process per input file.
+  \item Advanced parameters are only included when they differ from MAFFT defaults.
+  \item With direction adjustment enabled, MAFFT prefixes reverse-complemented records with \texttt{\_R\_}. The plugin strips this prefix from output headers so downstream taxon matching (OrthoFinder/concatenation) is not broken; the sequences themselves remain reverse-complemented. Do not re-add \texttt{\_R\_} when constructing taxon labels.
+  \item Direction adjustment is off by default. Enable it for Sanger amplicons or other data of unknown orientation.
+\end{itemize}
+
+
+\section{MACSE2}
+\noindent\textit{Menu:} ALIGN $\rightarrow$ Align by... $\rightarrow$ MACSE\\
+\noindent\textit{Skill id:} \texttt{macse}
+
+\subsection{Purpose}
+
+Codon-aware alignment of coding sequences with MACSE2 2.07. It preserves reading frames, handles frameshifts/stops, and writes both nucleotide and amino-acid alignments.
+
+\subsection{GUI to CLI}
+
+The runner builds:
+
+\begin{lstlisting}
+macse -prog alignSequences -seq <input> [options] -out_NT <nt> -out_AA <aa>
+macse -prog refineAlignment -align <input> [options] -out_NT <nt> -out_AA <aa>
+\end{lstlisting}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Mode = Align sequences & \texttt{-prog alignSequences -seq PATH} &  \\
+Mode = Refine existing alignment & \texttt{-prog refineAlignment -align PATH} &  \\
+Genetic code & \texttt{-gc\_def N} &  \\
+AA alphabet & \texttt{-alphabet\_AA NAME} & Default SE\_B\_8 \\
+Score matrix & \texttt{-score\_matrix NAME} & BLOSUM62, VTML200\_BIS, VTML240 \\
+Optimization cycles & \texttt{-optim N} & Default 2 \\
+NT output & \texttt{-out\_NT PATH} & Plugin-managed \\
+AA output & \texttt{-out\_AA PATH} & Plugin-managed \\
+Preferred result & none & GUI-only: selects NT or AA for import \\
+\bottomrule
+\end{longtable}
+
+Advanced parameters are free text and are appended verbatim to the MACSE command after shell-style splitting.
+
+\subsection{Post-processing (GUI-only)}
+
+\begin{itemize}
+  \item \textbf{Mask exceptional characters} rewrites \texttt{!} to \texttt{?}.
+  \item \textbf{Mask terminal stop codon} replaces a terminal stop with \texttt{---}.
+  \item \textbf{Drop all-gap codon columns} removes columns where every sequence has a gap.
+\end{itemize}
+
+These are applied by the plugin after MACSE, not by MACSE flags.
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import nucleotide FASTA files.
+  \item Choose align or refine mode.
+  \item Set genetic code, alphabet, matrix and optimization.
+  \item Run; send the NT or AA alignment to the workspace.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item Align mode expects unaligned CDS; refine mode expects an existing codon alignment.
+  \item The genetic code is passed by its NCBI number, not the display label.
+  \item MACSE writes both NT and AA files; the preferred-result combo only controls which one is selected for import.
+  \item Free-text advanced parameters are passed through without validation.
+\end{itemize}
+
+
+\section{MUSCLE5}
+\noindent\textit{Menu:} ALIGN $\rightarrow$ Align by... $\rightarrow$ Muscle 5\\
+\noindent\textit{Skill id:} \texttt{muscle5}
+
+\subsection{Purpose}
+
+Fast multiple-sequence alignment with MUSCLE5.
+
+\subsection{GUI to CLI}
+
+The runner calls \texttt{muscle -align|-super5 <input> -output <output>}.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Input FASTA & positional &  \\
+Mode = Standard alignment & \texttt{-align} & Default \\
+Mode = Large dataset & \texttt{-super5} & For many sequences \\
+Output & \texttt{-output PATH} & Plugin-managed \\
+Output suffix & none & GUI-only; default \texttt{\_m5.fas} beside the input \\
+\bottomrule
+\end{longtable}
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import one or more FASTA files.
+  \item Choose standard or large-dataset mode.
+  \item Run; the alignment is written beside the input (or to a temporary file) and can be sent to the workspace.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item \texttt{-align} and \texttt{-super5} are mutually exclusive modes, not tuning flags.
+  \item MUSCLE5 writes through \texttt{-output}; the GUI suffix is not a MUSCLE option.
+  \item Batch mode runs one process per input file.
+  \item \texttt{-super5} is intended for large datasets and can differ slightly from \texttt{-align}; do not mix modes within one comparison.
+\end{itemize}
+
+
+\section{Clustal Omega}
+\noindent\textit{Menu:} ALIGN $\rightarrow$ Align by... $\rightarrow$ Clustal Omega\\
+\noindent\textit{Skill id:} \texttt{clustal-omega}
+
+\subsection{Purpose}
+
+Multiple-sequence alignment with Clustal Omega 1.2.2.
+
+\subsection{GUI to CLI}
+
+The runner calls:
+
+\begin{lstlisting}
+clustalo -i <input> -o <output> --outfmt=fa [--auto] [--seqtype T] [--threads N] [--outorder=tree-order]
+\end{lstlisting}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Input FASTA & \texttt{-i PATH} &  \\
+Auto options & \texttt{--auto} & Default on \\
+Sequence type & \texttt{--seqtype Protein|RNA|DNA} & Auto is omitted \\
+Threads & \texttt{--threads N} & Omitted when 1 \\
+Output order = tree-order & \texttt{--outorder=tree-order} & Input order adds nothing \\
+Output & \texttt{-o PATH} & Plugin-managed \\
+Output format & \texttt{--outfmt=fa} & Always FASTA \\
+\bottomrule
+\end{longtable}
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import one or more FASTA files.
+  \item Leave Auto on unless you need explicit guide-tree/HMM control.
+  \item Set sequence type and threads.
+  \item Run; send the aligned FASTA to the workspace.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item \texttt{--auto} overrides manual guide-tree/HMM settings; turn it off before expecting those options to matter.
+  \item \texttt{--seqtype} is case-sensitive in the GUI mapping; Auto means Clustal detects the type itself.
+  \item The output is always FASTA (\texttt{--outfmt=fa}); the GUI suffix only changes the filename.
+  \item Batch mode runs one process per input file.
+\end{itemize}
+
+
+\section{TrimAl}
+\noindent\textit{Menu:} ALIGN $\rightarrow$ Trim Alignment by... $\rightarrow$ Trimal\\
+\noindent\textit{Skill id:} \texttt{trimal}
+
+\subsection{Purpose}
+
+Trim gap-rich and ambiguous columns from a multiple-sequence alignment with TrimAl 1.2rev57.
+
+\subsection{GUI to CLI}
+
+The runner builds \texttt{trimal -in <input> -out <output> [mode] [format]}.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Input alignment & \texttt{-in PATH} & One run per file in batch mode \\
+Trimming mode & \texttt{-gappyout}, \texttt{-strict}, \texttt{-strictplus}, \texttt{-automated1} & Default: automated1 \\
+Output format & \texttt{-clustal}, \texttt{-nexus}, \texttt{-phylip}, \texttt{-phylip3.2}, \texttt{-mega}, \texttt{-nbrf} & FASTA adds no flag \\
+Output file & \texttt{-out PATH} & Plugin-managed \\
+Output suffix & none & GUI-only; output is beside the input \\
+\bottomrule
+\end{longtable}
+
+Advanced parameters (applied only after accepting the dialog):
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.47\linewidth}>{\raggedright\arraybackslash}p{0.47\linewidth}@{}}
+\toprule
+GUI control & CLI option \\
+\midrule
+\endhead
+Gap threshold & \texttt{-gt X} \\
+Similarity threshold & \texttt{-st X} \\
+Consistency threshold & \texttt{-ct X} \\
+Minimum positions & \texttt{-cons N} \\
+Window size & \texttt{-w N} \\
+Gap window & \texttt{-gw N} \\
+Similarity window & \texttt{-sw N} \\
+Consistency window & \texttt{-cw N} \\
+Residue overlap & \texttt{-resoverlap X} \\
+Sequence overlap & \texttt{-seqoverlap N} \\
+Remove all-gap columns & \texttt{-nogaps} \\
+Remove columns composed only of gaps & \texttt{-noallgaps} \\
+Complementary alignment & \texttt{-complementary} \\
+Column numbering & \texttt{-colnumbering} \\
+\bottomrule
+\end{longtable}
+
+Thresholds are only emitted when greater than zero; the default mode supplies its own internal thresholds.
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import an alignment.
+  \item Choose a trimming mode and output format.
+  \item Optionally set advanced thresholds/windows.
+  \item Run; send the trimmed alignment to the workspace.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item \texttt{-strict} and \texttt{-automated1} are alternatives; only one mode flag is emitted.
+  \item Advanced threshold values of zero are omitted, not passed as \texttt{0}.
+  \item \texttt{-nogaps} removes any column containing a gap; \texttt{-noallgaps} only removes columns made entirely of gaps. They are not interchangeable.
+  \item FASTA output has no format flag; the other formats add one.
+\end{itemize}
+
+
+\section{GBlocks}
+\noindent\textit{Menu:} ALIGN $\rightarrow$ Trim Alignment by... $\rightarrow$ GBlocks\\
+\noindent\textit{Skill id:} \texttt{gblocks}
+
+\subsection{Purpose}
+
+Select conserved alignment blocks with GBlocks 0.91b.
+
+\subsection{GUI to CLI}
+
+The runner calls \texttt{GBlocks <input> [options] -p=n -q=n -r=n -e=-gb}.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Input alignment & positional & First argument \\
+Sequence type & \texttt{-t=p}, \texttt{-t=d}, \texttt{-t=c} & Auto adds nothing \\
+Minimum block length & \texttt{-b1=N} & Omitted at 0 \\
+Minimum conserved positions & \texttt{-b2=N} & Omitted at 0 \\
+Max contiguous non-conserved & \texttt{-b3=N} & Omitted at 8 \\
+Minimum flank positions & \texttt{-b4=N} & Omitted at 10 \\
+Gap positions & \texttt{-b5=n|h|a} & None is omitted \\
+Similarity matrix & \texttt{-b6=y|n} & Always emitted \\
+Output file & \texttt{-e=-gb} & Plugin-managed extension \\
+Batch/report flags & \texttt{-p=n -q=n -r=n} & Always added \\
+\bottomrule
+\end{longtable}
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import an alignment.
+  \item Choose sequence type and block parameters.
+  \item Run; send the \texttt{.gb} alignment to the workspace.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item \texttt{-b1}/\texttt{-b2} are omitted at 0, not passed as zero; GBlocks then uses its own defaults.
+  \item \texttt{-b3} and \texttt{-b4} have non-zero defaults (8 and 10); only changed values are emitted.
+  \item \texttt{-b6} is always emitted, including \texttt{-b6=n} when similarity matrices are off.
+  \item The plugin suppresses interactive prompts with \texttt{-p=n -q=n -r=n}.
+  \item GBlocks output is a block-selected alignment, not a tree.
+\end{itemize}
+
+
+\chapter{Sequence and dataset management}
+\section{One-Step OrthoFinder}
+\noindent\textit{Menu:} WORKSPACE $\rightarrow$ Dataset $\rightarrow$ One-Step OrthoFinder (for Organelle Genomes)\\
+\noindent\textit{Skill id:} \texttt{orthofinder}
+
+\subsection{Purpose}
+
+Turn GB/GBFF/GFF inputs into a workspace dataset of single-copy orthogroups. The plugin runs OrthoFinder, extracts CDS for each single-copy orthogroup and imports the resulting alignments/sequences into YPhylo Workbench.
+
+\subsection{When to use it}
+
+\begin{itemize}
+  \item You have organelle or bacterial genome annotations and want orthologous loci for downstream alignment and phylogenetics.
+  \item You need a dataset that can be sent to MAFFT/MACSE, ModelTest-NG and RAxML-NG.
+\end{itemize}
+
+\subsection{Semantic actions}
+
+This plugin is the most complete agent-facing plugin. Use \texttt{workbench.list\_windows} to get its \texttt{window\_id}, then \texttt{workbench.invoke\_plugin} with:
+
+\begin{itemize}
+  \item \texttt{orthofinder.inspect\_options} - current options and constraints.
+  \item \texttt{orthofinder.modify\_options} - atomically update options.
+  \item \texttt{orthofinder.validate} - validate annotations and the OrthoFinder runtime.
+  \item \texttt{orthofinder.run} - start without opening modal dialogs.
+  \item \texttt{orthofinder.stop} - stop the running pipeline.
+  \item \texttt{orthofinder.inspect\_status} - state, progress and capabilities.
+  \item \texttt{orthofinder.inspect\_console} - cursor window of console lines.
+  \item \texttt{orthofinder.inspect\_actions} - native action list and \texttt{next\_import}.
+  \item \texttt{orthofinder.preview\_results} - generated files and single-copy OGs.
+  \item \texttt{orthofinder.export\_to\_workspace} - idempotent import of the completed run.
+\end{itemize}
+
+\subsection{Typical flow}
+
+\begin{lstlisting}
+workbench.open_orthofinder
+workbench.list_windows -> window_id
+orthofinder.inspect_options
+orthofinder.modify_options {source_type: "gbff", input_path: "...", output_dir: "...", genetic_code: 11, threads: 2}
+orthofinder.validate
+orthofinder.run
+orthofinder.inspect_status
+orthofinder.preview_results
+orthofinder.export_to_workspace
+workbench.workspace
+\end{lstlisting}
+
+After import, each single-copy orthogroup is a dataset item and can be sent to the alignment tools.
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item Validation must pass before \texttt{orthofinder.run}; check \texttt{inspect\_status}.
+  \item The export action is idempotent; call it again after a completed run instead of duplicating the dataset manually.
+  \item The plugin cannot close while the pipeline is running.
+\end{itemize}
+
+
+\section{Sequence Viewer}
+\noindent\textit{Menu:} ALIGN $\rightarrow$ Open Sequence Files\\
+\noindent\textit{Skill id:} \texttt{sequence-viewer}
+
+\subsection{Purpose}
+
+View and edit a multiple-sequence alignment in a spreadsheet-style window, and launch alignment/trimming plugins on the current data.
+
+\subsection{GUI features}
+
+\begin{itemize}
+  \item Open FASTA/alignment files.
+  \item Insert sequences from another file.
+  \item Save changes, Save As, and export the current alignment.
+  \item Switch nucleotide/protein colouring and font.
+  \item Launch MAFFT, Clustal Omega, MUSCLE5, TrimAl or GBlocks from the viewer.
+  \item Navigate by sequence and column position.
+\end{itemize}
+
+There is no command-line interface; the viewer also serves as a lightweight editor for alignments produced by the plugins.
+
+\subsection{Workflow}
+
+\begin{enumerate}
+  \item Open an alignment (or receive one from a plugin).
+  \item Inspect/align columns, insert missing sequences if needed.
+  \item Optionally launch an aligner or trimmer from the toolbar.
+  \item Save changes or Save As before importing elsewhere.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item Editing is in-memory until Save/Save As; closing without saving loses edits.
+  \item Inserting sequences can change the alignment width; check that all rows stay rectangular.
+  \item The viewer is not a phylogeny tool; use the tree viewers for Newick/NEXUS.
+  \item Launching a plugin from the viewer passes the current alignment, but the returned result is a new item; it does not overwrite the viewer silently.
+  \item Colour schemes are display-only and do not affect the exported sequences.
+\end{itemize}
+
+
+\section{SeqMatrix}
+\noindent\textit{Menu:} WORKSPACE $\rightarrow$ Dataset $\rightarrow$ Create by SeqMatrix\\
+\noindent\textit{Skill id:} \texttt{seqmatrix}
+
+\subsection{Purpose}
+
+Build and edit multi-locus datasets in a spreadsheet-style matrix, including sequence import, NCBI downloads, partition definitions and export.
+
+\subsection{GUI features}
+
+\begin{itemize}
+  \item Import from sequences, NEXUS, partitioned NEXUS, or Excel.
+  \item Download sequences from NCBI by accession.
+  \item Append/delete rows and columns.
+  \item Edit sequence names and partition metadata.
+  \item Export partitions as FASTA files or as partitioned NEXUS.
+  \item \textbf{Import as a dataset} sends the matrix to the workspace as typed items.
+\end{itemize}
+
+There is no command-line interface; SeqMatrix is a data-management GUI.
+
+\subsection{Workflow}
+
+\begin{enumerate}
+  \item Create or import a matrix.
+  \item Add taxa (rows) and loci/partitions (columns), or download sequences.
+  \item Edit names/partitions so rows and columns are consistent.
+  \item Export FASTA/NEXUS, or import as a dataset for alignment/tree plugins.
+  \item Continue with MAFFT/TrimAl/IQ-TREE from the dataset.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item Rows are taxa and columns are partitions; mixing the two produces a transposed dataset.
+  \item NCBI downloads require network access and valid accessions; downloaded sequences are grouped separately until placed.
+  \item Partition definitions must match the exported FASTA order.
+  \item Importing as a dataset creates workspace items; exporting to files does not.
+  \item Sequence names must be unique within a partition for downstream matching.
+\end{itemize}
+
+
+\section{SeqDBG}
+\noindent\textit{Menu:} WORKSPACE $\rightarrow$ Dataset $\rightarrow$ Create by SeqDBG\\
+\noindent\textit{Skill id:} \texttt{seqdbg}
+
+\subsection{Purpose}
+
+Compare gene order and annotation across organelle genomes, reconcile gene names, inspect adjacency relationships and export a normalized dataset.
+
+\subsection{GUI features}
+
+\begin{itemize}
+  \item Load multiple annotated genomes.
+  \item Build a gene-adjacency graph.
+  \item Normalize gene names with synonym rules.
+  \item View left/right adjacency counts per gene.
+  \item Edit and export/import normalization rules.
+  \item Export selected loci as FASTA or as a workspace dataset.
+\end{itemize}
+
+There is no external command-line tool; SeqDBG runs in Python.
+
+\subsection{Workflow}
+
+\begin{enumerate}
+  \item Load annotated genomes.
+  \item Review the gene list and adjacency relationships.
+  \item Add normalization rules where annotations use different names for the same gene.
+  \item Refresh the graph/table so adjacency counts use the normalized names.
+  \item Select loci and export as a dataset for alignment/tree inference.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item Adjacency is computed within each genome; a gene missing from some genomes appears with lower coverage.
+  \item Normalization rules change labels, not the underlying sequences.
+  \item Gene-order comparisons are not orthology calls by themselves; verify one-to-one correspondence before concatenation.
+  \item Exporting to the workspace creates typed items; exporting FASTA only writes files.
+  \item Strand/orientation is not normalized by renaming; check reverse-complemented genes separately.
+\end{itemize}
+
+
+\section{Sequence Concatenator}
+\noindent\textit{Menu:} WORKSPACE\\
+\noindent\textit{Skill id:} \texttt{sequence-concatenator}
+
+\subsection{Purpose}
+
+Concatenate aligned FASTA partitions into one supermatrix and generate a NEXUS charset file describing the partition coordinates.
+
+\subsection{GUI workflow}
+
+\begin{enumerate}
+  \item \textbf{Add Files} selects the aligned partition FASTA files.
+  \item Each file must be internally rectangular: all sequences in that file have the same aligned length.
+  \item Set the output FASTA path.
+  \item Choose whether the NEXUS partition text is shown in a dialog or written to a file.
+  \item \textbf{Concatenate Sequences} writes the supermatrix and charset definitions.
+\end{enumerate}
+
+There is no external command-line tool; concatenation is performed in Python.
+
+\subsection{Matching and missing data}
+
+\begin{itemize}
+  \item Sequences are matched by their \textbf{full FASTA description}, not by a separate taxon ID field.
+  \item Descriptions present in any partition are included in the supermatrix.
+  \item A taxon absent from one partition is filled with \texttt{?} for that partition's full length.
+  \item Partition lengths come from each input file; a file with ragged sequence lengths is rejected.
+\end{itemize}
+
+\subsection{Output contract}
+
+\begin{itemize}
+  \item Output FASTA contains one record per unique description, with concatenated sequence.
+  \item The NEXUS text contains one \texttt{charset} per input file, with 1-based coordinates covering the concatenated length.
+  \item File names are sanitised into NEXUS labels (punctuation replaced by \texttt{\_}).
+\end{itemize}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item Matching by full description means headers must be identical across partitions; \texttt{taxonA} and \texttt{taxonA description} are different taxa.
+  \item Every input must be aligned; the concatenator does not align or trim.
+  \item Missing data is \texttt{?}, not \texttt{-} or \texttt{N}.
+  \item Partition order follows the file table, so reorder files before running if the charset order matters.
+  \item The NEXUS output describes partitions only; it does not contain the sequence matrix.
+\end{itemize}
+
+
+\section{Tree Merger}
+\noindent\textit{Menu:} PHYLOGENY\\
+\noindent\textit{Skill id:} \texttt{tree-merger}
+
+\subsection{Purpose}
+
+Collect trees from multiple Newick files into one tree file, usually to prepare a gene-tree set for ASTRAL/wASTRAL or another supertree method.
+
+\subsection{GUI workflow}
+
+\begin{enumerate}
+  \item \textbf{Add Files} selects one or more Newick files.
+  \item \textbf{Remove Selected} / \textbf{Clear All} edit the file list.
+  \item Set the output file.
+  \item \textbf{Merge Trees} writes every non-empty line from every input file, one tree per line, to the output.
+\end{enumerate}
+
+There is no external command-line tool; the merge is performed in Python.
+
+\subsection{Output contract}
+
+\begin{itemize}
+  \item Output is plain Newick text, one tree per line.
+  \item Files are processed in the order shown in the file table.
+  \item If a file contains several trees, each non-empty line is appended.
+  \item The merger does not reroot, deduplicate, validate, or relabel trees.
+\end{itemize}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item Lines that are not Newick are copied verbatim; check the output before running ASTRAL.
+  \item A NEXUS tree block is not parsed; use plain Newick files.
+  \item Taxon labels must already be consistent across files.
+  \item The output order follows the table order, so reorder files if the downstream tool depends on locus order.
+\end{itemize}
+
+
+\chapter{Model selection}
+\section{IQ-TREE ModelFinder}
+\noindent\textit{Menu:} MODEL $\rightarrow$ Find Best Substitution Model (ML)\\
+\noindent\textit{Skill id:} \texttt{modelfinder}
+
+\subsection{Purpose}
+
+Run IQ-TREE ModelFinder (\texttt{-m TESTONLY}) and import the best substitution model as a workspace \texttt{model} item.
+
+\subsection{GUI to CLI}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+File input & \texttt{-s} & One IQ-TREE process per alignment (or a supermatrix in partition mode) \\
+Sequence type & \texttt{-st DNA} or \texttt{-st AA} & \texttt{AUTO} omits \texttt{-st} \\
+Criterion & default BIC; \texttt{-AICc} / \texttt{-AIC} & BIC is IQ-TREE's default \\
+Threads & \texttt{-nt} & Omitted when 1/AUTO \\
+Model set & \texttt{-mset ALL} & The plugin searches all models \\
+Partition mode & \texttt{-p} / \texttt{-q} / \texttt{-m} scheme & Built by the partition thread \\
+\bottomrule
+\end{longtable}
+
+The core command is \texttt{iqtree3 -s <alignment> -m TESTONLY <options>}.
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Select an alignment or open \texttt{MODEL -> Find Best Substitution Model (ML)}.
+  \item Run and inspect the model table.
+  \item Import the model item.
+  \item Select the model and open IQ-TREE or RAxML-NG; the host applies the best model when the naming is compatible.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item ModelFinder's model names use IQ-TREE syntax (\texttt{GTR+F+G4}); RAxML-NG accepts most of it but \texttt{+FQ} is normalized to \texttt{+FE}.
+  \item Partition mode uses a different thread and can take much longer than a single-alignment search.
+  \item In partition mode the supermatrix taxa are the union across all selected loci; taxa missing from a locus are padded with \texttt{?}, not dropped.
+\end{itemize}
+
+
+\section{ModelTest-NG}
+\noindent\textit{Menu:} MODEL $\rightarrow$ Find Best Substitution Model (ModelTest-NG)\\
+\noindent\textit{Skill id:} \texttt{modeltest-ng}
+
+\subsection{Purpose}
+
+Select a DNA or protein substitution model and import the best model as a workspace \texttt{model} item. ModelTest-NG evaluates a candidate set and reports BIC, AIC and AICc in one run.
+
+\subsection{Preconditions}
+
+\begin{itemize}
+  \item One or more aligned FASTA/PHYLIP files.
+  \item More than three taxa for reliable model selection.
+  \item For a partitioned dataset, model selection currently runs per alignment; partition mode (\texttt{-q}) is not wired yet.
+\end{itemize}
+
+\subsection{GUI to CLI}
+
+The plugin's \texttt{control\_bindings()} is the source of truth. The expected mapping is:
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+File input & \texttt{-i}, \texttt{--input} & One ModelTest-NG process per selected file \\
+Sequence type & \texttt{-d}, \texttt{--datatype} & \texttt{DNA -> nt}, \texttt{Protein -> aa}; \texttt{Auto} is detected from the first record \\
+Criterion & none & GUI-only post-processing; ModelTest-NG always reports BIC/AIC/AICc \\
+Starting tree & \texttt{-t}, \texttt{--topology} & \texttt{ML starting tree -> ml}, \texttt{MP starting tree -> mp} \\
+DNA schemes & \texttt{-s}, \texttt{--schemes} & \texttt{3}, \texttt{5}, \texttt{7}, \texttt{11}; only passed for nucleotide data \\
+Threads & \texttt{-p}, \texttt{--processes} &  \\
+Output prefix & \texttt{-o}, \texttt{--output} & Generated by the plugin \\
+(fixed) & \texttt{--force}, \texttt{--disable-checkpoint} & Overwrites results; avoids the Cygwin exit crash \\
+\bottomrule
+\end{longtable}
+
+Verify options with:
+
+\begin{lstlisting}
+modeltest-ng --help
+\end{lstlisting}
+
+\subsection{Run and import}
+
+\begin{enumerate}
+  \item Select an alignment in the workspace, then open \texttt{MODEL -> Find Best Substitution Model (ModelTest-NG)}.
+  \item Choose the criterion used for the exported best model (BIC by default).
+  \item Run; inspect the criterion tables in Output Preview.
+  \item Click \texttt{Import to Current Platform}. The item data contains \texttt{type=model\_table}, \texttt{best\_model}, \texttt{criterion} and all three criteria tables.
+  \item Select the model item in the workspace and open \texttt{PHYLOGENY -> Maximum Likelihood (ML) -> RAxML-NG}; the model is applied automatically when possible.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item The BIC/AIC/AICc names are not command-line options; they select which block is exported.
+  \item ModelTest-NG can exit non-zero after writing a valid report; the plugin accepts the report when the \texttt{.out} file exists.
+  \item \texttt{Auto} is resolved before the command is built; the preview shows \texttt{<auto: nt|aa>} when it is not yet resolved.
+\end{itemize}
+
+
+\section{Model Parameter Estimation}
+\noindent\textit{Menu:} MODEL $\rightarrow$ Estimate Model Parameters (DNA, ML)\\
+\noindent\textit{Skill id:} \texttt{model-parameters}
+
+\subsection{Purpose}
+
+Estimate substitution-model parameters with IQ-TREE and export the fitted model (Q matrix, base frequencies, rate parameters) as a workspace model item. It can also parse existing \texttt{.iqtree} reports without rerunning IQ-TREE.
+
+\subsection{GUI to CLI}
+
+\texttt{control\_bindings()} is the source of truth. The plugin builds a single \texttt{-m} string, appending rate suffixes to the base model.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Input alignment & \texttt{-s PATH} & One IQ-TREE process per file in batch mode \\
+Substitution model & \texttt{-m MODEL} & \texttt{auto} becomes \texttt{MFP} \\
+Discrete Gamma & \texttt{+G} & Appended inside \texttt{-m} \\
+Gamma categories & \texttt{+G\{n\}} & Appended only when +G is checked \\
+Invariant sites & \texttt{+I} & Appended inside \texttt{-m} \\
+Empirical frequencies & \texttt{+F} & Appended inside \texttt{-m} \\
+Threads & \texttt{-nt N} & Omitted when 1 \\
+Load existing \texttt{.iqtree} & none & GUI-only parsing path \\
+\bottomrule
+\end{longtable}
+
+The runner always appends \texttt{-redo}.
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import an alignment or a set of alignments.
+  \item Choose a model, or keep \texttt{auto} (MFP).
+  \item Set Gamma/+I/+F if needed.
+  \item Run; inspect the parameter table and send the model to the workspace.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item \texttt{+G}, \texttt{+I} and \texttt{+F} are part of the same \texttt{-m} token, not separate options.
+  \item \texttt{auto} is a GUI label; the command uses \texttt{MFP}.
+  \item Batch mode runs IQ-TREE once per input file, so a shared model is not fitted across loci.
+  \item Loading an existing \texttt{.iqtree} file skips estimation and does not probe the sequence data.
+\end{itemize}
+
+
+\chapter{Distance and saturation}
+\section{ML distance calculation}
+\noindent\textit{Menu:} DISTANCE $\rightarrow$ Compute Pairwise Distances (ML)\\
+\noindent\textit{Skill id:} \texttt{ml-distance}
+
+\subsection{Purpose}
+
+Compute a maximum-likelihood pairwise distance matrix with IQ-TREE and import it as a distance item. The matrix can feed DecentTree or other distance-based tree builders.
+
+\subsection{GUI to CLI}
+
+The runner calls:
+
+\begin{lstlisting}
+iqtree3 -s alignment [-st DNA|AA] [-m MODEL] [-nt N] -redo
+\end{lstlisting}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Input alignment & \texttt{-s PATH} & One IQ-TREE run per file in batch mode \\
+Sequence type & \texttt{-st DNA|AA} & AUTO is omitted \\
+Substitution model & \texttt{-m MODEL} & \texttt{auto} omits \texttt{-m} \\
+Discrete Gamma & \texttt{+G\{n\}} & Appended to \texttt{-m} \\
+Invariable sites & \texttt{+I} & Appended to \texttt{-m} \\
+FreeRate & \texttt{+R} & Appended to \texttt{-m}; category count is not exposed here \\
+Ascertainment bias & \texttt{+ASC} & Appended to \texttt{-m} \\
+State frequencies & \texttt{+F}, \texttt{+FO}, \texttt{+FQ} & Estimated adds nothing \\
+Threads & \texttt{-nt N} & Omitted when 1 \\
+Rerun & \texttt{-redo} & Always added \\
+\bottomrule
+\end{longtable}
+
+IQ-TREE writes \texttt{<alignment>.mldist}; the plugin parses it into a distance matrix item.
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import one or more alignments.
+  \item Choose sequence type and model.
+  \item Run; inspect the distance table and send it to the workspace.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item \texttt{auto} does not mean ModelFinder here: the plugin simply omits \texttt{-m} and lets IQ-TREE use its distance default.
+  \item \texttt{+R} in this plugin does not take a category count; use the IQ-TREE plugin when you need \texttt{+R\{n\}}.
+  \item The output is a distance matrix, not a tree.
+  \item Batch mode writes one \texttt{.mldist} per input.
+  \item Uncorrected p-distances are a separate plugin and do not use IQ-TREE.
+\end{itemize}
+
+
+\section{Uncorrected p-distance}
+\noindent\textit{Menu:} DISTANCE $\rightarrow$ Compute Uncorrected Distances (p-distance)\\
+\noindent\textit{Skill id:} \texttt{uncorrected-distance}
+
+\subsection{Purpose}
+
+Compute an uncorrected p-distance matrix from an alignment without a substitution model. This is the observed proportion of differing sites, not an evolutionary distance corrected for multiple hits.
+
+\subsection{GUI controls}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.47\linewidth}>{\raggedright\arraybackslash}p{0.47\linewidth}@{}}
+\toprule
+Control & Effect \\
+\midrule
+\endhead
+Input alignment & FASTA alignment \\
+Sequence type & AUTO, DNA or Protein \\
+Gap treatment & Pairwise deletion or complete deletion \\
+DNA rule & All substitutions, transitions only, transversions only, or advanced rules \\
+\bottomrule
+\end{longtable}
+
+The calculation is implemented in Python; there is no external command-line tool.
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import an alignment.
+  \item Choose sequence type and gap treatment.
+  \item For DNA, optionally restrict the counted substitutions.
+  \item Run; inspect the matrix and send it to the workspace.
+\end{enumerate}
+
+\subsection{Output}
+
+\begin{itemize}
+  \item Square pairwise p-distance matrix.
+  \item Values range from 0 to 1 (proportion of differing sites).
+  \item The matrix can feed distance-based tree methods, but it is uncorrected.
+\end{itemize}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item p-distance underestimates evolutionary distance when multiple substitutions occur at the same site.
+  \item Pairwise deletion changes the compared length per pair; complete deletion uses one common set of sites.
+  \item Advanced DNA rules are not the same as a transition/transversion ratio model.
+  \item Protein and DNA rules are not interchangeable; set the sequence type first.
+  \item Do not compare p-distances computed with different gap treatments.
+\end{itemize}
+
+
+\section{Substitution saturation (BaCoCa C-value)}
+\noindent\textit{Menu:} DISTANCE $\rightarrow$ Calculate \& Plot Substitution Saturation\\
+\noindent\textit{Skill id:} \texttt{saturation}
+
+\subsection{Purpose}
+
+Assess substitution saturation in multiple-sequence alignments with the BaCoCa saturation index C. The plugin replaces the earlier simulated saturation analysis with the BaCoCa C-value.
+
+\subsection{Method}
+
+\begin{itemize}
+  \item The plugin computes the BaCoCa saturation index \texttt{C = std(Ti/Tv) / std(p)} from pairwise Ti/Tv counts and p-distances.
+  \item Gap treatment can be pairwise deletion or complete deletion.
+  \item Each alignment gets a saturation plot and summary statistics.
+  \item A high C indicates that substitutions are approaching saturation; low C indicates that the alignment still carries phylogenetic signal.
+\end{itemize}
+
+This is an internal Python analysis; no external executable is invoked.
+
+\subsection{GUI workflow}
+
+\begin{enumerate}
+  \item Import one or more alignments.
+  \item Choose gap treatment.
+  \item Run.
+  \item Select a file in the result tab to view its plot and statistics.
+  \item Export the current plot if needed.
+\end{enumerate}
+
+\subsection{Output}
+
+\begin{itemize}
+  \item Saturation plot per alignment.
+  \item Summary statistics including the C index.
+  \item Per-file selector for multi-file runs.
+\end{itemize}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item The C index depends on the alignment and gap treatment; compare only runs with the same settings.
+  \item Saturation is not the same as model selection: a saturated alignment may still be usable after trimming or with a site-heterogeneous model.
+  \item Pairwise and complete deletion can change the ranking of alignments.
+  \item The plot is descriptive; it is not a formal hypothesis test.
+\end{itemize}
+
+
+\section{DecentTree}
+\noindent\textit{Menu:} PHYLOGENY $\rightarrow$ Distance Methods (DecentTree)\\
+\noindent\textit{Skill id:} \texttt{decenttree}
+
+\subsection{Purpose}
+
+Build a distance-based tree from an ML distance matrix with DecentTree's scalable neighbour-joining variants.
+
+\subsection{GUI to CLI}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Input matrix & \texttt{-in PATH} & \texttt{.mldist} or \texttt{.dist} \\
+Algorithm & \texttt{-t BIONJ-R|BIONJ-V|NJ-R-D|ONJ-R|ONJ-R-V|AUCTION} &  \\
+Output tree & \texttt{-out PATH} & Plugin-managed: \texttt{<input>.nwk} \\
+Banner & \texttt{-no-banner} & Always added \\
+\bottomrule
+\end{longtable}
+
+The current Windows build avoids the classic BIONJ/NJ paths, which crash; the exposed algorithms are the verified variants. \texttt{BIONJ-R} is the default.
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Compute or import an ML distance matrix (for example from the ML distance plugin).
+  \item Choose an algorithm.
+  \item Run; send the resulting Newick tree to the workspace.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item The input must be a distance matrix, not an alignment.
+  \item DecentTree writes the tree next to the input as \texttt{<input>.nwk}; the GUI does not expose a separate output picker.
+  \item Batch mode runs one command per matrix file.
+  \item The algorithm names are case-sensitive CLI tokens; the GUI strips the parenthetical description before passing them.
+\end{itemize}
+
+
+\chapter{Phylogenetic inference}
+\section{IQ-TREE 3}
+\noindent\textit{Menu:} PHYLOGENY $\rightarrow$ Maximum Likelihood (ML) $\rightarrow$ IQ-Tree 3\\
+\noindent\textit{Skill id:} \texttt{iqtree}
+
+\subsection{Purpose}
+
+Maximum-likelihood tree inference from an alignment, with optional partition mode, model selection and branch support.
+
+\subsection{GUI to CLI: basic controls}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+File input & \texttt{-s} & One IQ-TREE process per alignment \\
+Sequence type & \texttt{-st DNA} / \texttt{-st AA} & \texttt{AUTO} omits the flag \\
+Threads & \texttt{-nt} & Omitted when 1/AUTO \\
+UFBoot & \texttt{-bb N} & Only when the UFBoot checkbox is enabled \\
+aBayes & \texttt{-abayes} & Boolean flag \\
+SH-aLRT & \texttt{-alrt N} & Only when the SH-aLRT checkbox is enabled \\
+(fixed) & \texttt{-redo} & Plugin always asks IQ-TREE to overwrite \\
+\bottomrule
+\end{longtable}
+
+\subsection{Substitution model}
+
+The GUI model combo contains the following base models. The live \texttt{workbench.help\_doc} returns the same catalog under \texttt{controls[id=model].choices}, mapping each GUI label to the exact \texttt{-m} token.
+
+\begin{itemize}
+  \item \textbf{Automatic:} \texttt{auto} -> \texttt{-m MFP} (ModelFinder plus tree inference).
+  \item \textbf{DNA:} JC69/JC, F81, K2P/K80, HKY85/HKY, TNe, TN93/TN, K3P/K81, K81u/K3Pu, TPM2, TPM2u, TPM3, TPM3u, TIM, TIMe, TIM2, TIM2e, TIM3, TIM3e, TVM, TVMe, SYM, GTR.
+  \item \textbf{Protein:} Blosum62, cpREV, Dayhoff, DCMut, EAL, ELM, FLAVI, FLU, GTR20, HIVb, HIVw, JTT, JTTDCMut, LG, mtART, mtMAM, mtREV, mtZOA, mtMet, mtVer, mtInv, NQ.bird, NQ.insect, NQ.mammal, NQ.pfam, NQ.plant, NQ.yeast, Poisson, PMB, Q.bird, Q.insect, Q.mammal, Q.pfam, Q.plant, Q.yeast, rtREV, VT, WAG.
+\end{itemize}
+
+The base model is extended into one \texttt{-m} string:
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & Model suffix & Notes \\
+\midrule
+\endhead
+Rate Heterogeneity = Equal & none & No rate-heterogeneity operation \\
+Rate Heterogeneity = Gamma Distribution (+G) & \texttt{+G\{n\}} & \texttt{n} from the Rate categories spin box \\
+Rate Heterogeneity = FreeRate Model (+R) & \texttt{+R\{n\}} & \texttt{n} from the Rate categories spin box (default 4) \\
+Invariable Sites & \texttt{+I} & Boolean \\
+Ascertainment Bias & \texttt{+ASC} & Boolean \\
+State Frequencies = Estimated & none & ML estimates \\
+State Frequencies = Empirical (+F) & \texttt{+F} & Empirical \\
+State Frequencies = ML-optimized (+FO) & \texttt{+FO} & ML-optimized \\
+State Frequencies = Equal (+FQ) & \texttt{+FQ} & Equal \\
+\bottomrule
+\end{longtable}
+
+Example: \texttt{GTR} + Gamma 4 + Invariant + Empirical = \texttt{-m GTR+G4+I+F}. Example: \texttt{GTR} + FreeRate 8 = \texttt{-m GTR+R8}.
+
+\subsection{Partition mode}
+
+Partition mode is configured in \textbf{Configure Partitions} and uses a partition file generated from the selected dataset:
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI partition option & CLI flag & Notes \\
+\midrule
+\endhead
+Edge-linked Proportional & \texttt{-p partition.nex} & Proportional branch lengths \\
+Edge-linked Equal & \texttt{-q partition.nex} & Equal branch lengths \\
+Edge-unlinked & \texttt{-Q partition.nex} & Unlinked branch lengths \\
+Separate Tree & \texttt{-S partition.nex} & Separate tree per partition \\
+Enable Bootstrap + replicates & \texttt{-bb N} & Partition thread also adds \texttt{-abayes} \\
+Sampling: SITE / GENE / GENESITE & (reserved) & Current command builder records the choice but does not yet pass a sampling flag \\
+RCluster + percentage & \texttt{--rcluster N} & Accelerated partition merging; passed when the merge path is used \\
+\bottomrule
+\end{longtable}
+
+The partition thread also passes \texttt{-m MFP+MERGE} when no per-partition model is set; if a \texttt{charpartition} model is present, models are read from the partition file instead.
+
+Taxa for the supermatrix are the \textbf{union across all selected partitions}; a taxon absent from a locus is padded with \texttt{?} for that locus length. Do not take the first partition as the taxon list when the dataset has missing data.
+
+\subsubsection{Partition-merger workaround}
+
+IQ-TREE 3.0.1 can abort partition merging with:
+
+\begin{lstlisting}
+Fixing branch lengths not supported under specified site rate model
+\end{lstlisting}
+
+This happens inside the partition-merger evaluation, not in the final tree search. RCluster takes a different pair-search path and avoids it. The plugin passes the RCluster percentage when configured; if the first attempt still fails with this message, it retries once with \texttt{--rcluster 10}.
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Select an alignment; optionally select a model item first.
+  \item Open \texttt{PHYLOGENY -> Maximum Likelihood (ML) -> IQ-Tree 3}.
+  \item Choose model/rate/state-frequency/support options and run.
+  \item Inspect \texttt{cli.preview} in \texttt{workbench.help\_doc}; it shows the exact command assembled from the current controls.
+  \item Import the resulting phylogeny or tree set.
+\end{enumerate}
+
+
+\section{MrBayes}
+\noindent\textit{Menu:} PHYLOGENY $\rightarrow$ Bayesian Inference (BI) $\rightarrow$ MrBayes3-MPI-BEAGLE\\
+\noindent\textit{Skill id:} \texttt{mrbayes}
+
+\subsection{Purpose}
+
+Bayesian phylogenetic inference with MrBayes 3.2.7a, including partitioned models, mixed protein models, MCMC diagnostics and optional dating priors. The Windows MPI+BEAGLE build is exposed as a separate plugin entry.
+
+\subsection{How the plugin runs}
+
+The plugin writes a \texttt{begin mrbayes; ... end;} block into a NEXUS file and runs:
+
+\begin{lstlisting}
+mb -i input.nex
+\end{lstlisting}
+
+With MPI enabled it runs \texttt{mpirun -np N mb -i input.nex}. If the input already contains a MRBAYES block and \textbf{Run MrBayes Data Block directly if present} is checked, that block is used instead of generating a new one.
+
+\subsection{GUI to NEXUS}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.47\linewidth}>{\raggedright\arraybackslash}p{0.47\linewidth}@{}}
+\toprule
+GUI control & NEXUS directive \\
+\midrule
+\endhead
+Data type = DNA & \texttt{lset nucmodel=4by4;} \\
+Data type = Protein & \texttt{lset nucmodel=protein;} \\
+DNA substitution number & \texttt{lset nst=N;} \\
+DNA state frequencies & \texttt{prset statefreqpr=dirichlet(1,1,1,1);}, \texttt{fixed(equal)}, or \texttt{fixed(empirical)} \\
+Protein model & \texttt{prset aamodelpr=fixed(model);} or \texttt{prset aamodelpr=mixed;} \\
+Protein state frequencies & \texttt{prset statefreqpr=...;} \\
+Rate heterogeneity & \texttt{lset rates=equal|gamma|invgamma|propinv|lnorm|adgamma;} \\
+Gamma categories & \texttt{ngammacat=N} in the \texttt{lset rates=...} line \\
+MCMC settings & \texttt{mcmcp ngen=N samplefreq=N nchains=N nruns=N printfreq=N savebrlens=yes checkpoint=yes checkfreq=5000;} then \texttt{mcmc;} \\
+Consensus type & \texttt{sumt contype=majorityrule|halfcompat|allcompat;} \\
+Consensus format & \texttt{conformat=simple|figtree} \\
+Burn-in as fraction & \texttt{sump relburnin=yes burninfrac=X;} and \texttt{sumt relburnin=yes burninfrac=X;} \\
+Burn-in as states & \texttt{sump burnin=N;} and \texttt{sumt burnin=N;} \\
+Partition mode & \texttt{charset}/\texttt{partition} definitions in NEXUS, then \texttt{prset applyto=(all)} as appropriate \\
+Dating & \texttt{prset brlenspr=clock:uniform;} plus clock and calibration priors \\
+BEAGLE & \texttt{set usebeagle=yes beagledevice=... beagleprecision=... beaglescaling=...;} \\
+\bottomrule
+\end{longtable}
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import a NEXUS/FASTA alignment, or a NEXUS file with an existing MRBAYES block.
+  \item Set data type, model, rate heterogeneity, MCMC length and consensus options.
+  \item For partitioned data, enable partition mode and configure partitions before running.
+  \item Run; inspect the \texttt{.con.tre}, \texttt{.p} and \texttt{.mcmc} outputs; import the consensus tree.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item The generated block must contain \texttt{mcmc;}; without it MrBayes only reads the data.
+  \item \texttt{sump} and \texttt{sumt} must run after \texttt{mcmc}; the plugin appends them automatically.
+  \item Burn-in is either a fraction (\texttt{relburnin=yes burninfrac=}) or a state count (\texttt{burnin=}), never both.
+  \item Partition definitions must live inside the NEXUS file; GUI partition mode only writes them when configured.
+  \item The supermatrix uses the union of taxa across partitions; missing taxa are padded with \texttt{?} for that partition, not removed.
+  \item An existing MRBAYES block is not silently replaced: uncheck the direct-run option if the GUI settings should regenerate it.
+  \item The MPI entry needs \texttt{mpirun} in addition to \texttt{mb}; the standard entry runs the serial executable.
+\end{itemize}
+
+
+\section{PhyloBayes-MPI}
+\noindent\textit{Menu:} PHYLOGENY $\rightarrow$ Bayesian Inference (BI) $\rightarrow$ PhyloBayes-MPI\\
+\noindent\textit{Skill id:} \texttt{phylobayes}
+
+\subsection{Purpose}
+
+Bayesian phylogenetic inference with PhyloBayes-MPI, including CAT mixture models, discrete Gamma rates and site-heterogeneous analyses.
+
+\subsection{GUI to CLI}
+
+The runner builds an \texttt{mpirun} command:
+
+\begin{lstlisting}
+mpirun -np N pb_mpi -d alignment [model options] chain_name
+\end{lstlisting}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Alignment & \texttt{-d PATH} & PHYLIP input \\
+MPI processes & \texttt{mpirun -np N} &  \\
+Parallel chains & none & GUI-only: launches N independent chains \\
+CAT mixture & \texttt{-cat} / \texttt{-ncat N} & Infinite or finite CAT \\
+nCAT components & \texttt{-ncat N} & Enabled by the CAT checkbox \\
+Discrete Gamma & \texttt{-dgam N} &  \\
+Substitution model & \texttt{-gtr}, \texttt{-poisson}, \texttt{-jtt}, \texttt{-wag}, \texttt{-lg} &  \\
+Sampling frequency + generations & \texttt{-x FREQ GEN} & Emitted together \\
+Chain name & positional & Plugin-generated from the input name \\
+\bottomrule
+\end{longtable}
+
+Chain post-processing uses \texttt{bpcomp}:
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.47\linewidth}>{\raggedright\arraybackslash}p{0.47\linewidth}@{}}
+\toprule
+GUI control & bpcomp option \\
+\midrule
+\endhead
+Consensus cutoff & \texttt{-c X} (0.5 default) \\
+Burn-in & \texttt{-x BURNIN} \\
+Sample every & \texttt{-x BURNIN EVERY} \\
+Stop at & \texttt{-x BURNIN EVERY UNTIL} \\
+\bottomrule
+\end{longtable}
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import a PHYLIP alignment.
+  \item Set MPI processes, CAT/Gamma and substitution model.
+  \item Run one or more chains.
+  \item Select the chain files and run \texttt{bpcomp} to obtain the consensus tree.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item CAT is enabled by default (\texttt{-cat}); switch to finite \texttt{-ncat} explicitly.
+  \item Gamma and CAT can be combined; both checkboxes are on by default.
+  \item The MCMC generation control is combined with the sampling frequency into a single \texttt{-x} pair, not two separate flags.
+  \item \texttt{-1} generations is converted to a large finite value for the CLI.
+  \item Chain analysis uses \texttt{bpcomp}, not \texttt{pb\_mpi}; its cutoff/burn-in options are separate from the MCMC flags.
+  \item PhyloBayes requires PHYLIP input; convert FASTA first.
+\end{itemize}
+
+
+\section{MPBoot}
+\noindent\textit{Menu:} PHYLOGENY $\rightarrow$ Maximum Parsimony (MPBoot)\\
+\noindent\textit{Skill id:} \texttt{mpboot}
+
+\subsection{Purpose}
+
+Maximum-parsimony tree inference with MPBoot's ultrafast bootstrap and consensus reconstruction.
+
+\subsection{GUI to CLI}
+
+\texttt{control\_bindings()} covers the top-level controls. Advanced Parameters are collected in a dialog; their flags are listed below.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Input alignment & \texttt{-s PATH} & One MPBoot run per file in batch mode \\
+Sequence type & \texttt{-st DNA|AA|CODON|BIN|MORPH} & AUTO is omitted \\
+Threads & \texttt{-nt N} & Omitted when 1 \\
+Ultrafast bootstrap & \texttt{-bb N} & Enabled by the UFBoot checkbox \\
+UFBoot max iterations & \texttt{-nm N} &  \\
+UFBoot stopping rule & \texttt{-nstep N} &  \\
+UFBoot min correlation & \texttt{-bcor X} &  \\
+RELL epsilon & \texttt{-beps X} &  \\
+Consensus threshold & \texttt{-t X} & Omitted at 0 (extended consensus); 0.5 = majority-rule \\
+Consensus burn-in & \texttt{-bi N} & Omitted at 0 \\
+Consensus tree & \texttt{-con} & Always appended by the plugin \\
+\bottomrule
+\end{longtable}
+
+Advanced Parameters (dialog values are applied when the dialog is accepted):
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.47\linewidth}>{\raggedright\arraybackslash}p{0.47\linewidth}@{}}
+\toprule
+GUI control & CLI option \\
+\midrule
+\endhead
+Initial trees & \texttt{-numpars N} \\
+Best trees & \texttt{-toppars N} \\
+Candidate trees & \texttt{-numcand N} \\
+Iterations = fixed & \texttt{-n N} \\
+Perturbation strength & \texttt{-pers X} \\
+Method = IQP & \texttt{-iqp} \\
+Method = IQPNNI (old) & \texttt{-iqpnni} \\
+Ratchet iterations & \texttt{-ratchet\_iter N} \\
+Ratchet weight & \texttt{-ratchet\_wgt N} \\
+Ratchet percent & \texttt{-ratchet\_percent N} \\
+Turn off Ratchet & \texttt{-ratchet\_off} \\
+SPR radius & \texttt{-spr\_rad N} \\
+Candidate cutoff & \texttt{-cand\_cutoff N} \\
+Turn off tree refinement & \texttt{-opt\_btree\_off} \\
+Use NNI instead of SPR & \texttt{-nni\_pars} \\
+\bottomrule
+\end{longtable}
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import an alignment.
+  \item Choose sequence type and threads.
+  \item Enable UFBoot and set the replicate/tuning values if needed.
+  \item Set the consensus threshold; run.
+  \item Send the \texttt{.treefile}/\texttt{.contree} result to the workspace.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item \texttt{-con} is always emitted, so a consensus tree is produced even when the threshold is 0.
+  \item \texttt{-bb} should be at least 1000; the GUI exposes the tuning options separately.
+  \item Advanced dialog values only take effect after accepting the dialog.
+  \item MPBoot uses the input alignment name for output; batch mode therefore writes one \texttt{.treefile}/\texttt{.contree} per input.
+\end{itemize}
+
+
+\chapter{Species trees and reconciliation}
+\section{ASTRAL-IV / wASTRAL}
+\noindent\textit{Menu:} SPECIES TREE $\rightarrow$ ASTRAL-IV\\
+\noindent\textit{Skill id:} \texttt{astral}
+
+\subsection{Purpose}
+
+Infer a species tree from a set of unrooted gene trees. YR-MPE wraps the ASTER executables:
+
+\begin{itemize}
+  \item \textbf{ASTRAL-IV} (\texttt{astral4}) --- standard quartet-based species-tree inference with CASTLES-II branch lengths.
+  \item \textbf{wASTRAL} (\texttt{wastral}) --- weighted ASTRAL; weights quartets by gene-tree support/length and reports coalescent-unit branch lengths.
+  \item \textbf{ASTRAL-Hybrid} (\texttt{astral-hybrid}) --- hybrid support/length weighting.
+\end{itemize}
+
+\subsection{GUI to CLI}
+
+The first argv token selects the executable; the remaining options are passed to it. \texttt{control\_bindings()} is the source of truth.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Input gene trees & positional & Appended last \\
+ASTRAL version & \texttt{astral4}, \texttt{wastral}, \texttt{astral-hybrid} & First argv token \\
+Threads & \texttt{-t N} &  \\
+Output tree & \texttt{-o PATH} & Optional; a temporary \texttt{.tre} is used if empty \\
+Support option & \texttt{-u 0..3} & 0 no support, 1 length+support, 2 detailed, 3 freqQuad.csv \\
+Constraint tree & \texttt{-c PATH} & Advanced \\
+Guide trees & \texttt{-g PATH} & Advanced \\
+Rounds & \texttt{-r N} & Advanced; default 4 \\
+Subsample rounds & \texttt{-s N} & Advanced; default 4 \\
+Gene-to-taxon map & \texttt{-a PATH} & Advanced \\
+Root taxon & \texttt{--root NAME} & Advanced \\
+Subsample proportion & \texttt{--proportion X} & Advanced; default 0.25 \\
+Seed & \texttt{--seed N} & Advanced; default 233 \\
+Yule lambda & \texttt{-l X} & Advanced; default 0.5 \\
+Downweight repeats & \texttt{-w X} & Advanced; default 1.0 \\
+Verbose level & \texttt{-v 1|2} & Advanced; default 1 \\
+Scoring only & \texttt{-C} &  \\
+More rounds & \texttt{-R} &  \\
+Branch lengths (ASTRAL-IV) & \texttt{--length SULength|CULength} & ASTRAL-IV only \\
+Gene length (ASTRAL-IV) & \texttt{--genelength X} & ASTRAL-IV only \\
+Hybrid preset & \texttt{-B}, \texttt{-S}, \texttt{-L} & ASTRAL-Hybrid only \\
+Tree weights & \texttt{--treeweights PATH} & ASTRAL-Hybrid only \\
+Weighting mode & \texttt{--mode 1..4} & ASTRAL-Hybrid only \\
+Min/max/default support & \texttt{-n}, \texttt{-x}, \texttt{-d} & ASTRAL-Hybrid only \\
+\bottomrule
+\end{longtable}
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Provide one Newick file with one gene tree per line. Opening ASTRAL from Selected with Phylogeny/TreeSet objects preloads their trees; the \textbf{Import from Selected TreeSet} button is the fallback and also accepts plain phylogenies.
+  \item Choose ASTRAL-IV, wASTRAL or ASTRAL-Hybrid.
+  \item Set support option, threads and output path.
+  \item Run; send the resulting tree to the workspace.
+\end{enumerate}
+
+\subsection{Weighted-mode support labels}
+
+ASTER's weighted parsers (\texttt{wastral}, \texttt{astral-hybrid}) call \texttt{std::stod} on node labels. IQ-TREE can write composite labels such as \texttt{/1/100} (SH-aLRT/aBayes/UFBoot). The leading slash makes \texttt{std::stod} throw \texttt{std::invalid\_argument} and the process aborts.
+
+YR-MPE normalizes composite labels before weighted runs: it keeps the first numeric field (aBayes when present, otherwise aLRT/UFBoot) and drops the others. A single support type such as aBayes-only also avoids the crash. ASTRAL-IV accepts composite labels directly.
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item ASTER writes the tree to \texttt{-o}; stdout contains only logs.
+  \item wASTRAL leaves terminal branch lengths empty in coalescent units; the plugin adds display-only \texttt{1e-5} terminal lengths for viewers.
+  \item \texttt{--length} and \texttt{--genelength} are ASTRAL-IV options; do not pass them to wASTRAL or ASTRAL-Hybrid.
+  \item Constraint and guide trees must be binary Newick trees.
+\end{itemize}
+
+
+\section{CASTER-site}
+\noindent\textit{Menu:} SPECIES TREE $\rightarrow$ CASTER-site\\
+\noindent\textit{Skill id:} \texttt{caster-site}
+
+\subsection{Purpose}
+
+Infer a species tree directly from a multiple-sequence alignment by sampling quartets from alignment sites. CASTER-site does not use gene trees, so it is an alternative to ASTRAL when site-level information should drive the estimate.
+
+\subsection{GUI to CLI}
+
+\texttt{control\_bindings()} is the source of truth.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Input alignment & positional & FASTA, PHYLIP, or a file list \\
+Format & \texttt{--format fasta|list|phylip} & \texttt{auto} is omitted \\
+Threads & \texttt{--thread N} &  \\
+Output tree & \texttt{--output PATH} & Optional \\
+Support option & \texttt{--support 0..2} & 0 none, 1 length+support, 2 detailed \\
+Subsample rounds & \texttt{--subsample N} & Advanced; default 4 \\
+Constraint tree & \texttt{--constraint PATH} & Advanced \\
+Guide trees & \texttt{--guide PATH} & Advanced \\
+Rounds & \texttt{--round N} & Advanced; default 4 \\
+Gene-to-taxon map & \texttt{--mapping PATH} & Advanced \\
+Root taxon & \texttt{--root NAME} & Advanced \\
+Subsample proportion & \texttt{--proportion X} & Advanced; default 0.25 \\
+Seed & \texttt{--seed N} & Advanced; default 233 \\
+Chunk size & \texttt{--chunk N} & Advanced; default 10000 \\
+Ambiguity handling & \texttt{--ambiguity 0|1} & 0=N, 1=diploid unphased \\
+Branch lengths & \texttt{--length SULength|CULength} & Advanced; default SULength \\
+Scoring only & \texttt{--scoring} &  \\
+More rounds & \texttt{--moreround} &  \\
+\bottomrule
+\end{longtable}
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import one alignment, or a dataset that concatenates to one supermatrix.
+  \item Set format (usually \texttt{auto} or \texttt{fasta}), threads and support option.
+  \item Run and send the tree to the workspace.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item The input is an alignment, not a gene-tree file.
+  \item \texttt{--format list} expects a file containing paths to per-locus alignments, not a FASTA alignment.
+  \item CASTER-site can be slow on large alignments; increase threads before increasing rounds.
+  \item The output is a Newick tree with branch lengths; terminal lengths may be missing and are added by the plugin for viewers.
+\end{itemize}
+
+
+\section{TreeRecs}
+\noindent\textit{Menu:} SPECIES TREE $\rightarrow$ TreeRecs 1.2\\
+\noindent\textit{Skill id:} \texttt{treerecs}
+
+\subsection{Purpose}
+
+Reconcile a gene tree with a species tree, report duplication/loss events and optionally write orthology/paralogy events.
+
+\subsection{GUI to CLI}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Gene tree & \texttt{-g PATH} & Newick \\
+Species tree & \texttt{-s PATH} & Newick \\
+Output directory & \texttt{-o DIR} & Plugin-managed \\
+Fix root / quiet & \texttt{-f -q} & Always added \\
+Duplication cost & \texttt{-d N} & Default 2 \\
+Loss cost & \texttt{-l N} & Default 1 \\
+Best root by reconciliation & \texttt{-r} & Boolean \\
+Contraction threshold & \texttt{-t X} & Omitted for \texttt{none} \\
+Species prefix mode & \texttt{-p Y} & Only \texttt{Y} is emitted \\
+Species separator & \texttt{-c CHAR} & Omitted for \texttt{\_} \\
+Orthology/paralogy events & \texttt{--fevent} &  \\
+Gene-to-species mapping & \texttt{-S PATH} &  \\
+\bottomrule
+\end{longtable}
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Import or select a gene tree and a species tree.
+  \item Set duplication/loss costs and optional mapping.
+  \item Run; inspect the reconciliation and import the event tables/tree.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item TreeRecs 1.2 aborts with \texttt{std::stod} when given \texttt{-t none}; the plugin leaves the flag out unless a numeric threshold is set.
+  \item Passing \texttt{-p N} or \texttt{-c \_} explicitly switches separator mapping on and breaks leaf names such as \texttt{A/B/C}; both flags are only emitted when changed from their defaults.
+  \item \texttt{-p} uses a species-prefix convention; for a separate mapping file use \texttt{-S} instead.
+  \item The output directory is always created by the plugin; \texttt{-f -q} makes the run non-interactive.
+\end{itemize}
+
+
+\section{BEST / MrBayes Multi-Species Coalescent}
+\noindent\textit{Menu:} SPECIES TREE $\rightarrow$ BEST / MrBayes MSC\\
+\noindent\textit{Skill id:} \texttt{best-mrbayes}
+
+BEST is the full-likelihood multispecies-coalescent analysis implemented by MrBayes. YPhylo Workbench exposes it as a block-oriented agent surface:
+
+\begin{itemize}
+  \item \texttt{best.inspect\_options} returns the current structured options and the canonical MRBAYES block.
+  \item \texttt{best.apply\_block} accepts a complete MRBAYES block. The form is updated from the parsed values and the response returns the canonical block plus any lines that were not parsed.
+  \item \texttt{best.modify\_options} sets individual controls directly.
+  \item \texttt{best.run} starts MrBayes through the task queue. \texttt{best.stop} cancels it.
+  \item \texttt{best.export\_to\_workspace} imports the consensus tree and chain files.
+\end{itemize}
+
+The input must be a NEXUS data file. Partitions may be loaded from charset definitions; the species partition uses MrBayes \texttt{speciespartition} syntax. A round-trip response should be checked with \texttt{unparsed\_lines} before running.
+
+
+\chapter{Dating and selection}
+\section{LSD2}
+\noindent\textit{Menu:} CLOCK $\rightarrow$ LSD2\\
+\noindent\textit{Skill id:} \texttt{lsd2}
+
+\subsection{Purpose}
+
+Least-squares molecular dating with LSD2 2.4.4, using node calibrations and/or tip dates.
+
+\subsection{GUI to CLI}
+
+The runner calls:
+
+\begin{lstlisting}
+lsd2 -i tree.nwk -s sequence_length -r l|a [-f 100 -q SD] -d calibrations.txt
+\end{lstlisting}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Tree file & \texttt{-i PATH} & Newick \\
+Sequence length mode & none & Disabled uses 1000; Manual uses the spin value; From sequence file computes it \\
+Sequence length & \texttt{-s N} & Always passed \\
+Use chosen root & \texttt{-r l} & Requires the tree rooted in IcyTree \\
+Estimate the root & \texttt{-r a} & Default \\
+Confidence intervals & \texttt{-f 100} & 100 bootstrap trees \\
+Lognormal std & \texttt{-q X} & Only with confidence intervals \\
+Node calibrations & \texttt{-d FILE} & Generated from the table \\
+Tip dates & \texttt{-d FILE} & Merged into the same calibration file \\
+Preferred result & none & GUI-only import choice \\
+\bottomrule
+\end{longtable}
+
+\subsection{Calibrations}
+
+\begin{itemize}
+  \item Node calibrations are entered in the calibration table.
+  \item Tip dates are entered through \textbf{Configure tip dates}; they are merged into the same \texttt{-d} file.
+  \item The plugin writes a platform-specific line ending (CRLF on Windows) because LSD2 is sensitive to it.
+\end{itemize}
+
+\subsection{Flow}
+
+\begin{enumerate}
+  \item Load a tree; optionally root it in IcyTree.
+  \item Set sequence length (or load a sequence file).
+  \item Add node calibrations and/or tip dates.
+  \item Enable confidence intervals if needed.
+  \item Run; import the dated tree.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item \textbf{Use chosen root} only takes effect if a rooted tree file is loaded; otherwise LSD2 is run with \texttt{-r a}.
+  \item Sequence length is always passed. Disabled does not omit \texttt{-s}; the runner substitutes 1000.
+  \item \texttt{-f} is fixed at 100 bootstrap trees in this plugin.
+  \item \texttt{-q} is only added when confidence intervals are enabled.
+  \item At least one calibration is normally required; the GUI can continue without one only after an explicit warning.
+\end{itemize}
+
+
+\section{PD-Guide}
+\noindent\textit{Menu:} PHYLOGENY $\rightarrow$ PD-Guide\\
+\noindent\textit{Skill id:} \texttt{pdguide}
+
+\subsection{Purpose}
+
+Set up molecular-dating calibrations and run a first dating analysis. PD-Guide is a guidance layer over the LSD2 controls, with method slots for other dating engines.
+
+\subsection{Method choices}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.47\linewidth}>{\raggedright\arraybackslash}p{0.47\linewidth}@{}}
+\toprule
+Method & Status \\
+\midrule
+\endhead
+LSD2 & Implemented \\
+IQ-TREE tree inference & Implemented as the tree-preparation step \\
+PhyloBayes & Not yet implemented \\
+MrBayes & Not yet implemented \\
+MCMCTree & Not yet implemented \\
+\bottomrule
+\end{longtable}
+
+\subsection{GUI workflow}
+
+\begin{enumerate}
+  \item Load a tree, or infer one with IQ-TREE from an alignment.
+  \item Configure tip dates and node calibrations in the shared dating panel.
+  \item Optionally export the calibration table as a text file.
+  \item Select LSD2 and run; the dated tree and \texttt{.result} files are returned.
+  \item Inspect the console and send the dated tree to the workspace.
+\end{enumerate}
+
+\subsection{Calibration inputs}
+
+\begin{itemize}
+  \item Tip dates: one date per sampled sequence.
+  \item Node calibrations: minimum/maximum or distribution-based bounds on internal nodes.
+  \item Calibration tables are written to a temporary file and passed to LSD2 with \texttt{-d}.
+\end{itemize}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item Only LSD2 is currently wired end-to-end; the other method entries report "not implemented" rather than silently running.
+  \item The tree must be rooted before dating; PD-Guide can use a chosen root or ask LSD2 to estimate it.
+  \item Calibrations must be compatible with the tree taxa; unmatched labels are not applied.
+  \item Dating requires branch lengths in the input tree.
+  \item Export the calibration table if you need to reuse it with MrBayes/MCMCTree later.
+\end{itemize}
+
+
+\section{Codon-based Z-test}
+\noindent\textit{Menu:} SELECTION $\rightarrow$ Codon-based Z-test (NG86 / YN00)\\
+\noindent\textit{Skill id:} \texttt{codon-ztest}
+
+\subsection{Purpose}
+
+Test whether synonymous and nonsynonymous substitution rates differ pairwise among codon-aligned sequences. The plugin implements NG86 (Nei-Gojobori counting) and YN00 (Yang-Nielsen, F84 correction) with an analytic delta-method Z-test.
+
+\subsection{Input}
+
+\begin{itemize}
+  \item Codon-aligned nucleotide FASTA.
+  \item All sequences must be in frame and have the same aligned length.
+  \item Stop codons and frameshifts should be masked before running.
+\end{itemize}
+
+\subsection{GUI workflow}
+
+\begin{enumerate}
+  \item Select a codon-aligned FASTA.
+  \item Choose NG86 or YN00.
+  \item Choose the genetic code.
+  \item Run.
+  \item Inspect the pairwise table and the omega matrix; export TSV if needed.
+\end{enumerate}
+
+\subsection{Statistics}
+
+\begin{itemize}
+  \item Z-test is two-sided by default; one-sided p-values are also reported.
+  \item The upper triangle of the omega matrix reports pairwise omega values; the lower triangle reports the corresponding p-values.
+  \item Significant pairs are highlighted.
+  \item The default variance follows the MEGA-style NG86 implementation; YN00 uses the F84 correction.
+\end{itemize}
+
+\subsection{Output}
+
+\begin{itemize}
+  \item Pairwise table: sequence pair, synonymous/nonsynonymous rates, omega, Z, p-values.
+  \item Lower/upper triangular omega/p matrices.
+  \item TSV export.
+\end{itemize}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item The test is pairwise; it does not fit a single tree-wide dN/dS model.
+  \item NG86 can be biased when transition/transversion rates are unequal or divergence is high; YN00 is the F84-corrected alternative.
+  \item Alignment gaps and ambiguous codons reduce the usable codon count.
+  \item A non-significant Z-test does not prove neutrality; it only fails to reject equal rates.
+  \item Genetic code must match the organism; the default is the standard code.
+\end{itemize}
+
+
+\section{Batch dN/dS}
+\noindent\textit{Menu:} SELECTION $\rightarrow$ Batch dN/dS (NG86 / YN00 / IQ-TREE)\\
+\noindent\textit{Skill id:} \texttt{batch-dnds}
+
+\subsection{Purpose}
+
+Estimate dN/dS across many codon alignments in one run, using either fast counting methods or IQ-TREE codon-model MLE.
+
+\subsection{Methods}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI method & Implementation & Output \\
+\midrule
+\endhead
+Counting --- NG86 & Nei-Gojobori counting & Pairwise omega table \\
+Counting --- YN00 & Yang-Nielsen F84 correction, one kappa per alignment & Pairwise omega table \\
+MLE --- IQ-TREE GY & \texttt{iqtree -s ALN --seqtype CODON -m GY} & Global omega + logL \\
+MLE --- IQ-TREE MG & \texttt{iqtree -s ALN --seqtype CODON -m MG} & Global omega + logL \\
+\bottomrule
+\end{longtable}
+
+\subsection{GUI workflow}
+
+\begin{enumerate}
+  \item Select an input folder of codon-aligned FASTA files.
+  \item Choose a method and genetic code.
+  \item For MLE, choose an output folder and threads.
+  \item Run; inspect the batch table and export TSV.
+\end{enumerate}
+
+\subsection{MLE command}
+
+\begin{lstlisting}
+iqtree -s alignment.fasta --seqtype CODON -m GY|MG -T N --prefix OUT/stem_gy|mg --redo
+\end{lstlisting}
+
+The plugin parses omega and log-likelihood from the IQ-TREE report/stdout.
+
+\subsection{Output}
+
+\begin{itemize}
+  \item One row per alignment: method, omega, logL, status, artifact path.
+  \item Failed alignments are marked and kept in the table.
+  \item TSV export of the batch table.
+\end{itemize}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item Counting methods skip stop/ambiguous codons pairwise; MLE requires clean, in-frame codon alignments.
+  \item NG86/YN00 report pairwise omega; GY/MG report one global omega per alignment.
+  \item The MLE output folder is required; picking a file instead of a folder is not supported.
+  \item IQ-TREE must be configured before MLE runs.
+  \item Genetic code applies to both counting and MLE paths.
+\end{itemize}
+
+
+\chapter{Visualization and diagnostics}
+\section{IcyTree}
+\noindent\textit{Menu:} PHYLOGENY $\rightarrow$ Tree Viewer (IcyTree)\\
+\noindent\textit{Skill id:} \texttt{icytree}
+
+\subsection{Purpose}
+
+Interactive tree viewing and annotation in an embedded IcyTree web view.
+
+\subsection{Inputs}
+
+\begin{itemize}
+  \item Newick (\texttt{.nwk}, \texttt{.newick}, \texttt{.tre}, \texttt{.tree})
+  \item NEXUS (\texttt{.nex}, \texttt{.nexus}) with a trees block
+\end{itemize}
+
+NEXUS is preferred when the tree carries rich annotations, because IcyTree can display support values, branch lengths and metadata that plain Newick may lose.
+
+\subsection{GUI workflow}
+
+\begin{enumerate}
+  \item Open IcyTree from the Phylogeny menu or send a tree/TreeSet to it.
+  \item The tree is loaded into the embedded viewer.
+  \item Use IcyTree's own controls to reroot, change layout, colour by support and export.
+  \item Downloads are offered as SVG, PNG, JPEG, Newick, NEXUS or XML.
+\end{enumerate}
+
+There is no command-line interface; IcyTree runs entirely in the embedded web view.
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item IcyTree is a viewer, not an inference tool; it does not modify the workspace tree unless you export and re-import it.
+  \item Very large trees may be slow in the embedded browser.
+  \item Export format matters: SVG/PNG for figures, Newick/NEXUS for downstream software.
+  \item Rooting in the viewer is display-side unless the exported tree is re-imported.
+  \item The viewer needs the bundled IcyTree HTML assets; if they are missing, the plugin shows an error page instead of a tree.
+\end{itemize}
+
+
+\section{MiniTracer}
+\noindent\textit{Menu:} PHYLOGENY $\rightarrow$ Bayesian Inference (BI) $\rightarrow$ MCMC Diagnostics (MiniTracer)\\
+\noindent\textit{Skill id:} \texttt{minitracer}
+
+\subsection{Purpose}
+
+Inspect MCMC chain files without an external Tracer installation: trace plots, ESS, 95\% HPD, harmonic means, skyline plots and two-chain comparisons.
+
+\subsection{Inputs}
+
+\begin{itemize}
+  \item MrBayes \texttt{.p} files (tab-delimited chain parameters).
+  \item PhyloBayes \texttt{.trace} files.
+  \item Plain tab-delimited trace files with a header row.
+\end{itemize}
+
+\subsection{GUI workflow}
+
+\begin{enumerate}
+  \item Open \texttt{PHYLOGENY -> Bayesian Inference (BI) -> MCMC Diagnostics (MiniTracer)}.
+  \item Add one or more chain files; set burn-in.
+  \item Select parameters in the statistics table (Ctrl/Shift for multiple).
+  \item Inspect the summary form, box plot or skyline plot.
+  \item Open \textbf{Compare 2 Chains} to select two traces; the harmonic-mean interval plot sits below the right-hand statistics table.
+\end{enumerate}
+
+\subsection{Notes for agents}
+
+MiniTracer is a GUI analysis tool, not a command-line binary. It consumes chain items from the workspace and produces no new file artifact unless the caller exports one. Use \texttt{workbench.workspace} to discover \texttt{chain} items and \texttt{workbench.selection} to see whether a chain can be sent to MiniTracer.
+
+\subsection{Interpretation}
+
+\begin{itemize}
+  \item ESS should be checked before trusting posterior summaries.
+  \item The harmonic-mean panel is descriptive; its approximate delta-method test is not a substitute for a proper marginal-likelihood comparison.
+  \item Skyline plots connect the selected parameters across posterior samples; the dashed bounds are 95\% HPD.
+\end{itemize}
+
+
+\section{Robinson-Foulds Comparison}
+\noindent\textit{Menu:} PHYLOGENY $\rightarrow$ Tree Comparison $\rightarrow$ Pairwise Robinson-Foulds (IQ-TREE)\\
+\noindent\textit{Skill id:} \texttt{rf}
+
+\subsection{Purpose}
+
+Compute pairwise unrooted Robinson-Foulds (RF) distances among trees or tree sets with IQ-TREE's \texttt{--tree-dist-all}. The plugin exposes the RF matrix, per-pair table, normalized RF and an RF distribution plot.
+
+\subsection{GUI to CLI}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+Tree file / TreeSet & \texttt{-t PATH} & One Newick tree per line \\
+Threads & \texttt{-T N} & Default: half the CPU count, capped at 4 \\
+Run & \texttt{--tree-dist-all} & Always added by the runner \\
+Output prefix & \texttt{--prefix DIR/rf} & Plugin-managed \\
+Rerun & \texttt{--redo} & Always added \\
+\bottomrule
+\end{longtable}
+
+Rooted input trees are converted to unrooted topologies in a temporary file before the IQ-TREE call. This normalization is GUI-only and does not appear as a CLI flag.
+
+\subsection{Comparison groups}
+
+When the input comes from selected TreeSets, the plugin records which trees belong to the same set. Pairwise rows are labelled \texttt{within} or \texttt{between} so the box plot can separate within-set and between-set RF distributions. Plain single-tree input produces no group labels.
+
+\subsection{Output}
+
+\begin{itemize}
+  \item Lower-triangular RF matrix (TSV and figure).
+  \item Pairwise table: tree 1, tree 2, comparison type, RF, normalized RF.
+  \item Normalized RF uses \texttt{RF / (2(n-3))} for \texttt{n >= 4} taxa.
+  \item RF distribution box plot.
+\end{itemize}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item RF is unrooted; do not interpret it as a rooted-tree distance.
+  \item The normalized denominator depends on the taxon count; compare normalized values only for the same taxon set.
+  \item Two trees are the minimum input; duplicate splits are counted, not deduplicated.
+  \item IQ-TREE must be configured before Run, even though the dialog opens without it.
+\end{itemize}
+
+
+\section{YR-MPE Console}
+\noindent\textit{Menu:} WORKSPACE\\
+\noindent\textit{Skill id:} \texttt{console}
+
+\subsection{Purpose}
+
+Open a shell preconfigured with the bundled phylogenetic tools, or create a PhyloBOT project directory.
+
+\subsection{GUI features}
+
+\begin{itemize}
+  \item \textbf{Startup a new shell} opens a terminal with the plugin's tool directories added to \texttt{PATH}.
+  \item \textbf{Create new PhyloBOT project} creates a project scaffold for command-line work.
+  \item The dialog lists the tool paths and commands that will be available.
+\end{itemize}
+
+There is no analysis command line of its own; the console is a launcher.
+
+\subsection{Workflow}
+
+\begin{enumerate}
+  \item Open the Console plugin.
+  \item Review the tool PATH list.
+  \item Start a shell, or create a PhyloBOT project.
+  \item Run bundled tools by name in the opened shell.
+\end{enumerate}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item The shell inherits the environment at launch; tools added later require a new shell.
+  \item The console does not create workspace items or provenance records; use the plugins for tracked analyses.
+  \item Closing the dialog does not necessarily close an already-opened terminal.
+  \item Tool paths come from \texttt{config.json}; a missing path is shown but cannot be fixed from this dialog.
+\end{itemize}
+
+
+\appendix
+\chapter{Tool and menu index}
+\begin{longtable}{@{}p{0.28\linewidth}p{0.48\linewidth}p{0.18\linewidth}@{}}
+\toprule
+Tool & Menu & Skill id \\
+\midrule
+\endhead
+One-Step OrthoFinder & WORKSPACE $\rightarrow$ Dataset $\rightarrow$ One-Step OrthoFinder (for Organelle Genomes) & \texttt{orthofinder} \\
+MAFFT & ALIGN $\rightarrow$ Align by... $\rightarrow$ MAFFT & \texttt{mafft} \\
+MACSE2 & ALIGN $\rightarrow$ Align by... $\rightarrow$ MACSE & \texttt{macse} \\
+TrimAl & ALIGN $\rightarrow$ Trim Alignment by... $\rightarrow$ Trimal & \texttt{trimal} \\
+GBlocks & ALIGN $\rightarrow$ Trim Alignment by... $\rightarrow$ GBlocks & \texttt{gblocks} \\
+MUSCLE5 & ALIGN $\rightarrow$ Align by... $\rightarrow$ Muscle 5 & \texttt{muscle5} \\
+Clustal Omega & ALIGN $\rightarrow$ Align by... $\rightarrow$ Clustal Omega & \texttt{clustal-omega} \\
+IQ-TREE ModelFinder & MODEL $\rightarrow$ Find Best Substitution Model (ML) & \texttt{modelfinder} \\
+ModelTest-NG & MODEL $\rightarrow$ Find Best Substitution Model (ModelTest-NG) & \texttt{modeltest-ng} \\
+Model Parameter Estimation & MODEL $\rightarrow$ Estimate Model Parameters (DNA, ML) & \texttt{model-parameters} \\
+IQ-TREE 3 & PHYLOGENY $\rightarrow$ Maximum Likelihood (ML) $\rightarrow$ IQ-Tree 3 & \texttt{iqtree} \\
+RAxML-NG & PHYLOGENY $\rightarrow$ Maximum Likelihood (ML) $\rightarrow$ RAxML-NG & \texttt{raxml-ng} \\
+MrBayes & PHYLOGENY $\rightarrow$ Bayesian Inference (BI) $\rightarrow$ MrBayes3-MPI-BEAGLE & \texttt{mrbayes} \\
+PhyloBayes-MPI & PHYLOGENY $\rightarrow$ Bayesian Inference (BI) $\rightarrow$ PhyloBayes-MPI & \texttt{phylobayes} \\
+MPBoot & PHYLOGENY $\rightarrow$ Maximum Parsimony (MPBoot) & \texttt{mpboot} \\
+DecentTree & PHYLOGENY $\rightarrow$ Distance Methods (DecentTree) & \texttt{decenttree} \\
+ASTRAL-IV / wASTRAL & SPECIES TREE $\rightarrow$ ASTRAL-IV & \texttt{astral} \\
+CASTER-site & SPECIES TREE $\rightarrow$ CASTER-site & \texttt{caster-site} \\
+TreeRecs & SPECIES TREE $\rightarrow$ TreeRecs 1.2 & \texttt{treerecs} \\
+LSD2 & CLOCK $\rightarrow$ LSD2 & \texttt{lsd2} \\
+MiniTracer & PHYLOGENY $\rightarrow$ Bayesian Inference (BI) $\rightarrow$ MCMC Diagnostics (MiniTracer) & \texttt{minitracer} \\
+Robinson-Foulds Comparison & PHYLOGENY $\rightarrow$ Tree Comparison $\rightarrow$ Pairwise Robinson-Foulds (IQ-TREE) & \texttt{rf} \\
+Codon-based Z-test & SELECTION $\rightarrow$ Codon-based Z-test (NG86 / YN00) & \texttt{codon-ztest} \\
+Batch dN/dS & SELECTION $\rightarrow$ Batch dN/dS (NG86 / YN00 / IQ-TREE) & \texttt{batch-dnds} \\
+IcyTree & PHYLOGENY $\rightarrow$ Tree Viewer (IcyTree) & \texttt{icytree} \\
+SeqMatrix & WORKSPACE $\rightarrow$ Dataset $\rightarrow$ Create by SeqMatrix & \texttt{seqmatrix} \\
+SeqDBG & WORKSPACE $\rightarrow$ Dataset $\rightarrow$ Create by SeqDBG & \texttt{seqdbg} \\
+Sequence Concatenator & WORKSPACE & \texttt{sequence-concatenator} \\
+Tree Merger & PHYLOGENY & \texttt{tree-merger} \\
+BEST / MrBayes Multi-Species Coalescent & SPECIES TREE $\rightarrow$ BEST / MrBayes MSC & \texttt{best-mrbayes} \\
+ML distance calculation & DISTANCE $\rightarrow$ Compute Pairwise Distances (ML) & \texttt{ml-distance} \\
+Uncorrected p-distance & DISTANCE $\rightarrow$ Compute Uncorrected Distances (p-distance) & \texttt{uncorrected-distance} \\
+Substitution saturation (BaCoCa C-value) & DISTANCE $\rightarrow$ Calculate \& Plot Substitution Saturation & \texttt{saturation} \\
+PD-Guide & PHYLOGENY $\rightarrow$ PD-Guide & \texttt{pdguide} \\
+Sequence Viewer & ALIGN $\rightarrow$ Open Sequence Files & \texttt{sequence-viewer} \\
+YR-MPE Console & WORKSPACE & \texttt{console} \\
+\bottomrule
+\end{longtable}
+\end{document}

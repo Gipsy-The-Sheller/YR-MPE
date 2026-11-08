@@ -39,3 +39,42 @@
 
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0.5em}
+
+% Uniform title page for the supplementary documents (manual, cases,
+% tool reference).  The first argument is the document title, the second is
+% its subtitle.  The manuscript metadata is kept in one place so the three
+% documents stay consistent with the main text.
+\newcommand{\supportingtitlepage}[2]{%
+  \begin{titlepage}
+    \thispagestyle{empty}
+    \centering
+    {\large Supporting information to\par}
+    \vspace{0.8em}
+    {\Large YR-MPE: a modular desktop platform for agent-operable and
+    reproducible phylogenetic workflows\par}
+    \vspace{2.2em}
+    {\Huge #1\par}
+    \vspace{0.7em}
+    {\Large #2\par}
+    \vspace{1.2em}
+    {\large Version 1.1.0 --- \today\par}
+    \vspace{2.2em}
+    {\large Zhijie Xu, Yiyang Jia, Zhihan Gu, Mingrui Shang, Xinbo Cheng,\\
+    Shuo Han, Yang Jin, Yitong Lei, Rui Zhang, Yunlong Zhang\par}
+    \vspace{1.4em}
+    {\small Department of Biological Sciences and Technology, College of
+    Biological Science and Medical Engineering, Donghua University,
+    Shanghai 201620, China\par}
+    \vspace{0.5em}
+    {\small Department of Cardio-Pulmonary Circulation, Shanghai Pulmonary
+    Hospital, Tongji University School of Medicine, Shanghai 200433,
+    China\par}
+    \vspace{0.5em}
+    {\small Shanghai Center of Systems Biomedicine, Shanghai Jiao Tong
+    University, Shanghai, China\par}
+    \vspace{1.8em}
+    {\small Correspondence: Yunlong Zhang,
+    \texttt{zhyl@dhu.edu.cn}\par}
+    \vfill
+  \end{titlepage}
+}

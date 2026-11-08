@@ -11,10 +11,15 @@ From this `docs/` directory:
 ```bash
 latexmk -lualatex manual/manual.tex
 latexmk -lualatex cases/cases.tex
+
+# Human-readable tool reference generated from YR_MPE/skills/*.md
+python docs/tools/build_tool_reference.py
+latexmk -lualatex -outdir=manual manual/tool-reference.tex
 ```
 
-Outputs: `manual.pdf`, `cases.pdf` in this `docs/` directory (latexmk writes
-them next to the build aux files). `latexmkrc` sets `lualatex` and `biber`.
+Outputs: `manual.pdf`, `cases.pdf`, and `manual/tool-reference.pdf`.
+`latexmkrc` sets `lualatex` and `biber`. The tool reference is regenerated
+from the skill Markdown; edit the skill file, not the generated `.tex`.
 Build artifacts are ignored by `docs/.gitignore`.
 
 ## Structure
@@ -25,12 +30,23 @@ docs/
 │   ├── preamble.tex      # packages, macros, tip/warning boxes
 │   └── software.bib      # @software citations for wrapped tools
 ├── manual/
-│   └── manual.tex        # user manual skeleton
+│   ├── manual.tex        # user manual skeleton
+│   └── tool-reference.tex  # generated from YR_MPE/skills/*.md
+├── tools/
+│   └── build_tool_reference.py  # skill Markdown -> tool-reference.tex
 ├── cases/
 │   └── cases.tex         # 9 case-study chapters
+├── plugin-development-standard.md  # developer contract for new/refactored plugins
 ├── tools_inventory.md    # verified local tool versions/paths
 └── latexmkrc
 ```
+
+## Plugin development
+
+`plugin-development-standard.md` is the maintained contract for new plugins
+and the old-plugin refactor: metadata, `BasePlugin`/`BaseProcessThread`,
+hidden subprocesses, citations, `ResultSpec` export, agent actions, host
+registration, testing, and the migration mapping from legacy signals.
 
 ## Content sources
 

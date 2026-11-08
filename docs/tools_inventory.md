@@ -9,6 +9,8 @@ the source of truth until that exists.
 | Tool | Path | Version | Notes |
 |---|---|---|---|
 | IQ-TREE 3 | `YR_MPE/bin/iqtree3/iqtree3.exe` | 3.0.1 (2025-05-05) | `settings.json` says 3.0.6; fix |
+| ModelTest-NG | `YR_MPE/bin/modeltest-ng/modeltest-ng.exe` | 0.1.7 | Cygwin build; run with `--disable-checkpoint` to avoid its exit crash |
+| RAxML-NG | `YR_MPE/bin/raxml-ng/raxml-ng.exe` | 1.2.2-master | package `build/bin` + MSYS DLLs; `--tree` braces must be escaped on Windows |
 | ASTER/ASTRAL | `YR_MPE/bin/aster/astral4.exe`, `wastral.exe`, `astral-pro3.exe`, `astral.bat` | ASTRAL-IV 1.24.4.8 | `astral.bat` takes a version token |
 | CASTER-site | `YR_MPE/bin/aster/caster-site.exe` | 1.24.2.6 | — |
 | LSD2 | `YR_MPE/bin/lsd2/lsd2.exe` | 2.4.4 | no standalone `settings.json` entry |
@@ -28,7 +30,6 @@ the source of truth until that exists.
 
 | Tool | Path | Version | Notes |
 |---|---|---|---|
-| RAxML-NG | `E:\Codes\raxml-ng\build\bin\raxml-ng.exe` | 1.2.2-master | bundle `raxml-ng/bin` lacks MSYS DLLs (exit 127); package `build/bin` + 3 DLLs |
 | OrthoFinder | `E:\Codes\gf_mito_b\orthofinder.exe` | 2.5.5 | BLAST+/MCL in the same folder |
 | MCMCTree | `E:\Codes\PYML\release\mcmctree_{scalar,SSE,AVX2,AVX512}.exe` | PAML 4.10.10 | default to `scalar`; SIMD builds lack node scaling |
 | baseml | `E:\Codes\gf_mito_b\baseml.exe` | PAML 4.10.7 | — |
@@ -47,8 +48,9 @@ the source of truth until that exists.
 
 ## Packaging hazards
 
-- `Initializer.finish_install()` rewrites `YR_MPE/config.json` from the 6-tool
-  `config.template.json`, dropping 10 of the 16 current entries. Fix before
-  shipping a new Initializer.
+- `Initializer.finish_install()` now rewrites `YR_MPE/config.json` from the
+  20-entry `config.template.json`; `config.template.json` and
+  `binary_sources.json` are the release inputs. Keep them in sync when a
+  bundled executable is added or renamed.
 - Version mismatches: IQ-TREE 3.0.6 vs 3.0.1; Gblocks 0.91b vs 1.0; MPBoot 1.2
   vs 1.1.1; LSD2 2.4.1 vs 2.4.4; `__version__` 0.2.0 vs manifest 0.1.0.

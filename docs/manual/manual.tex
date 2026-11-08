@@ -1,120 +1,2746 @@
-\documentclass[11pt]{report}
+\documentclass[10pt]{report}
 \input{shared/preamble}
-
-\title{YR-MPE User Manual}
-\author{Zhi-Jie Xu}
-\date{Draft for version 0.2.0 --- \today}
+\graphicspath{{manual/figures/}{figures/}}
+\hypersetup{hidelinks,
+  pdftitle={YPhylo Workbench and YR-MPE User Manual},
+  pdfauthor={Zhi-Jie Xu}}
+\geometry{margin=0.75in}
+\setlength{\parskip}{0.2em}
+\setlength{\emergencystretch}{2em}
+\AtEveryBibitem{\clearfield{url}}
+\renewcommand*{\bibfont}{\small}
+\setlength{\bibitemsep}{0pt}
 
 \begin{document}
-\maketitle
+\supportingtitlepage{YPhylo Workbench and YR-MPE}
+  {A User Manual for Molecular Phylogenetics and Evolution Analysis}
+
+\setcounter{tocdepth}{0}
+{\small
 \tableofcontents
+}
 
+%======================================================================
 \chapter{Introduction}
-\todo{Import the English introduction from the wiki/Word manual. Define
-YR-MPE (the plugin package) and YR-MPEA (the integrated GUI workbench) once.}
+%======================================================================
 
+This manual describes YR-MPE, a modular collection of molecular phylogenetics
+and evolution plugins for the YRTools platform, and YPhylo Workbench, the
+integrated graphical workbench built on top of those plugins. The first
+chapters cover installation, the interface and the workspace; the middle
+chapters are a reference for each analysis menu; the final chapters cover
+troubleshooting and plugin development. Menu paths are written as
+\textbf{MENU $\rightarrow$ Submenu $\rightarrow$ Action}, and names in
+\texttt{monospace} are files, options or object types. This edition describes
+YR-MPE 1.1.0. The integrated workbench is called \textbf{YPhylo Workbench};
+the plugin package remains \textbf{YR-MPE}.
+
+\section{What YR-MPE and YPhylo Workbench are}
+
+YR-MPE is a collection of plugins for YRTools, a plugin-based bioinformatics
+platform. Each plugin wraps one analysis---an aligner, a trimmer, a model
+selector, a tree program, a dating method, a selection test---and exposes it
+through a consistent graphical window. YPhylo Workbench is the integrated
+environment inside YR-MPE. It adds a persistent workspace, typed data objects,
+automatic hand-off between tools, and a provenance view of everything that has
+been done to a dataset.
+
+The distinction matters when reading this manual:
+
+\begin{itemize}
+  \item \textbf{YR-MPE} is the plugin package. It can be used from the YRTools
+        sidebar one tool at a time, or embedded in another PyQt application.
+  \item \textbf{YPhylo Workbench} is the workbench window. It manages
+        sequences, alignments, datasets, models, distance matrices, trees,
+        tree sets and MCMC chains as objects, and passes them between plugins.
+  \item \textbf{YRTools} is the host application that loads the plugins and
+        provides the sidebar, settings and update mechanism.
+\end{itemize}
+
+\section{Design principles}
+
+YR-MPE was built around four practical constraints.
+
+\begin{description}
+  \item[Modularity.] A method lives in one plugin. Adding or replacing a method
+        does not require rebuilding the workbench. The plugin package is pure
+        Python plus bundled executables, so a repository update can be
+        released without a compilation step.
+  \item[Reproducibility.] Every run records the command that was executed, the
+        input objects, the output files and the tool version. In a persistent
+        workspace these records survive restarts, so a analysis can be
+        inspected or repeated later.
+  \item[Windows-first packaging.] Many phylogenetic programs are developed and
+        tested on Unix-like systems. YR-MPE bundles verified x86\_64 Windows
+        builds, including MPI and BEAGLE builds of MrBayes and an MPI build of
+        PhyloBayes, so that the same interface works on a standard laboratory
+        workstation.
+  \item[Progressive disclosure.] Simple analyses use a short form. Advanced
+        options, partition schemes, MPI settings and calibration dialogs are
+        available but do not clutter the default view.
+\end{description}
+
+\section{Two ways to work}
+
+There are two complementary workflows.
+
+\textbf{Standalone plugin mode.} Open a plugin from the YRTools sidebar, load
+input files, set parameters, run the tool, and save the output manually. This
+is appropriate for one-off analyses and for users who already have a file-based
+pipeline.
+
+\textbf{Workbench mode.} Open YPhylo Workbench from the YR-MPE sidebar. Import
+sequences or create a dataset, select an object, and launch a tool from the
+toolbar. The selected object is imported automatically, and the completed
+result is added to the workspace as a new object. A pipeline then accumulates
+as a left-to-right chain: sequences $\rightarrow$ alignment $\rightarrow$
+model $\rightarrow$ tree. This mode removes most manual file handling and is
+recommended for multi-step analyses.
+
+The two modes use the same underlying plugins. The workbench adds persistent
+storage, dataset and partition management, and automatic result passing.
+
+\section{License, citation and support}
+
+YR-MPE is distributed under the GNU General Public License, version 3. You may
+modify and redistribute it under the terms of that license. The software is
+provided ``as is'', without warranty of any kind. Users are responsible for
+checking inputs, settings and results; the developers are not liable for
+decisions made from the output.
+
+When publishing an analysis, cite the method papers for the tools you used, not
+only the interface. Each plugin's \textbf{Citation} tab lists the relevant
+references with copy buttons. Cite YR-MPE itself by its repository URL until a
+software paper is available. The bibliography at the end of this manual gives
+the citations used in the tool sections.
+
+Bug reports and feature requests should include the YR-MPE version, the
+operating system, the exact command shown in the Console tab, and the smallest
+input that reproduces the problem.
+
+%======================================================================
 \chapter{Installation and first launch}
-\todo{Import from \texttt{User Manual-final.docx} and the wiki. Cover the
-Initializer, bundled binaries, manual installation, and the
-\texttt{launcher.vbs} entry point. Apply the accepted corrections in
-\texttt{revision-judgments.md}.}
+%======================================================================
 
+\section{System requirements}
+
+The pre-built package targets 64-bit Windows 10 and Windows 11. The bundled
+executables are x86\_64 binaries; 32-bit Windows is not supported. Linux and
+macOS can run the Python plugins and user-supplied binaries, but the packaged
+Windows executables and the MPI/BEAGLE configuration are Windows-specific.
+
+A practical minimum is 8 GB of RAM for single-gene analyses and 16 GB or more
+for partitioned phylogenomics, MrBayes with BEAGLE, or PhyloBayes CAT analyses.
+Long Bayesian runs also need free disk space for chains, checkpoints and
+traces. A working directory on a local SSD is preferable to a network share or
+a synchronised cloud folder during a long run.
+
+For manual installation, Python 3.8 or newer is required, together with PyQt5
+(including QtWebEngine), Biopython, NumPy, pandas and matplotlib. The repository
+does not pin exact dependency versions; use current stable releases unless a
+bundled runtime is provided.
+
+\section{Installing the pre-built Windows package}
+
+\begin{enumerate}
+  \item Download the YR-MPE release archive and the YRTools release archive
+        from their repositories.
+  \item Unzip both archives to writable locations. Avoid unpacking into
+        \texttt{Program Files} unless you have administrator rights; the
+        plugins write configuration and temporary files next to the
+        installation.
+  \item Place the whole \texttt{YR-MPE} folder into the host's plugin
+        directory:
+        \begin{center}
+        \texttt{<YRTools\_root>/plugins/YR-MPE/}
+        \end{center}
+        The folder must keep its internal structure, including
+        \texttt{YR\_MPE/}, \texttt{plugins/}, \texttt{bin/},
+        \texttt{settings.json} and \texttt{config.json}.
+  \item Start YRTools by running \texttt{launcher.vbs} in the YRTools root
+        directory. The script launches the host without leaving a console
+        window. If your system blocks VBScript, run \texttt{python main.py}
+        from the YRTools root instead.
+  \item Open YPhylo Workbench from the YR-MPE sidebar.
+\end{enumerate}
+
+\begin{warning}
+Do not rename the \texttt{YR-MPE} folder or move individual binaries out of
+\texttt{YR\_MPE/bin}. The configuration stores paths relative to the plugin
+root, and the plugin loader resolves the package by name.
+\end{warning}
+
+\section{First launch and the Initializer}
+
+On first launch, YR-MPE checks whether \texttt{YR\_MPE/config.json} exists and
+whether every configured executable can be found. If the file is missing or a
+path is invalid, the \textbf{YR-MPE Initializer} opens.
+
+The Initializer has five parts:
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.92\linewidth]{initializer.png}
+  \caption{The YR-MPE Initializer. The bundled-binary source defaults to
+  GitHub or Gitee; a custom archive URL can be pasted instead. \textbf{Auto
+  Config} first checks the extracted \texttt{YR\_MPE/bin} tree, then the
+  system \texttt{PATH}.}
+  \label{fig:manual-initializer}
+\end{figure}
+
+\begin{enumerate}
+  \item \textbf{License.} View the GPL-3.0 text.
+  \item \textbf{Installation path.} The path of the YR-MPE folder relative to
+        the host. The default, \texttt{YR-MPE}, is correct for a standard
+        installation under \texttt{<YRTools\_root>/plugins/}.
+  \item \textbf{Bundled Windows binaries.} Choose the GitHub or Gitee mirror
+        and click \textbf{Download and install binaries}. The archive is
+        extracted into \texttt{YR\_MPE/bin}. If the automatic download fails,
+        paste a direct URL for a \texttt{.zip} or \texttt{.tar.gz} archive, or
+        download the archive manually and unpack it so that its \texttt{bin/}
+        directory replaces \texttt{YR\_MPE/bin}. The default mirrors are in
+        \texttt{binary\_sources.json}; edit that file to add an institutional
+        mirror.
+  \item \textbf{Tool configuration.} \textbf{Auto Config} first checks the
+        bundled \texttt{YR\_MPE/bin} tree, then searches the system
+        \texttt{PATH} for each expected command (using \texttt{where} on
+        Windows and \texttt{which} elsewhere). \textbf{Manual Config} opens a
+        table in which you can browse to each executable. Tools that are not
+        found are listed with their download pages.
+  \item \textbf{Finish \& Install.} Writes \texttt{settings.json} and
+        \texttt{YR\_MPE/config.json}, then asks you to restart.
+\end{enumerate}
+
+A pre-built package usually ships with a working \texttt{config.json}, so the
+Initializer may not appear. If a single tool is later moved or upgraded, edit
+its entry in \texttt{YR\_MPE/config.json} rather than re-running the whole
+wizard. Each entry has the form:
+
+\begin{lstlisting}
+{
+  "name": "MAFFT",
+  "path": "/bin/mafft/mafft.bat"
+}
+\end{lstlisting}
+
+The \texttt{name} must match the \texttt{tool\_name} declared by the plugin
+(case-insensitive), and \texttt{path} is relative to \texttt{YR\_MPE/}.
+
+\section{Bundled binaries}
+
+The Windows package includes the following executables. Versions are those
+reported by the build shipped with this manual; a plugin's Console tab always
+shows the actual command and version banner for the current installation.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.24\linewidth}
+                      >{\raggedright\arraybackslash}p{0.20\linewidth}
+                      >{\raggedright\arraybackslash}p{0.46\linewidth}@{}}
+\toprule
+Program & Typical version & Used by \\
+\midrule
+\endhead
+MAFFT & 7.505 & ALIGN $\rightarrow$ MAFFT \\
+MUSCLE 5 & 5.3 & ALIGN $\rightarrow$ Muscle 5 \\
+Clustal Omega & 1.2.2 & ALIGN $\rightarrow$ Clustal Omega \\
+MACSE 2 & 2.07 & ALIGN $\rightarrow$ MACSE \\
+TrimAl & 1.2rev57 & ALIGN $\rightarrow$ Trimal \\
+GBlocks & 0.91b & ALIGN $\rightarrow$ GBlocks \\
+IQ-TREE 3 & 3.0.1 & ModelFinder, model parameters, distance, IQ-TREE,
+concordance factors, RF comparison \\
+RAxML-NG & 1.2.2 & PHYLOGENY $\rightarrow$ RAxML-NG \\
+ModelTest-NG & current build & MODEL $\rightarrow$ ModelTest-NG \\
+MrBayes & 3.2.7a (MPI + BEAGLE) & PHYLOGENY $\rightarrow$ MrBayes3-MPI-BEAGLE;
+CLOCK $\rightarrow$ MrBayes \\
+PhyloBayes-MPI & 1.9 & PHYLOGENY $\rightarrow$ PhyloBayes-MPI \\
+MPBoot & 1.1.1 & PHYLOGENY $\rightarrow$ MPBoot \\
+DecentTree & 1.0.0 & PHYLOGENY $\rightarrow$ DecentTree \\
+ASTER & 1.24.x & SPECIES TREE $\rightarrow$ ASTRAL-IV, wASTRAL,
+ASTRAL-Hybrid, CASTER-site \\
+TreeRecs & 1.2 & SPECIES TREE $\rightarrow$ TreeRecs 1.2 \\
+LSD2 & 2.4.4 & CLOCK $\rightarrow$ LSD2 \\
+\bottomrule
+\end{longtable}
+
+\section{Manual installation, updating and uninstalling}
+
+Manual installation is intended for developers and for users who need to run
+the plugins inside another PyQt host. Clone YRTools and YR-MPE into
+\texttt{<YRTools\_root>/plugins/}, install PyQt5, PyQtWebEngine, Biopython,
+NumPy, pandas and matplotlib, and run \texttt{main.py} from the YRTools root.
+If the Initializer does not open, copy \texttt{config.template.json} to
+\texttt{YR\_MPE/config.json} and edit the paths by hand; a plugin can also be
+launched directly through its \texttt{PluginEntry.run()} method. The repository
+runs from source without compilation, so a new method or bug fix can be
+distributed by updating the plugin folder.
+
+To update, replace the \texttt{YR-MPE} folder with the new release, but keep
+\texttt{YR\_MPE/config.json} and \texttt{settings.json} if you have customised
+paths. Workspaces live outside the plugin folder and are unaffected. To
+uninstall, remove the plugin folder; workspace folders must be deleted
+separately.
+
+\section{Verifying the installation}
+
+A quick check after installation:
+
+\begin{enumerate}
+  \item Open YPhylo Workbench. The toolbar should show WORKSPACE, ALIGN,
+        MODEL, DISTANCE, PHYLOGENY, SPECIES TREE, CLOCK and SELECTION.
+  \item Open \textbf{ALIGN $\rightarrow$ Open Sequence Files} and load a small
+        FASTA alignment.
+  \item Run \textbf{ALIGN $\rightarrow$ Align by... $\rightarrow$ MAFFT} with
+        the default settings. The Console tab should show the MAFFT command and
+        finish without an error, and the Output Preview should show aligned
+        sequences.
+  \item Run \textbf{MODEL $\rightarrow$ Find Best Substitution Model (ML)} on
+        the same alignment. A ranked model table confirms that IQ-TREE is
+        configured.
+\end{enumerate}
+
+If a step fails, the Console tab names the executable and the exact command.
+Chapter~\ref{ch:troubleshooting} lists the common causes.
+
+%======================================================================
 \chapter{Interface overview}
-\todo{Describe the workspace, dataset, and toolbar. Use the final menu names:
-WORKSPACE, ALIGN, MODEL, DISTANCE, PHYLOGENY, SPECIES TREE, CLOCK,
-SELECTION.}
+%======================================================================
 
+\section{Main window}
+
+The YPhylo Workbench window has four regions:
+
+\begin{itemize}
+  \item a \textbf{toolbar} at the top, with one pop-up button per analysis
+        menu and a feature search box on the right;
+  \item a central \textbf{workspace grid} of icons, one per data object;
+  \item a right-hand \textbf{Details / Selected} panel, opened on demand;
+  \item a \textbf{status bar} that reports the current workspace, running
+        tasks and short hints.
+\end{itemize}
+
+The toolbar is the map for the rest of the manual. Hovering a button expands
+its menu; clicking a menu item opens the corresponding plugin. Disabled items
+are placeholders for methods that are not implemented in this version and say
+so in their label or tooltip.
+
+\section{Toolbar map}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.15\linewidth}
+                      >{\raggedright\arraybackslash}p{0.75\linewidth}@{}}
+\toprule
+Menu & Actions (submenus in parentheses) \\
+\midrule
+\endhead
+\textbf{WORKSPACE} & Select Workspace; Dataset (New, Import from partitioned
+NEXUS file, Create by SeqMatrix, Create by SeqDBG, One-Step OrthoFinder);
+Import Workflow; Workflow Preview; About YPhylo Workbench. \\
+\textbf{ALIGN} & Open Sequence Files; Align by... (Clustal Omega, MAFFT,
+Muscle 5, MACSE); Trim Alignment by... (Trimal, GBlocks). \\
+\textbf{MODEL} & Find Best Substitution Model (ML); Find Best Substitution
+Model (ModelTest-NG); Estimate Model Parameters (DNA, ML). \\
+\textbf{DISTANCE} & Compute Pairwise Distances (ML); Compute Uncorrected
+Distances (p-distance); Calculate \& Plot Substitution Saturation. \\
+\textbf{PHYLOGENY} & Maximum Likelihood (ML) (IQ-Tree 3, RAxML-NG); Bayesian
+Inference (BI) (MrBayes3-MPI-BEAGLE, PhyloBayes-MPI, MCMC Diagnostics);
+Maximum Parsimony (MPBoot); Distance Methods (DecentTree); Tree Viewer
+(IcyTree); Tree Comparison (Pairwise Robinson--Foulds). \\
+\textbf{SPECIES TREE} & ASTRAL-IV; wASTRAL; CASTER-site; TreeRecs 1.2; Gene
+Concordance (gCF); Site Concordance (sCF); Site Diagnostics (sCF + CASTER);
+MSC Diagnostics (gCF + ASTER CU); BEST / MrBayes MSC. \\
+\textbf{CLOCK} & LSD2; MrBayes3-MPI-BEAGLE (dating mode). \\
+\textbf{SELECTION} & Codon-based Z-test (NG86 / YN00); Batch dN/dS (NG86 /
+YN00 / IQ-TREE); CodeML / HyPhy (planned, disabled). \\
+\bottomrule
+\end{longtable}
+
+\section{Workspace objects and provenance}
+
+Every object in the workspace has a type: sequence file, alignment, dataset,
+model, distance matrix, tree, tree set, chain, table or report. The icon shape
+and colour identify the type. Objects are arranged in rows by type, with
+newest objects at the end of the row.
+
+Each object also carries provenance metadata: the run that produced it, the
+inputs consumed by that run, the tool and version, and the command line. This
+is what makes the \textbf{Details} tree useful. It is a forward view of the
+provenance DAG: a run is anchored once under its first input, and the remaining
+inputs are listed in the run tooltip. Reverse edges are not drawn, so every
+object appears exactly once.
+
+\section{The common plugin window}
+
+Most analysis plugins share the same four-tab window.
+
+\begin{description}
+  \item[Input \& Parameters.] Supply data and set options. You can use
+        \textbf{Browse Files...} (multiple selection is supported for batch
+        runs), drag files into the window, or paste sequences into the
+        \textbf{Sequence} text box. For aligners and trimmers, the
+        \textbf{Save to} choice controls where the result is written.
+  \item[Output Preview.] Renders the result: a tree in IcyTree, an HTML
+        report, a distance matrix, a model table, a concordance table, or a
+        text preview. When several files were processed in a batch, the
+        \textbf{Select Report} drop-down chooses which one is shown.
+  \item[Console.] A colour-coded, timestamped log of the command sent and the
+        program's output. This is the first place to look when something
+        fails. \textbf{Clear Console} empties it; \textbf{Auto Scroll} toggles
+        following.
+  \item[Citation.] The reference or references to cite, each with a copy
+        button. Citations are resolved from the citation database, not typed
+        into the plugin.
+\end{description}
+
+At the bottom of the window are \textbf{Run}, \textbf{Stop} and a progress bar.
+When a tool is launched from the workbench, an import button appears after a
+successful run; its label is \textbf{Import to Current Platform} in older
+panels and \textbf{Send to workspace} in newer ones. Both do the same thing:
+they push the validated result into the workspace as a typed object.
+
+Long-running tools (MrBayes, PhyloBayes, OrthoFinder) open as non-modal
+windows. You can continue working in the main window while they run; the
+status bar and the Console tab report progress.
+
+\section{Input and output conventions}
+
+\textbf{Batch input.} A multi-file selection runs the tool once per file. Each
+run writes its own output, and the Output Preview's \textbf{Select Report}
+drop-down switches between them. Batch mode is intended for per-locus
+alignments or per-file distance matrices; it is not a way to pool files into
+one analysis (use a dataset or the Sequence Concatenator for that).
+
+\textbf{Save to.} The two radio buttons have different consequences:
+
+\begin{itemize}
+  \item \textbf{Beside input} writes the result next to the input file as
+        \texttt{<input\_stem><suffix>.<ext>}. For example,
+        \texttt{genes.fas} becomes \texttt{genes\_mafft.fas} with MAFFT.
+  \item \textbf{Temporary File} writes to a temporary directory: the workspace
+        \texttt{temp/} folder when the plugin was opened from YPhylo
+        Workbench, otherwise the system temporary directory. Pasting sequence
+        text forces temporary-file output.
+\end{itemize}
+
+The suffix is editable in most aligner and trimmer panels. Output is always
+written by the plugin, not by the external program's own output option, so the
+suffix only affects the file name, not the format.
+
+\textbf{Import versus export.} Importing sends an object to the workspace and
+makes it available to downstream tools. Exporting writes a file that is not
+tracked by the workbench. Use import when the result is part of a pipeline;
+use export when you need a file for another program or for archiving.
+
+\section{Selection and result passing}
+
+Clicking an icon selects it and marks it green. The green object is the active
+input for the next tool. When several objects are selected, the host chooses
+the most relevant one for the tool being opened; for example, a green model
+plus a green alignment applies the model to that alignment in IQ-TREE. Tooltips
+describe the multi-input logic.
+
+Data icons that belong to the same provenance chain (same dataset and
+\texttt{ownership\_uuid}) form a visual chain. Hovering one icon
+grey-highlights every icon on that chain; moving away restores the normal
+selection colours. Clicking an icon clears the previous chain highlight, keeps
+the clicked icon green, highlights the rest of the chain in blue, and slides
+the right-hand inspector open (220 ms, cubic ease-out). The green selection
+state is preserved for plugin import. Double-clicking opens the object's
+viewer; the right-click \textbf{Deselect} action clears both the chain
+highlight and the selection. The \textbf{Details} toolbar button uses the same
+slide animation when it is toggled.
+
+The right pane is a vertical splitter with \textbf{Details} (the provenance
+inspector) above \textbf{Selected}. Both headers stay visible; only one body is
+expanded at a time, and the other collapses to its header. \textbf{Selected} is
+a multi-object basket: right-click an icon and choose \textbf{Add to Selected},
+or drag the icon onto the \textbf{Selected} toolbar button. Basket objects stay
+green across chains and types; selections are written to the workspace state.
+The panel lists the basket as a type-grouped tree (alignments, trees, tree
+sets, models, distances and chains, with counts), and the \textbf{Send to} tree
+is grouped by toolbar menu. A single click sends the basket to a tool.
+Recommendations follow the types present: a tree set offers ASTRAL-IV and
+wASTRAL, a tree set plus a tree offers gCF/sCF, alignments offer IQ-TREE or
+CASTER-site, and two or more trees offer the Robinson--Foulds comparison.
+
+\section{Console conventions}
+
+The Console is a record, not a terminal. Command lines are shown in a distinct
+colour, normal output in the default colour, warnings in amber and errors in
+red. The timestamp is the time at which the line was received, not the time at
+which the external program wrote it.
+
+The first line is usually the exact command. If a run fails, compare that
+command with the tool's own documentation before changing GUI settings. A
+non-zero exit code is reported with the last lines of stdout and stderr; a tool
+that writes a valid report and then exits non-zero (ModelTest-NG is one
+example) is accepted only when the report file exists.
+
+%======================================================================
 \chapter{Datasets and workspace}
+%======================================================================
+
 \section{Workspace modes}
+
+By default no workspace folder is selected, and YPhylo Workbench runs in
+\textbf{Temporary mode}. Objects are kept in memory and in a session temporary
+directory, and everything is discarded when the window closes. Temporary mode
+is convenient for a quick look at a file, but it is not suitable for long
+analyses or for work you may want to revisit.
+
+\textbf{WORKSPACE $\rightarrow$ Select Workspace $\rightarrow$ Select Folder...}
+switches to a \textbf{persistent workspace}. The folder becomes a project with
+three subdirectories:
+
+\begin{itemize}
+  \item \texttt{temp/} --- the working directory passed to external programs;
+  \item \texttt{history/} --- a log of every output file and run;
+  \item \texttt{results/} --- final results and exported objects.
+\end{itemize}
+
+The workspace state is stored in \texttt{workspace.json}. Recent workspaces
+reappear in the sub-menu, and the current one is suffixed \textbf{Current}.
+Switching back to \textbf{Temporary} clears the current workspace data after a
+confirmation prompt.
+
+MrBayes and PhyloBayes require a persistent workspace. Their chains are long,
+often hours to days, and are checkpointed to disk so that an interrupted run
+can be resumed. The plugin refuses to start, or warns and asks you to select a
+folder, when the workspace is temporary. The same applies to any tool whose
+output you want to keep across sessions.
+
+Use one persistent workspace per project on a local disk: a workspace
+synchronised by OneDrive, Dropbox or a network share can produce file-lock and
+permission errors during long Bayesian runs.
+
+\section{Datasets and partitions}
+
+A \textbf{dataset} is a set of per-locus partitions treated as one analysis
+unit. It is the object you send to a partition-aware tool. Create one in any of
+these ways:
+
+\begin{itemize}
+  \item \textbf{New} creates an empty dataset; use the dataset manager's
+        \textbf{+} button to add FASTA files, and \textbf{View} to inspect a
+        locus in the sequence viewer.
+  \item \textbf{Import from partitioned NEXUS file} parses a NEXUS
+        supermatrix and its \texttt{charset} definitions into a dataset.
+  \item \textbf{Create by SeqMatrix} builds a dataset from a taxon $\times$
+        locus matrix, including sequences downloaded from NCBI.
+  \item \textbf{Create by SeqDBG} builds a dataset from annotated organelle
+        genomes after gene-name standardisation.
+  \item \textbf{One-Step OrthoFinder} builds a dataset of single-copy
+        orthogroups from GenBank or proteome input.
+\end{itemize}
+
+The dataset manager controls two independent partition properties:
+
+\begin{description}
+  \item[Topology.] \emph{Topo linked} forces one shared tree topology across
+        partitions; \emph{Topo unlinked} lets each partition have its own tree.
+        Concatenated analysis assumes linked topology. The default is
+        unlinked to prevent unintentional concatenation of loci with
+        discordant histories.
+  \item[Branch lengths.] \emph{Edge linked} assumes branch lengths are shared
+        or proportional across partitions; \emph{Edge unlinked} allows
+        independent branch lengths. Edge linked is a stronger hypothesis and
+        is appropriate for partitions with similar rates; edge unlinked is
+        appropriate for heterogeneous partitions.
+\end{description}
+
+When a dataset is imported into ModelFinder, IQ-TREE, MrBayes or another
+partition-aware tool, the supermatrix and partition scheme are built
+automatically. The taxon set of the supermatrix is the \textbf{union} across
+partitions; a taxon missing from a locus is padded with \texttt{?} for that
+locus, not dropped. Do not assume that the first partition's taxon list is the
+full taxon set.
+
+\section{Chain feedback and the inspector}
+
+The workflow tree in \textbf{Details} is a forward view of the provenance DAG:
+a run is anchored once under its first input, the remaining inputs are listed
+in its tooltip, and reverse edges are omitted so every item appears once.
+Clicking a run node shows the tool, version, command and output files.
+Right-clicking an object offers \textbf{Show}, \textbf{Preview}, \textbf{Add to
+Selected}, \textbf{Deselect} and, for dating inputs, \textbf{Import to LSD2}
+or \textbf{Import to MCMCTree}; the latter is a placeholder in this version
+and reports that the import will be wired through PD-Guide.
+
+\section{Sequence viewer}
+
+\textbf{ALIGN $\rightarrow$ Open Sequence Files} opens the sequence viewer, a
+spreadsheet-style window for one or more sequences.
+
+It opens FASTA or alignment files, inserts sequences from another file, edits
+residues or whole rows in a grid, switches nucleotide/protein colouring and
+font, navigates by sequence and column, launches MAFFT, Clustal Omega, MUSCLE
+5, TrimAl or GBlocks from its toolbar, and saves or exports the alignment.
+
+Editing is in memory until \textbf{Save} or \textbf{Save As}; closing without
+saving loses the edits. Inserting sequences can change the alignment width, so
+check that every row stays rectangular. The viewer is display-oriented: its
+colour schemes do not affect exported sequences, and launching a plugin from
+the viewer creates a new result object rather than silently overwriting the
+viewer's data.
+
 \section{SeqMatrix}
+
+\textbf{WORKSPACE $\rightarrow$ Dataset $\rightarrow$ Create by SeqMatrix}
+opens a drag-and-drop matrix builder for assembling partitioned multi-locus
+datasets. Rows are taxa, columns are gene partitions, and cells hold the
+sequence of one taxon for one locus. SeqMatrix is for assembly, concatenation
+and partition-definition generation; sequence statistics are computed by
+downstream tools.
+
+To build a dataset:
+
+\begin{enumerate}
+  \item Add sequences with \textbf{Import from Sequences} (multi-FASTA),
+        \textbf{Import from NEXUS}, \textbf{Import from Excel} (column 1 =
+        name, column 2 = sequence), or \textbf{Download from NCBI} for selected
+        accession cells. Imported sequences appear in the left-hand
+        \textbf{Sequence Explorer} tree.
+  \item Drag sequences from the explorer into the cells of the matrix. Use
+        \textbf{Append New Row} and \textbf{Append New Column} to extend the
+        table; new columns are headed \texttt{Partition 1},
+        \texttt{Partition 2}, and so on. The first column, \textbf{Sequence
+        Name}, holds the taxon names.
+  \item Double-click a column header to rename a partition and paste its
+        accession list. Double-click the \textbf{Sequence Name} header to edit
+        taxon names in bulk.
+  \item When the matrix is complete, click \textbf{Import as a dataset} to
+        push the concatenated supermatrix and its partition definitions into
+        the workspace, or \textbf{Export} to write one FASTA per partition to
+        a folder. A partitioned NEXUS file is generated for downstream
+        partition-aware tools.
+\end{enumerate}
+
+Cell colour codes:
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.18\linewidth}
+                      >{\raggedright\arraybackslash}p{0.74\linewidth}@{}}
+\toprule
+Colour & Meaning \\
+\midrule
+\endhead
+Light green & Sequence used once; valid. \\
+Light blue & Sequence downloaded from NCBI. \\
+Light red & Sequence duplicated across multiple cells. This is a warning: an
+accidental locus duplication biases concatenation and downstream phylogenetic
+inference. \\
+\bottomrule
+\end{longtable}
+
+SeqMatrix only concatenates: sequences in one column must already be aligned
+to the same length, and names must be unique within a partition. If a cell is
+filled by accession, the NCBI download must succeed before import.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{case_seqmatrix_colors.pdf}
+  \caption{SeqMatrix colour states. (A) Blue cells mark sequences retrieved
+  from NCBI by accession. (B) Red cells mark the same accession placed in two
+  cells, which would duplicate a locus in the concatenation. Green cells are
+  ordinary single-use sequences.}
+  \label{fig:manual-seqmatrix-colors}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{seqmatrix_sanger.png}
+  \caption{A 12-taxon, three-locus Sanger matrix. The empty ITS cell for
+  \texttt{B3421} is retained; SeqMatrix writes it as \texttt{?} in the
+  concatenated matrix. Green cells are sequences used once.}
+  \label{fig:manual-seqmatrix}
+\end{figure}
+
 \section{SeqDBG}
+
+\textbf{WORKSPACE $\rightarrow$ Dataset $\rightarrow$ Create by SeqDBG} opens
+SeqDBG, a sequence-database visualisation tool for annotated genomes. It reads
+several GenBank files, builds an adjacency graph of neighbouring genes, and
+helps identify structural variation and annotation inconsistencies across
+(typically mitochondrial or chloroplast) genomes. It can then export a
+standardised per-locus dataset.
+
+SeqDBG is an interactive window rather than the standard four-tab plugin.
+
+\begin{enumerate}
+  \item Click \textbf{+ (Add GenBank Files)} and select one or more
+        \texttt{*.gb}, \texttt{*.gbk} or \texttt{*.gbff} files. They are parsed
+        in the background; each taxon appears in the \textbf{Taxon Management}
+        list. Annotation classes are colour-coded in the annotation table:
+        CDS green, tRNA purple, rRNA orange.
+  \item The \textbf{Gene Statistics} table lists every gene with its left and
+        right neighbours (\textbf{LN}, \textbf{RN}) and left, right and taxon
+        counts (\textbf{LT}, \textbf{RT}, \textbf{Taxon}). The counts are
+        heat-coloured so that conserved adjacencies and rearrangements stand
+        out. A low \textbf{Taxon} count marks a rarely annotated or
+        non-standard name; low \textbf{LT}/\textbf{RT} marks a terminal gene or
+        an inconsistent annotation; low \textbf{LN}/\textbf{RN} marks a
+        structurally conservative adjacency.
+  \item Click a gene row to draw a three-layer Sankey plot of its
+        left $\rightarrow$ current $\rightarrow$ right neighbours on the
+        \textbf{Plot} tab. The widths show how often each adjacency occurs.
+  \item On the \textbf{Standardization} tab, review or extend the
+        name-standardisation rules. Built-in defaults map synonyms such as
+        \texttt{cox1} $\rightarrow$ \texttt{COX1} and
+        \texttt{nad1} $\rightarrow$ \texttt{NAD1}. Rules can be imported and
+        exported as a tab-separated file. Normalisation changes labels, not
+        the underlying sequences.
+  \item On the \textbf{Dataset} tab choose what to export: \textbf{Nucleotide}
+        (CDS, tRNA, rRNA, Others) or \textbf{Amino Acid} (CDS); choose
+        \textbf{All loci} or \textbf{Customize loci}; then \textbf{Export
+        (FASTA)} to a folder or \textbf{Export to YPhylo Workbench} to send the
+        dataset straight to the workspace.
+\end{enumerate}
+
+Amino-acid export requires CDS features to carry the \texttt{/translation}
+qualifier, which manually curated GenBank files may lack. Nucleotide export
+skips IDs containing \texttt{\_protein}. SeqDBG computes adjacency within each
+genome, so a missing gene lowers coverage; gene-order similarity is not an
+orthology call, so verify one-to-one correspondence before concatenation.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{seqdbg_organelle.png}
+  \caption{SeqDBG for four annotated chloroplast genomes. The Gene Statistics
+  table is on the left; the selected gene and its left/right neighbours are
+  shown in the Sankey plot.}
+  \label{fig:manual-seqdbg}
+\end{figure}
+
 \section{Sequence Concatenator}
+
+The Sequence Concatenator is a standalone sidebar plugin in the Dataset
+category. It joins several per-gene alignments into one supermatrix and writes
+the matching NEXUS \texttt{charset} partition file, filling taxa that are
+missing from a gene with \texttt{?}.
+
+\begin{enumerate}
+  \item Click \textbf{Add Files} and select the per-gene alignments (FASTA or
+        PHYLIP). They appear in a table with their sequence count and length.
+        The concatenation order is the order in this table; use
+        \textbf{Remove Selected} and \textbf{Clear All} to manage it.
+  \item Set the \textbf{Concatenated FASTA} output path.
+  \item For the NEXUS partition, choose \textbf{Show Text (Default)} to preview
+        the \texttt{charset} block in a pop-up, or \textbf{To File} to write it
+        to disk.
+  \item Click \textbf{Concatenate Sequences}. After it finishes, \textbf{Display
+        Overview Figure} opens a presence/absence heatmap of taxa $\times$
+        genes with a retention-per-gene row.
+\end{enumerate}
+
+Taxon matching relies on an exact match of the \textbf{full FASTA header} (the
+string after \texttt{>}, excluding the newline). Ensure headers are identical
+across all input files. Missing taxa are represented by \texttt{?}, not by
+\texttt{-} or \texttt{N}. While PHYLIP files are selectable in the dialog, they
+are parsed internally as FASTA; convert PHYLIP to FASTA with consistent headers
+for reliable results. Every input must already be aligned and rectangular; the
+concatenator does not align or trim.
+
 \section{TreeMerger}
+
+TreeMerger is a standalone sidebar plugin in the Dataset category. It pools
+multiple Newick gene-tree files into one file with one tree per line, which is
+the input format for ASTRAL and other supertree tools.
+
+\begin{enumerate}
+  \item \textbf{Add Files} and select the gene-tree files
+        (\texttt{*.nwk}, \texttt{*.newick}, \texttt{*.tre}, \texttt{*.tree}).
+  \item Set the output file path.
+  \item Click \textbf{Merge Trees}.
+\end{enumerate}
+
+Merging is line-by-line concatenation. Each input tree must occupy a single
+line; a Newick string broken across lines will be copied as separate lines and
+will corrupt the output. Taxon labels must be consistent across all gene trees
+(ASTRAL fails on label mismatches). No re-rooting, de-duplication or
+relabelling is performed. ASTRAL treats gene trees as unrooted, so the rooting
+of the inputs is irrelevant, but the topology and labels are not validated
+before merging.
+
 \section{One-Step OrthoFinder for organelle genomes}
-The plugin uses a three-step panel. \textbf{Input} selects either a folder of
-GBFF/GB/GBK files (one file per organelle genome), a single multi-record
-GenBank file (each record becomes a separate taxon), or a folder of proteome
-FASTA files. It also sets the genetic code, pseudogene handling,
-internal-stop policy, and output folder. GenBank input is parsed into CDS features,
+
+\textbf{WORKSPACE $\rightarrow$ Dataset $\rightarrow$ One-Step OrthoFinder (for
+Organelle Genomes)} turns annotated genomes into a workspace dataset of
+single-copy orthogroups. It is intended for organelle or bacterial annotations
+where orthology is largely one-to-one and the user wants a ready-to-align
+dataset without running OrthoFinder by hand.
+
+The pipeline is built on OrthoFinder \cite{orthofinder} and uses a three-step
+panel.
+
+\textbf{Input.} Select one of three source types:
+
+\begin{itemize}
+  \item a folder of GBFF/GB/GBK files, one file per organelle genome;
+  \item a single multi-record GenBank file, where each record becomes a
+        separate taxon;
+  \item a folder of proteome FASTA files.
+\end{itemize}
+
+The same panel sets the genetic code, pseudogene handling, internal-stop
+policy and output folder. GenBank input is parsed into CDS features,
 translated to protein, and written as \texttt{proteomes/<species>.faa},
-\texttt{cds/<species>.fna}, and \texttt{cds\_map.tsv}. \textbf{OrthoFinder}
-sets the OrthoFinder executable, the BLAST+/MCL directory, the thread count,
-and the run mode (full pipeline, parse only, or reuse existing results); the
-runtime check reports any missing executable by name. \textbf{Review} shows the
-selected input, output, runtime, and run mode before the pipeline starts.
+\texttt{cds/<species>.fna} and \texttt{cds\_map.tsv}.
+
+\textbf{OrthoFinder.} Set the OrthoFinder executable, the BLAST+/MCL
+directory, the thread count, and the run mode: full pipeline, parse only, or
+reuse existing results. The runtime check reports any missing executable by
+name before the run starts.
+
+\textbf{Review.} Shows the selected input, output, runtime and run mode before
+the pipeline starts.
 
 The output tab shows summary cards (species, CDS, orthogroups, single-copy
 orthogroups) and a table of single-copy orthogroups. For each single-copy
-orthogroup the plugin writes a protein FASTA, an in-frame CDS FASTA, and a
+orthogroup the plugin writes a protein FASTA, an in-frame CDS FASTA and a
 mapping table, so the CDS set can be passed directly to codon-aware alignment
-or selection analyses. The pipeline runs in a background thread and streams
-the OrthoFinder log to the Console tab; it is not modal.
+or selection analyses. The pipeline runs in a background thread and streams the
+OrthoFinder log to the Console tab; it is not modal. The plugin cannot be
+closed while the pipeline is running.
 
+The plugin also exposes an agent-facing action set
+(\texttt{inspect\_options}, \texttt{modify\_options}, \texttt{validate},
+\texttt{run}, \texttt{stop}, \texttt{inspect\_status},
+\texttt{inspect\_console}, \texttt{preview\_results},
+\texttt{export\_to\_workspace}); the export action is idempotent, so call it
+again after a completed run rather than duplicating the dataset manually.
 
+%======================================================================
 \chapter{Alignment}
+%======================================================================
+
+\section{Common aligner behaviour}
+
+MAFFT, MUSCLE 5 and Clustal Omega accept DNA, RNA or protein sequences. MACSE
+2 is for protein-coding nucleotide sequences and aligns at the codon level. All
+four support batch input, and all four share the same input/output group:
+\textbf{Browse Files...} (or paste into the \textbf{Sequence} text box) and a
+\textbf{Save to} choice. The default output suffixes are:
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.22\linewidth}
+                      >{\raggedright\arraybackslash}p{0.30\linewidth}
+                      >{\raggedright\arraybackslash}p{0.40\linewidth}@{}}
+\toprule
+Tool & Default suffix & Output \\
+\midrule
+\endhead
+MAFFT & \texttt{\_mafft} & FASTA alignment (or Clustal if requested) \\
+MUSCLE 5 & \texttt{\_m5} & FASTA alignment \\
+Clustal Omega & \texttt{\_clustal} & FASTA alignment \\
+MACSE 2 & \texttt{\_macse\_NT}, \texttt{\_macse\_AA} & Nucleotide/codon and
+translated amino-acid alignments \\
+TrimAl & \texttt{\_trimal} & FASTA (or the selected format) \\
+GBlocks & \texttt{\_gblocks} & Block-selected alignment \\
+\bottomrule
+\end{longtable}
+
+Batch mode runs one process per input file. MAFFT, MUSCLE and Clustal write
+their output to the path chosen by the plugin; the suffix is a GUI convention,
+not an external option. After a run, inspect the first few sequences in the
+Output Preview and check the Console for warnings about duplicate names or
+empty records.
+
 \section{MAFFT}
+
+\textbf{ALIGN $\rightarrow$ Align by... $\rightarrow$ MAFFT} wraps MAFFT 7
+\cite{mafft}.
+In \textbf{Input / Output}, browse for one or more FASTA files or paste
+sequences. The default suffix is \texttt{\_mafft}.
+
+In \textbf{Basic Parameters}, choose an alignment mode:
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.26\linewidth}
+                      >{\raggedright\arraybackslash}p{0.66\linewidth}@{}}
+\toprule
+Mode & Behaviour and typical use \\
+\midrule
+\endhead
+Auto (\texttt{--auto}) & Default. MAFFT chooses an appropriate strategy from
+the input size and similarity. Good first choice for most data. \\
+High speed & Fast progressive alignment for large, similar datasets. \\
+High accuracy, local pair (\texttt{--localpair}) & Iterative refinement with a
+local alignment scoring scheme; slower, suitable for divergent sequences with
+local homology. \\
+High accuracy, genaf pair (\texttt{--genafpair}) & Iterative refinement with a
+generalized affine scoring scheme; useful for sequences with long gaps. \\
+High accuracy, global pair (\texttt{--globalpair}) & Iterative refinement with
+a global scoring scheme; suitable for similar-length, globally homologous
+sequences. \\
+Fast (\texttt{--retree}) & Quick progressive alignment; use when speed matters
+more than precision. \\
+\bottomrule
+\end{longtable}
+
+The three high-accuracy modes add \texttt{--maxiterate 1000}. Set
+\textbf{Threads} to \texttt{-1} for automatic detection.
+
+\textbf{Advanced Parameters...} exposes gap penalties (\texttt{--op}, default
+1.53; \texttt{--ep}, default 0.0), maximum iterations, Clustal-format output,
+sequence reordering, and the strand option.
+
+\subsection{Automatic strand correction}
+
+Sequencing reads are sometimes returned in the reverse orientation, which
+ruins an alignment. In the advanced dialog, \textbf{Output Options $\rightarrow$
+Direction adjustment} lets MAFFT detect and reverse-complement such reads so
+that every sequence ends up on the same strand:
+
+\begin{itemize}
+  \item \textbf{No adjustment} (default);
+  \item \textbf{Adjust direction} (\texttt{--adjustdirection}) --- fast;
+  \item \textbf{Adjust direction accurately}
+        (\texttt{--adjustdirectionaccurately}) --- a more exhaustive, slower
+        check.
+\end{itemize}
+
+The option is intended for nucleotide data and needs at least two sequences.
+The accurate variant is worth the extra time on divergent data. Use it whenever
+strand is not guaranteed, for example low-throughput Sanger reads assembled
+without orientation control; leave it off for protein alignments.
+
+MAFFT marks reverse-complemented records with an \texttt{\_R\_} prefix. The
+plugin strips that prefix from output headers so downstream taxon matching is
+not broken, while the sequences themselves remain reverse-complemented. Do not
+re-add \texttt{\_R\_} when constructing taxon labels.
+
+\begin{tip}
+If an alignment contains a few sequences that are obviously reversed, run
+MAFFT once with \textbf{Adjust direction accurately} and compare the output
+length and gap pattern with the uncorrected run. A large reduction in terminal
+gaps usually means the correction was needed.
+\end{tip}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.78\linewidth]{mafft_adjustdirection.png}
+  \caption{MAFFT advanced parameters with \textbf{Direction adjustment} set to
+  \texttt{--adjustdirection}. Use this for nucleotide reads whose orientation
+  is not guaranteed; leave it off for protein alignments.}
+  \label{fig:manual-mafft}
+\end{figure}
+
 \section{MUSCLE 5}
+
+\textbf{ALIGN $\rightarrow$ Align by... $\rightarrow$ Muscle 5} wraps MUSCLE 5
+\cite{muscle5}.
+The default suffix is \texttt{\_m5}. In \textbf{Parameters}, choose:
+
+\begin{itemize}
+  \item \textbf{Standard alignment} (\texttt{-align}) --- default, suitable for
+        ordinary datasets;
+  \item \textbf{Large dataset} (\texttt{-super5}) --- for thousands of
+        sequences.
+\end{itemize}
+
+MUSCLE 5 is extremely fast on very large numbers of sequences but can run out
+of memory on extremely long sequences. If it fails on long alignments, switch
+to MAFFT. The two modes are alternatives, not tuning flags; do not mix them
+within one comparison.
+
 \section{Clustal Omega}
+
+\textbf{ALIGN $\rightarrow$ Align by... $\rightarrow$ Clustal Omega} wraps
+Clustal Omega 1.2.2 \cite{clustalo}. The default suffix is \texttt{\_clustal}. In
+\textbf{Basic Parameters}:
+
+\begin{itemize}
+  \item \textbf{Auto options} (\texttt{--auto}) is on by default; it chooses
+        the guide tree and HMM settings automatically.
+  \item \textbf{Sequence type}: Auto, Protein, RNA or DNA.
+  \item \textbf{Threads}: default 4.
+  \item \textbf{Output order}: input order or tree order
+        (\texttt{--outorder=tree-order}).
+\end{itemize}
+
+Clustal Omega is a good choice for large protein alignments and for users who
+want a familiar, fast progressive aligner. Turning \textbf{Auto} off allows
+manual guide-tree or HMM control, but those options only matter when Auto is
+off. The output is always FASTA.
+
 \section{MACSE 2}
+
+\textbf{ALIGN $\rightarrow$ Align by... $\rightarrow$ MACSE} aligns coding
+sequences at the codon level \cite{macse}, correctly placing frameshifts and
+premature stop codons. Use it for CDS rather than generic nucleotide alignments.
+
+Choose the \textbf{Mode}:
+
+\begin{itemize}
+  \item \textbf{Align Sequences} (default) --- input is unaligned CDS;
+  \item \textbf{Refine Alignment} --- input is an existing codon alignment.
+\end{itemize}
+
+\textbf{Basic Parameters} include the \textbf{Genetic Code} (default 1,
+Standard), the amino-acid alphabet (default \texttt{SE\_B\_8}), the score matrix
+(BLOSUM62, VTML200\_BIS or VTML240) and the number of optimization cycles
+(default 2). Pick the correct NCBI genetic code for your organism; a wrong table
+produces many spurious stop codons.
+
+\textbf{Post-processing} options are enabled by default:
+
+\begin{itemize}
+  \item \textbf{Mask exceptional characters} rewrites MACSE's \texttt{!}
+        characters to \texttt{?}.
+  \item \textbf{Mask terminal stop codon} replaces a terminal stop codon with
+        \texttt{???} in the nucleotide alignment.
+  \item \textbf{Drop all-gap codon columns} removes codon columns in which
+        every sequence is \texttt{!}, \texttt{-} or \texttt{?}.
+\end{itemize}
+
+These are applied by the plugin after MACSE, not by MACSE flags. Fine gap and
+frameshift costs go in \textbf{Advanced Parameters...} as free-text extra
+command-line flags; they are passed through without validation.
+
+Run MACSE produces two files: a nucleotide/codon alignment with suffix
+\texttt{\_macse\_NT} and a translated alignment with suffix
+\texttt{\_macse\_AA}. The \textbf{Preferred result} combo controls which one is
+selected for import; both files are kept.
+
+\begin{warning}
+A codon alignment with many \texttt{?} or \texttt{!} columns is a warning about
+the input, not a success. Check the genetic code and inspect the first few
+codons before using the alignment for selection analysis.
+\end{warning}
+
 \section{TrimAl}
+
+\textbf{ALIGN $\rightarrow$ Trim Alignment by... $\rightarrow$ Trimal} removes
+unreliable columns from an alignment \cite{trimal} and shows an HTML trimming
+report afterwards. Input formats are FASTA, CLUSTAL, PHYLIP and NEXUS; the default
+suffix is \texttt{\_trimal}.
+
+The main choice is the \textbf{Trimming mode}:
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.22\linewidth}
+                      >{\raggedright\arraybackslash}p{0.70\linewidth}@{}}
+\toprule
+Mode & Behaviour \\
+\midrule
+\endhead
+Automated 1 (\texttt{-automated1}) & Default. Chooses among the automated
+strategies from the alignment's characteristics; optimized for ML tree
+reconstruction. Recommended for most data. \\
+Gappyout (\texttt{-gappyout}) & Uses gap statistics only; the least aggressive
+automated mode. \\
+Strict (\texttt{-strict}) & Gappyout plus an automatically selected similarity
+cutoff; trims more than gappyout. \\
+Strict Plus (\texttt{-strictplus}) & Stricter still; designed for
+neighbour-joining reconstruction. \\
+\bottomrule
+\end{longtable}
+
+The \textbf{Output format} is FASTA by default; CLUSTAL, NEXUS, PHYLIP, MEGA
+and NBRF are also available. \textbf{Advanced Parameters...} exposes the gap
+threshold (\texttt{-gt}), similarity threshold (\texttt{-st}), consistency
+threshold (\texttt{-ct}), minimum positions (\texttt{-cons}), window sizes
+(\texttt{-w}, \texttt{-gw}, \texttt{-sw}, \texttt{-cw}), residue and sequence
+overlap, and the switches \texttt{-nogaps}, \texttt{-noallgaps} and
+\texttt{-complementary}.
+
+\begin{itemize}
+  \item \texttt{-nogaps} removes any column containing a gap.
+  \item \texttt{-noallgaps} removes only columns composed entirely of gaps.
+  \item \texttt{-complementary} writes the columns that were removed, which is
+        useful for checking what the filter discarded.
+\end{itemize}
+
+Thresholds are emitted only when greater than zero; zero means ``use the
+mode's internal default''. \texttt{-strict} and \texttt{-automated1} are
+alternatives, not cumulative filters.
+
 \section{GBlocks}
 
+\textbf{ALIGN $\rightarrow$ Trim Alignment by... $\rightarrow$ GBlocks}
+selects conserved blocks and removes divergent or gap-rich columns
+\cite{gblocks}. Input is
+FASTA or NBRF/PIR; the default suffix is \texttt{\_gblocks}.
+
+\textbf{GBlocks Parameters}:
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.10\linewidth}
+                      >{\raggedright\arraybackslash}p{0.48\linewidth}
+                      >{\raggedright\arraybackslash}p{0.32\linewidth}@{}}
+\toprule
+Option & Meaning & Default \\
+\midrule
+\endhead
+\texttt{-t} & Sequence type: Auto, Protein, DNA or Codons & Auto \\
+\texttt{-b1} & Minimum number of sequences for a conserved position & 0
+(internal default) \\
+\texttt{-b2} & Minimum number of sequences for a flank position & 0
+(internal default) \\
+\texttt{-b3} & Maximum number of contiguous non-conserved positions & 8 \\
+\texttt{-b4} & Minimum length of a block & 10 \\
+\texttt{-b5} & Allowed gap positions: None, With Half or All & None \\
+\texttt{-b6} & Use a similarity matrix (proteins) & on \\
+\bottomrule
+\end{longtable}
+
+A value of 0 for \texttt{-b1} or \texttt{-b2} means ``use GBlocks' internal
+default'', not ``allow zero sequences''. GBlocks writes a block-selected
+alignment, not a tree. It is more conservative than TrimAl's automated modes;
+use it when you want explicit control over block criteria, and TrimAl when you
+want a fast, data-driven trim.
+
+%======================================================================
 \chapter{Model selection}
+%======================================================================
+
 \section{ModelFinder}
+
+\textbf{MODEL $\rightarrow$ Find Best Substitution Model (ML)} runs IQ-TREE
+ModelFinder \cite{modelfinder} and imports the best model as a workspace
+\texttt{model} object.
+The core command is \texttt{iqtree3 -s <alignment> -m TESTONLY <options>}.
+
+\textbf{ModelFinder Parameters}:
+
+\begin{itemize}
+  \item \textbf{Sequence type}: AUTO, DNA or PROT. AUTO omits \texttt{-st}.
+  \item \textbf{Criterion}: BIC (default), AICc or AIC.
+  \item \textbf{Threads}: \texttt{-nt}; omitted when 1 or automatic.
+  \item \textbf{Model set}: the plugin searches all models
+        (\texttt{-mset ALL}).
+\end{itemize}
+
+The output is a ranked model table. Import the model object and select it
+before opening IQ-TREE or RAxML-NG; the host applies the model when the naming
+is compatible.
+
+\subsection{Partition mode}
+
+Tick \textbf{Enable Partition Mode} and open \textbf{Configure Partitions} for
+multi-locus data. The partition mode determines how branch lengths are shared:
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.19\linewidth}
+                      >{\raggedright\arraybackslash}p{0.13\linewidth}
+                      >{\raggedright\arraybackslash}p{0.60\linewidth}@{}}
+\toprule
+Mode & Flag & Meaning \\
+\midrule
+\endhead
+Edge-linked Proportional & \texttt{-p} & One shared topology; branch lengths
+are proportional across partitions. Fewest parameters; recommended for most
+multi-locus datasets. \\
+Edge-linked Equal & \texttt{-q} & Shared topology and equal branch lengths
+across partitions. The most restrictive option; assumes homogeneous rates. \\
+Edge-unlinked & \texttt{-Q} & Shared topology but independent branch lengths
+per partition. For heterogeneous rates. \\
+Topo-unlinked & \texttt{-S} & Each partition is analysed on its own tree. This
+is not a combined analysis. MrBayes supports only edge-linked and
+edge-unlinked schemes and coerces the rest. \\
+\bottomrule
+\end{longtable}
+
+Optionally enable \textbf{rcluster} for fast partition merging. Define each
+partition's name and range, or import a NEXUS \texttt{charset} or RAxML
+partition file. For protein-coding genes, split codon positions by entering
+the position ranges (for example \texttt{1-300\textbackslash{}3},
+\texttt{2-300\textbackslash{}3}, \texttt{3-300\textbackslash{}3}).
+
+In partition mode the output includes an \texttt{.iqtree} report and a
+\texttt{.best\_scheme.nex} file. The Output Preview shows the ranked model
+table. Importing a multi-locus dataset from the workspace auto-enables
+partition mode and builds the supermatrix and partitions for you.
+
+\begin{warning}
+IQ-TREE 3.0.1 can abort partition merging with the message
+\texttt{Fixing branch lengths not supported under specified site rate model}.
+This occurs inside the partition-merger evaluation, not in the final tree
+search. RCluster takes a different path; the plugin retries once with
+\texttt{--rcluster 10} when the first attempt fails. If the error persists,
+run each partition separately or reduce the partition set.
+\end{warning}
+
+\section{ModelTest-NG}
+
+\textbf{MODEL $\rightarrow$ Find Best Substitution Model (ModelTest-NG)}
+evaluates a candidate model set and reports BIC, AIC and AICc in one run. It is
+useful when you want a second opinion or a model naming convention closer to
+RAxML-NG.
+
+\begin{itemize}
+  \item \textbf{Sequence type}: DNA or Protein; Auto is detected from the first
+        record.
+  \item \textbf{Criterion}: chooses which block is exported as the best model;
+        ModelTest-NG always reports all three criteria.
+  \item \textbf{Starting tree}: ML or MP.
+  \item \textbf{DNA schemes}: 3, 5, 7 or 11 substitution schemes.
+  \item \textbf{Threads}.
+\end{itemize}
+
+ModelTest-NG can exit non-zero after writing a valid report; the plugin accepts
+the report when the \texttt{.out} file exists. Partition mode is not wired in
+this version; run model selection per alignment, or use ModelFinder for
+partitioned data. The best model is imported as a \texttt{model\_table} object
+and can be applied to RAxML-NG; \texttt{+FQ} is normalised to \texttt{+FE} when
+the naming differs.
+
 \section{Model parameters}
 
-\chapter{Distance and saturation}
-\section{ML distance}
-\section{Uncorrected p-distance}
-\section{Substitution saturation}
-\section{DecentTree}
-\todo{Explain negative branch lengths as a property of NJ on non-additive
-distance matrices; describe the diagnostic and the optional zero-clamp.}
+\textbf{MODEL $\rightarrow$ Estimate Model Parameters (DNA, ML)} fits a
+substitution model with IQ-TREE \cite{iqtree3} and exports the fitted model (Q matrix, base
+frequencies and rate parameters) as a workspace \texttt{model} object. It can
+also parse an existing \texttt{.iqtree} report without rerunning IQ-TREE.
 
+\begin{itemize}
+  \item \textbf{Input alignment}: one IQ-TREE process per file in batch mode.
+  \item \textbf{Substitution model}: a named model, or \texttt{auto}
+        (\texttt{MFP}).
+  \item \textbf{Discrete Gamma}: \texttt{+G} or \texttt{+G\{n\}}.
+  \item \textbf{Invariant sites}: \texttt{+I}.
+  \item \textbf{Empirical frequencies}: \texttt{+F}.
+  \item \textbf{Threads}.
+\end{itemize}
+
+The runner always appends \texttt{-redo}. \texttt{+G}, \texttt{+I} and
+\texttt{+F} are part of the same \texttt{-m} token, not separate options.
+Batch mode fits a separate model to each file, so it does not estimate a
+shared model across loci. The fitted model can be sent to IQ-TREE, RAxML-NG or
+the batch dN/dS MLE path.
+
+%======================================================================
+\chapter{Distance and saturation}
+%======================================================================
+
+\section{Maximum-likelihood distance}
+
+\textbf{DISTANCE $\rightarrow$ Compute Pairwise Distances (ML)} computes a
+maximum-likelihood pairwise distance matrix with IQ-TREE \cite{iqtree3}. It supports full
+substitution models (GTR, HKY, and so on) with rate heterogeneity
+(\texttt{+G}, \texttt{+I}, \texttt{+R}) and frequency options
+(\texttt{+F}, \texttt{+FO}, \texttt{+FQ}) without the numerical overflow of
+simpler implementations.
+
+\begin{itemize}
+  \item \textbf{Input}: FASTA or PHYLIP alignments.
+  \item \textbf{Sequence type}: AUTO, DNA or AA; AUTO omits \texttt{-st}.
+  \item \textbf{Substitution model}: \texttt{auto} omits \texttt{-m} and lets
+        IQ-TREE use its distance default; a named model enables the
+        \texttt{+G}, \texttt{+I}, \texttt{+R}, \texttt{+F}, \texttt{+FO} and
+        \texttt{+FQ} modifiers.
+  \item \textbf{Threads}.
+\end{itemize}
+
+The output is a lower-triangular PHYLIP matrix,
+\texttt{<alignment>.mldist}, previewed as a table. It is a distance matrix,
+not a tree; send it to DecentTree or another distance-based tree builder.
+
+Limitations: the plugin cannot output standard deviations, cannot run
+bootstrap, and cannot compute p-distance. The \texttt{+R} modifier does not
+expose a category count here; use the IQ-TREE plugin when you need
+\texttt{+R\{n\}}. Batch mode writes one \texttt{.mldist} per input.
+
+\section{Uncorrected p-distance}
+
+\textbf{DISTANCE $\rightarrow$ Compute Uncorrected Distances (p-distance)}
+computes the observed proportion of differing sites. It is implemented in
+Python; no external program is called.
+
+\begin{itemize}
+  \item \textbf{Input}: FASTA or NEXUS alignments.
+  \item \textbf{Sequence type}: AUTO, DNA or Protein.
+  \item \textbf{Gap treatment}: pairwise deletion or complete deletion.
+  \item \textbf{DNA substitution rules}: all substitutions, transitions only,
+        transversions only, or advanced rules. The advanced dialog lets you
+        choose exactly which of the six substitution types to count.
+\end{itemize}
+
+The output is a square matrix with values from 0 to 1, exportable as
+\texttt{<basename>\_uncorrected\_distance.dist}. Pairwise deletion changes the
+compared length per pair; complete deletion uses one common set of sites.
+Do not compare p-distances computed with different gap treatments.
+
+The p-distance is uncorrected: multiple substitutions at the same site are not
+accounted for, so it underestimates evolutionary distance at high divergence.
+Use it for a quick description of raw divergence, for saturation plots, or when
+a model-based distance is not identifiable; use ML distance for tree building.
+
+\section{Substitution saturation}
+
+\textbf{DISTANCE $\rightarrow$ Calculate \& Plot Substitution Saturation} runs
+the BaCoCa bias/saturation analysis. It computes the index
+\[
+C = \frac{\operatorname{std}(\mathrm{Ti/Tv})}{\operatorname{std}(p)}
+\]
+from pairwise transition/transversion counts and p-distances, and plots
+transitions and transversions against p-distance.
+
+\begin{itemize}
+  \item \textbf{Input}: a nucleotide alignment (FASTA or NEXUS), or several
+        alignments in batch mode.
+  \item \textbf{Gap treatment}: pairwise deletion (default) or complete
+        deletion. \textbf{View Method Description} shows the formula and the
+        interpretation guide.
+\end{itemize}
+
+The output tab shows, for each alignment, a Ti/Tv-versus-p scatter (red =
+transitions, blue = transversions, with regression $r$) and a C-value bar chart
+across files. \textbf{Export Current Plot} saves the figure.
+
+Interpretation: the more the Ti and Tv trend lines converge, the more
+transitions are saturated. A higher C indicates stronger bias. This is the
+BaCoCa C-value, not the Xia/DAMBE Iss test; there is no automatic
+``little/much saturation'' verdict, and there are no universal C thresholds.
+Read the plot together with the C value. A saturated alignment may still be
+usable after trimming or with a site-heterogeneous model, so saturation is a
+diagnostic, not a model-selection substitute.
+
+\section{DecentTree}
+
+\textbf{PHYLOGENY $\rightarrow$ Distance Methods (DecentTree)} rebuilds a tree
+from a distance matrix using the scalable neighbour-joining family
+\cite{decenttree}. The input
+must be a distance matrix (\texttt{.mldist} or \texttt{.dist}), not an
+alignment. If you give it an alignment, compute ML distances first.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.42\linewidth}
+                      >{\raggedright\arraybackslash}p{0.50\linewidth}@{}}
+\toprule
+Algorithm & Note \\
+\midrule
+\endhead
+BIONJ-R (Rapid BioNJ) & Default; verified on the Windows build. \\
+BIONJ-V (Vectorized BIONJ) & Vectorised variant. \\
+NJ-R-D (Double Precision Rapid NJ) & Rapid NJ with double precision. \\
+ONJ-R (Rival Rapid NJ) & Rival rapid NJ. \\
+ONJ-R-V (Rival Rapid NJ Vectorized) & Vectorised rival variant. \\
+AUCTION (Auction Joining) & Auction-based joining. \\
+\bottomrule
+\end{longtable}
+
+The current Windows build avoids the classic BIONJ/NJ paths, which crash; the
+exposed algorithms are the verified variants. The tree is written next to the
+input as \texttt{<input>.nwk} and drawn in IcyTree. Batch mode runs one command
+per matrix file.
+
+\subsection{Negative branch lengths}
+
+Neighbour-joining is a least-squares algorithm, not a maximum-likelihood
+algorithm. When the distance matrix is not additive---for example because of
+sampling error, missing data, or a model that does not fit---NJ can produce
+negative branch lengths. They are a property of the algorithm on that matrix,
+not evidence that the matrix is invalid. The diagnostic is to compare the NJ
+tree with an ML tree on the same alignment and to inspect the distance matrix
+for non-additivity; if negative branches are few and short, they usually
+reflect noise around zero.
+
+The DecentTree plugin does not modify branch lengths. For display, a negative
+length can be treated as zero; for downstream tools that reject negative
+lengths, apply a \textbf{zero-clamp} (replace negative values with 0) as an
+explicit post-processing step and record that you did so. A zero-clamp changes
+the branch-length interpretation but not the topology. Do not present clamped
+lengths as ML estimates.
+
+%======================================================================
 \chapter{Phylogenetic inference}
+%======================================================================
+
 \section{Maximum likelihood with IQ-TREE 3}
+
+\textbf{PHYLOGENY $\rightarrow$ Maximum Likelihood (ML) $\rightarrow$ IQ-Tree
+3} infers a maximum-likelihood tree with IQ-TREE 3 \cite{iqtree3}. It supports single
+alignments and partitioned datasets, model selection, ultrafast bootstrap,
+SH-aLRT and aBayes support.
+
+\subsection{Model and rate options}
+
+Set \textbf{Substitution Model} to \texttt{auto} (\texttt{-m MFP}, ModelFinder
+chooses the best model and then infers the tree), or choose a specific model
+and add rate heterogeneity:
+
+\begin{itemize}
+  \item \textbf{Gamma} \texttt{+G\{n\}} with a category count;
+  \item \textbf{FreeRate} \texttt{+R\{n\}} with a category count;
+  \item \textbf{Invariable sites} \texttt{+I};
+  \item \textbf{Ascertainment bias} \texttt{+ASC}.
+\end{itemize}
+
+\textbf{State Frequencies} can be estimated (no suffix), empirical
+(\texttt{+F}), ML-optimized (\texttt{+FO}) or equal (\texttt{+FQ}). Example:
+GTR + Gamma 4 + Invariant + Empirical is \texttt{-m GTR+G4+I+F}; GTR + FreeRate
+8 is \texttt{-m GTR+R8}.
+
+\subsection{Branch support}
+
+\begin{itemize}
+  \item \textbf{UFBoot} is on by default with 10{,}000 replicates
+        (\texttt{-bb N}). Use at least 1{,}000; 10{,}000 is the recommended
+        setting for publication.
+  \item \textbf{SH-aLRT} (\texttt{-alrt N}, default 1{,}000) is recommended in
+        combination with UFBoot.
+  \item \textbf{aBayes} (\texttt{-abayes}) is a fast Bayesian approximation
+        that can be added to either.
+\end{itemize}
+
+\subsection{Partition mode}
+
+For multi-locus data, tick \textbf{Enable Partition Mode} and open
+\textbf{Configure Partitions}. The partition modes are the same as in
+ModelFinder: edge-linked proportional (\texttt{-p}), edge-linked equal
+(\texttt{-q}), edge-unlinked (\texttt{-Q}) and topo-unlinked (\texttt{-S}).
+Bootstrap sampling can be SITE, GENE or GENESITE; the current command builder
+records the choice, but the sampling flag is reserved and not yet passed.
+RCluster (\texttt{--rcluster N}) accelerates partition merging.
+
+The partition thread passes \texttt{-m MFP+MERGE} when no per-partition model
+is set; if a \texttt{charpartition} model is present, models are read from the
+partition file instead.
+
+\subsection{Output and pitfalls}
+
+The output includes the best tree (\texttt{<input>.treefile}), the report
+(\texttt{<input>.iqtree}) and, in partition mode,
+\texttt{.best\_scheme.nex}. The tree is drawn in IcyTree, and the plugin always
+adds \texttt{-redo}.
+
+\begin{itemize}
+  \item ModelFinder model names use IQ-TREE syntax (\texttt{GTR+F+G4});
+        RAxML-NG accepts most of it but normalises \texttt{+FQ} to
+        \texttt{+FE}.
+  \item The supermatrix taxon set is the union across partitions; missing taxa
+        are padded with \texttt{?}, not dropped.
+  \item If partition merging fails with the ``Fixing branch lengths'' message,
+        the plugin retries with \texttt{--rcluster 10}; otherwise reduce the
+        partition set.
+  \item UFBoot below 1{,}000 is not adequate for publication; increase the
+        replicate count rather than the number of independent runs.
+\end{itemize}
+
 \section{Maximum likelihood with RAxML-NG}
-\todo{P0: import/partition/bootstrap/outgroup options.}
+
+\textbf{PHYLOGENY $\rightarrow$ Maximum Likelihood (ML) $\rightarrow$ RAxML-NG}
+infers an ML tree with RAxML-NG 1.2.2 \cite{raxmlng}. It can run a search only, or an
+all-in-one search plus bootstrap analysis.
+
+\textbf{Preconditions}: an aligned FASTA/PHYLIP file with at least four
+sequences, and a RAxML-NG model string such as \texttt{GTR+G4} or
+\texttt{LG+G4}. A green model object from ModelFinder or ModelTest-NG is applied
+automatically when the naming is compatible.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.28\linewidth}
+                      >{\raggedright\arraybackslash}p{0.26\linewidth}
+                      >{\raggedright\arraybackslash}p{0.38\linewidth}@{}}
+\toprule
+GUI control & CLI option & Notes \\
+\midrule
+\endhead
+File input & \texttt{--msa} & One process per selected file \\
+Model & \texttt{--model} & \texttt{+FQ} normalised to \texttt{+FE} \\
+Threads & \texttt{--threads} & \\
+Bootstrap replicates & \texttt{--bs-trees} & Only with \texttt{--all}; 0 means
+no bootstrap unless autoMRE is enabled \\
+autoMRE convergence & \texttt{--bs-trees autoMRE\{N\}} & N is the replicate
+limit; 1{,}000 when the spin box is 0 \\
+Starting trees & \texttt{--tree} & Empty/default omits the flag;
+\texttt{pars\{10\}}, \texttt{rand\{10\}}, \texttt{rand\{1\}} accepted \\
+Outgroup & \texttt{--outgroup} & Comma-separated taxa; drawing/annotation
+option, not an inference constraint \\
+(fixed) & \texttt{--search} or \texttt{--all} & \texttt{--all} when bootstrap
+or autoMRE is active \\
+\bottomrule
+\end{longtable}
+
+Outputs are the best tree (\texttt{*.raxml.bestTree}), the support tree
+(\texttt{*.raxml.support}, with \texttt{--all}), the bootstrap tree set
+(\texttt{*.raxml.bootstraps}), the best model (\texttt{*.raxml.bestModel}) and
+the log (\texttt{*.raxml.log}).
+
+\begin{warning}
+The Windows MSYS build strips braces in \texttt{--tree}; the plugin escapes
+them internally, so do not pass already-escaped braces. RAxML-NG treats
+\texttt{--outgroup} as a drawing option, not an inference constraint.
+Bootstrap runs are much slower; start with a search-only run.
+\end{warning}
+
 \section{Bayesian inference with MrBayes}
+
+\textbf{PHYLOGENY $\rightarrow$ Bayesian Inference (BI) $\rightarrow$
+MrBayes3-MPI-BEAGLE} runs MrBayes 3.2.7a \cite{mrbayes} under MPI (one process
+per chain) and the BEAGLE library for GPU/CPU-accelerated likelihoods. A persistent workspace
+is required: Bayesian runs are long (often hours to days) and are checkpointed
+so that interrupted runs can be resumed. Intermediate chain states are written
+to the workspace temporary directory.
+
+\subsection{Input and model}
+
+Browse a PHYLIP or NEXUS alignment. Tick \textbf{Run MrBayes Data Block
+directly if present} to execute an existing \texttt{MRBAYES} block as-is;
+otherwise the plugin generates a block from the GUI settings. Non-NEXUS inputs
+are converted to interleaved NEXUS.
+
+Set \textbf{Type} (DNA or Protein), \textbf{DNA substitution number} (1 = JC,
+2 = HKY/K2P, 6 = GTR, passed as \texttt{lset nst=N}), \textbf{State
+frequencies} (estimated Dirichlet, fixed equal or empirical), \textbf{Rate
+heterogeneity} (Equal, Gamma, InvGamma, PropInv, Lognormal or Adgamma),
+\textbf{Gamma categories} (default 4) and the \textbf{Protein model} (fixed or
+mixed).
+
+\subsection{Partitions, MPI and BEAGLE}
+
+\textbf{Enable Partition Mode $\rightarrow$ Configure Partitions...} sets up
+per-partition models and rates for multi-locus data. MrBayes supports only
+edge-linked and edge-unlinked schemes; topo-unlinked partitions are coerced.
+Importing a partitioned dataset sets this up automatically.
+
+\textbf{MPI \& BEAGLE Settings...} keeps \textbf{Use MPI} and \textbf{Use
+BEAGLE} on by default. Choose the BEAGLE device (CPU or GPU), precision
+(Double or Single) and scaling (Dynamic or Always). MPI uses
+$(\mathrm{Runs} \times \mathrm{Chains})$ processors; do not request more
+processes than the machine can supply.
+
+\subsection{MCMC and convergence}
+
+Default MCMC settings are 1{,}000{,}000 generations, sampling every 1{,}000
+generations, 2 runs and 4 chains, with burn-in as a fraction (default 0.25) or
+as a fixed number of states. The consensus type is majority-rule,
+half-compatible or all-compatible; the format is FigTree or simple.
+
+Run MrBayes. The consensus tree (\texttt{.con.tre}) is drawn in IcyTree; the
+\texttt{.p} parameter chains can be sent to MiniTracer. There is no automatic
+stop rule, so decide burn-in and run length from the diagnostics:
+
+every parameter should reach ESS $\geq$ 200 in MiniTracer, the potential scale
+reduction factors (PSRF) from \texttt{sumt} should be close to 1.0, and the
+traces should show no trend with the two independent runs in agreement. If not,
+increase the number of generations and re-run. The plugin appends \texttt{sump} and \texttt{sumt} after \texttt{mcmc};
+without \texttt{mcmc;} the block would only read the data.
+
 \section{Bayesian inference with PhyloBayes}
+
+\textbf{PHYLOGENY $\rightarrow$ Bayesian Inference (BI) $\rightarrow$
+PhyloBayes-MPI} runs PhyloBayes-MPI 1.9 \cite{phylobayes} under MPI. PhyloBayes specialises in
+site-heterogeneous infinite-mixture (CAT) models, which reduce long-branch
+attraction. A persistent workspace is required.
+
+\textbf{Input}: a PHYLIP alignment (convert FASTA first), or a chain file to
+continue. PhyloBayes forces a global mixture model, so partition information is
+not imported.
+
+Choose \textbf{site heterogeneity} (Infinite CAT, \texttt{-cat}, default, or
+finite nCAT, \texttt{-ncat N}), \textbf{rate heterogeneity} (gamma with
+categories, \texttt{-dgam N}, default 4) and the \textbf{substitution model}
+(GTR default, or Poisson, JTT, WAG or LG for proteins).
+
+\textbf{MCMC and run settings}: number of MPI parallels, number of parallel
+chains (1--4; run at least 2 independent chains for convergence), MCMC
+generations (default 1{,}000; set far higher for real runs; $-1$ means run
+indefinitely) and sampling frequency. Gamma and CAT can be combined; both are
+on by default. The generation count and sampling frequency are emitted as a
+single \texttt{-x FREQ GEN} pair.
+
+Run PhyloBayes-MPI, then open the \textbf{Compare \& Consensus} sub-tab and run
+\texttt{bpcomp} with a burn-in and a cutoff (default 0.50, i.e.\ 50\%
+majority-rule) to build the consensus and the bipartition list. Check
+convergence with \texttt{bpcomp}'s \texttt{maxdiff}; aim for a value below 0.1
+between independent chains before trusting the tree.
+
 \section{Maximum parsimony with MPBoot}
+
+\textbf{PHYLOGENY $\rightarrow$ Maximum Parsimony (MPBoot)} infers a
+maximum-parsimony tree with MPBoot's ultrafast bootstrap and consensus
+reconstruction \cite{mpboot}.
+
+\textbf{Basic Parameters}:
+
+\begin{itemize}
+  \item \textbf{Sequence type}: AUTO, DNA, AA, CODON, BIN or MORPH.
+  \item \textbf{Threads}.
+  \item \textbf{Ultrafast bootstrap (UFBoot)}: on by default, 1{,}000
+        replicates.
+  \item \textbf{Consensus threshold}: default 0.50; 0 produces an extended
+        consensus.
+  \item \textbf{Burn-in}: omitted at 0.
+\end{itemize}
+
+\textbf{Advanced Parameters...} controls the tree search: initial, best and
+candidate trees; NNI versus SPR; ratchet iterations, weight and percentage;
+SPR radius; candidate cutoff; and tree refinement. The dialog values only take
+effect after you accept the dialog.
+
+Run MPBoot produces \texttt{<input>.treefile} (best tree) and
+\texttt{<input>.contree} (consensus), drawn in IcyTree. \texttt{-con} is always
+emitted, so a consensus tree is produced even when the threshold is 0.
+\texttt{-bb} should be at least 1{,}000.
+
 \section{MCMC diagnostics with MiniTracer}
 
+\textbf{PHYLOGENY $\rightarrow$ Bayesian Inference (BI) $\rightarrow$ MCMC
+Diagnostics (MiniTracer)} opens a lightweight convergence-diagnostics viewer in
+the spirit of Tracer. It reads the parameter files produced by BEAST
+(\texttt{.log} or \texttt{.log.txt}), MrBayes (\texttt{.p}) and PhyloBayes
+(\texttt{.trace}). You can also double-click a chain object in the workspace,
+and the chains are imported automatically.
+
+\subsection{Loading and burn-in}
+
+Load one or more trace files with \textbf{+ (Select MCMC Trace Files)}.
+MrBayes \texttt{.p} and PhyloBayes \texttt{.trace} are accepted, but they do
+not appear in the default filter; switch to \textbf{All Files (*)} to pick
+them, or open MiniTracer from a green chain object. Use \textbf{-} to remove a
+file and \textbf{Refresh} to reload after editing the burn-in.
+
+Set the \textbf{Burn-in} per file as a fraction of total generations (default
+0.100). Discarded states are shown greyed at reduced opacity. Burn-in is
+entered as a fraction, not as a generation count.
+
+\subsection{Statistics table and single-chain view}
+
+The statistics table on the left lists each parameter's \textbf{Mean} and
+\textbf{ESS}. The ESS is colour-coded per row:
+
+\begin{itemize}
+  \item \textbf{green}: ESS $\geq$ 200, sufficient;
+  \item \textbf{yellow}: 100 $\leq$ ESS $<$ 200, marginal;
+  \item \textbf{red}: ESS $<$ 100, insufficient.
+\end{itemize}
+
+Single-click a parameter to draw it. The \textbf{Analyze Single Chain} tab
+shows the trace plot (\textbf{MCMC Trace}) beside the post-burn-in density
+(\textbf{Post-burnin Distribution}, a KDE plus histogram), with a summary table
+reporting the number of samples, mean, range, 95\% HPD interval and ESS.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.95\linewidth]{minitracer_trace.png}
+  \caption{MiniTracer single-chain view for \texttt{lnLike}: post-burn-in
+  trace, marginal density, ESS, 95\% HPD and the per-parameter statistics
+  table. Green, yellow and red rows mark ESS $\geq 200$, 100--200 and $<100$.}
+  \label{fig:manual-minitracer-trace}
+\end{figure}
+
+\subsection{Two-chain comparison and PSRF}
+
+To compare independent runs, select exactly two files and open the
+\textbf{Compare 2 Chains} tab. The tab draws a Chain 1 versus Chain 2 scatter
+with a red dashed $y=x$ reference line. The table reports each chain's sample
+count and mean, the correlation coefficient \textbf{R}, and a \textbf{PSRF
+(R-hat)} row.
+
+The PSRF is the Gelman--Rubin potential scale reduction factor computed from
+the two post-burn-in chains. Values near 1 indicate that the between-chain
+variance is small relative to the within-chain variance, i.e.\ that the chains
+agree. The value is also shown in the plot title
+(\texttt{Chain Comparison (PSRF = ...)}). A value of \texttt{inf} means the two
+chains are constant but different; \texttt{N/A} means the statistic is
+undefined, usually because there are fewer than two paired samples.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.95\linewidth]{minitracer_psrf.png}
+  \caption{MiniTracer two-chain comparison. Points near the red $y=x$ line
+  indicate agreement; the table reports sample counts, means, the correlation
+  coefficient and the Gelman--Rubin PSRF (R-hat), also shown in the plot
+  title.}
+  \label{fig:manual-minitracer-psrf}
+\end{figure}
+
+\begin{tip}
+Treat an analysis as converged only when every parameter has ESS $\geq$ 200
+and the two independent runs agree (points near the $y=x$ line, high R, PSRF
+near 1). If a parameter has a low ESS but a stable trace, increase sampling or
+thin the chain; if the trace has a trend, increase burn-in or run length.
+\end{tip}
+
+MiniTracer currently does not export plots or tables; take a screenshot if you
+need a figure, or switch to Tracer for exportable graphs. The harmonic-mean
+panel, where present, is descriptive and is not a substitute for a proper
+marginal-likelihood comparison.
+
+\section{Tree comparison with Robinson--Foulds distances}
+
+\textbf{PHYLOGENY $\rightarrow$ Tree Comparison $\rightarrow$ Pairwise
+Robinson--Foulds} compares a set of trees with IQ-TREE 3 \cite{iqtree3}. The input is a
+Newick file with one tree per line, or two or more phylogeny/tree-set objects
+sent from \textbf{Selected}. IQ-TREE computes the all-to-all split distance
+with \texttt{-t trees --tree-dist-all} and writes \texttt{rf.rfdist}; the
+plugin parses that matrix and maps the \texttt{Tree0}, \texttt{Tree1}, \ldots{}
+rows back to the workspace object names.
+
+The \textbf{Overview} tab is a box plot of all pairwise RF distances with the
+individual comparisons overlaid. When the input contains one or more
+\textbf{tree-set} objects, the plot separates \emph{within tree set} pairs from
+\emph{between tree sets} pairs; pairs that involve a plain phylogeny are shown
+separately as \emph{between objects}. This makes the spread of a single
+posterior or bootstrap sample directly comparable with the divergence between
+independent runs. The \textbf{RF matrix} tab shows the lower triangle with the
+diagonal and upper triangle masked. The \textbf{Pairs} tab lists every
+comparison, its category, and, for four or more taxa, the normalised distance
+$\mathrm{RF}/[2(n-3)]$, the maximum RF between two fully resolved unrooted
+trees.
+
+IQ-TREE treats a tree whose root has two children as rooted and otherwise as
+unrooted; mixing the two makes \texttt{--tree-dist-all} report a sentinel
+distance. The plugin therefore parses each line with Biopython and rewrites
+rooted trees as unrooted topologies before running IQ-TREE. RF is an
+unnormalised split distance and is not a substitution distance; trees with
+different taxon sets are handled by IQ-TREE but are less directly comparable.
+The pairwise and matrix tables export as TSV, and both figures can be saved as
+PNG.
+
+%======================================================================
 \chapter{Species tree and concordance}
-\section{ASTRAL / wASTRAL / ASTRAL-Pro}
+%======================================================================
+
+\section{ASTRAL-IV and wASTRAL}
+
+The \textbf{SPECIES TREE} menu exposes ASTRAL-IV, wASTRAL, CASTER-site,
+TreeRecs, gene and site concordance factors, concordance diagnostics and
+BEST/MrBayes MSC.
+
+ASTRAL infers a species tree from gene trees under the multi-species
+coalescent \cite{astral}. The workbench wraps the ASTER executables:
+
+\begin{itemize}
+  \item \textbf{ASTRAL-IV} (\texttt{astral4}) --- standard quartet-based
+        species-tree inference with CASTLES-II branch lengths;
+  \item \textbf{wASTRAL} (\texttt{wastral}) --- weighted ASTRAL; weights
+        quartets by gene-tree support and branch length, downweighting poorly
+        supported quartets and long branches, and reports coalescent-unit
+        branch lengths. \textbf{ASTRAL-Hybrid} (\texttt{astral-hybrid}) is a
+        synonym/preset of wASTRAL, not a separate method; both use support
+        values and branch lengths.
+\end{itemize}
+
+ASTRAL-Pro 3, which handles gene trees with multiple individuals per species,
+is not exposed in this version. The bundled ASTER executables report version
+1.24; ASTER2 is not part of the current binary bundle.
+
+\begin{enumerate}
+  \item Provide one Newick file with one gene tree per line. Opening ASTRAL
+        from \textbf{Selected} with phylogeny/tree-set objects preloads their
+        trees; \textbf{Import from Selected TreeSet} is the fallback and also
+        accepts plain phylogenies.
+  \item Choose ASTRAL-IV, wASTRAL or ASTRAL-Hybrid.
+  \item Set threads, the support option (0 = none, 1 = length and support,
+        2 = detailed, 3 = \texttt{freqQuad.csv}) and an optional output path.
+  \item Advanced options cover constraint and guide trees, rounds, subsample
+        rounds, a gene-to-taxon map, root taxon, subsample proportion, seed,
+        Yule lambda, repeat downweighting and verbosity.
+  \item Run and send the resulting tree to the workspace.
+\end{enumerate}
+
+ASTRAL-IV and CASTER-site default to \texttt{SULength}, which includes
+terminal branch lengths and is the most readable option in tree viewers.
+wASTRAL reports coalescent units and intentionally leaves terminal branch
+lengths empty; the plugin adds display-only terminal lengths of $10^{-5}$ so
+viewers that reject missing tip lengths can open the tree. The plugin keeps the
+tree written through \texttt{-o} instead of overwriting it with stdout logs.
+
+Constraint and guide trees must be binary Newick trees. \texttt{--length} and
+\texttt{--genelength} are ASTRAL-IV options and must not be passed to wASTRAL or
+ASTRAL-Hybrid. ASTER's weighted parsers call \texttt{std::stod} on node labels;
+IQ-TREE composite labels such as \texttt{/1/100} can make them abort. The
+plugin normalises composite labels before weighted runs, keeping the first
+numeric field.
+
 \section{CASTER-site}
-\section{Concordance factors (sCF / gCF)}
-\todo{P0: explain the gCF + parsimony sCF mode and the separate likelihood
-sCF mode; note that \texttt{-t} is a starting tree and \texttt{-te} fixes it.}
+
+\textbf{SPECIES TREE $\rightarrow$ CASTER-site} infers a species tree directly
+from a sequence alignment by site-based quartet sampling \cite{caster}. No gene trees are
+needed, and the method is very fast when the alignment is large enough.
+
+\begin{itemize}
+  \item \textbf{Input}: FASTA, PHYLIP, or a file list.
+  \item \textbf{Format}: auto, fasta, list or phylip. \texttt{list} expects a
+        file containing paths to per-locus alignments, not a FASTA alignment.
+  \item \textbf{Threads}, \textbf{support option} and optional output path.
+  \item \textbf{Advanced}: subsample rounds, constraint and guide trees,
+        rounds, gene-to-taxon map, root taxon, subsample proportion, seed,
+        chunk size, ambiguity handling (0 = treat ambiguity codes as N;
+        1 = diploid unphased sites), branch lengths and scoring-only mode.
+\end{itemize}
+
+\begin{warning}
+Ensure the alignment or supermatrix has enough sites. Empirically, CASTER-site
+needs on the order of 100 kbp (for example a chloroplast genome) to converge.
+With fewer informative sites, the tree may be unresolved or unstable even
+though the program exits successfully.
+\end{warning}
+
+The output is a Newick tree with branch lengths. Terminal lengths may be
+missing and are added by the plugin for viewers. CASTER-site can be slow on
+large alignments; increase threads before increasing rounds.
+
+\section{Gene and site concordance factors}
+
+Concordance factors annotate a fixed species tree with the proportion of gene
+trees (gCF) or alignment sites (sCF) that support each internal split. They are
+not branch support values and should not be interpreted as posterior
+probabilities.
+
+\subsection{Gene concordance factors (gCF)}
+
+\textbf{SPECIES TREE $\rightarrow$ Gene Concordance (gCF)} takes one species
+tree plus one file of gene trees (one Newick tree per line). It runs IQ-TREE 3
+\cite{iqtree3} with \texttt{--gcf}, using the species tree as the starting tree
+(\texttt{-t}). The output is a TSV table with one row per internal
+bipartition. Each split is named by its \textbf{smaller taxon side}, so the
+representation is stable across programs.
+
+Columns: \texttt{split}, \texttt{split\_size}, \texttt{branch\_id},
+\texttt{gCF}, \texttt{gDF1}, \texttt{gDF2}, \texttt{gDFP}, \texttt{gN},
+\texttt{branch\_length}. The four gene-tree categories sum to 100\%:
+\texttt{gCF + gDF1 + gDF2 + gDFP = 100\%}. \texttt{gN} is the number of
+decisive gene trees; \texttt{gDFP} is polyphyly/other, not a clean NNI
+alternative.
+
+The \textbf{Table} tab shows the parsed rows; the \textbf{Overview} tab shows
+the distribution. Send the table to the workspace as a \texttt{table} object.
+A gCF at or below 1/3 cannot be inverted to a positive coalescent-unit length,
+so do not force the transformation.
+
+\subsection{Site concordance factors (sCF)}
+
+\textbf{SPECIES TREE $\rightarrow$ Site Concordance (sCF)} takes one species
+tree plus one alignment. It runs IQ-TREE 3 with \texttt{--scfl} and a fixed
+species tree (\texttt{-te}), using likelihood-based quartet sampling. The
+number of quartets is set in \textbf{sCF quartets} (default 1{,}000). The output
+is a TSV table with columns \texttt{split}, \texttt{split\_size},
+\texttt{branch\_id}, \texttt{sCF}, \texttt{sDF1}, \texttt{sDF2}, \texttt{sN}
+and \texttt{branch\_length}.
+
+The current workbench exposes the likelihood sCF estimator only. IQ-TREE also
+implements a parsimony sCF (\texttt{--scf}), which is faster but ignores the
+substitution model; it is not exposed here, and results from the two
+estimators should not be mixed. sCF depends on the alignment and substitution
+model: an uninformative or misaligned partition can return zero informative
+sites.
+
+\subsection{Concordance diagnostics}
+
+\textbf{SPECIES TREE $\rightarrow$ Site Diagnostics (sCF + CASTER)} compares
+likelihood sCF with CASTER-site q1/q2/q3 scores on the same fixed tree; its
+Simplex tab uses sCF/sDF1/sDF2 and CASTER q1/q2/q3. \textbf{SPECIES TREE
+$\rightarrow$ MSC Diagnostics (gCF + ASTER CU)} compares gCF with ASTRAL-IV and
+wASTRAL coalescent-unit lengths. These panels are interpretive aids: they align
+the same splits across methods and flag disagreements, but they do not replace
+a formal concordance analysis.
+
+\subsection{MSC diagnostics and simplex visualisation}
+
+\textbf{SPECIES TREE $\rightarrow$ MSC Diagnostics (gCF + ASTER CU)} is the
+combined view. It takes one fixed species tree, a set of gene trees and,
+optionally, the alignment used to estimate them. The plugin runs IQ-TREE 3
+gCF, scores the same tree with ASTRAL-IV and wASTRAL, and presents the result
+in four tabs:
+
+\begin{itemize}
+  \item \textbf{Table} --- one row per internal split, with gCF/gDF1/gDF2/gDFP
+        and the ASTER coalescent-unit values;
+  \item \textbf{Overview} --- the distribution of the concordance factors and
+        the largest gCF versus the largest gDF, so discordant splits stand
+        out;
+  \item \textbf{Simplex} --- ternary plots of the gCF and ASTRAL-IV qCF
+        triplets, with gDFP encoded by colour;
+  \item \textbf{Bipartition info} --- a taxa $\times$ splits membership
+        matrix, with the smaller side of each split shaded blue.
+\end{itemize}
+
+The simplex is a ternary coordinate system for the three competing quartet
+outcomes. For gCF, the vertices are \texttt{gCF}, \texttt{gDF1} and
+\texttt{gDF2}; a point near the top vertex means that most decisive gene trees
+support the species-tree split, and a point near a bottom vertex means that an
+alternative NNI split is more common. \texttt{gDFP} is not a vertex because it
+mixes polyphyly and other outcomes; it is shown as the point colour. The
+ASTRAL-IV panel uses \texttt{qCF}, \texttt{qDF1} and \texttt{qDF2} in the same
+way. The two panels are separate because the order of \texttt{DF1} and
+\texttt{DF2} can differ between the gene-tree and site-based summaries.
+
+Each point is an \emph{internal split}, not a gene tree. A tree with $n$ taxa
+has $n-3$ internal splits in the unrooted case, so a 10-taxon analysis has at
+most seven points. Increasing the number of gene trees improves the precision
+of each point; it does not add points. A denser simplex requires more taxa.
+
+The bipartition matrix uses the same split ordering. Rows are taxa and columns
+are \texttt{S1}, \texttt{S2}, \ldots; a blue cell means that the taxon is on
+the smaller side of that split. Hover a column header to see the full split.
+This view is useful for checking that a split is not driven by a single taxon
+or by a missing-data pattern.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{manual_msc_simplex.pdf}
+  \caption{MSC diagnostics. (A) gCF and ASTRAL-IV qCF simplex views; each
+  point is an internal split and gDFP is encoded by colour. (B) Bipartition
+  membership matrix; rows are taxa and columns are splits, with the smaller
+  side shaded blue.}
+  \label{fig:manual-msc-simplex}
+\end{figure}
+
+A gCF at or below 1/3 cannot be inverted to a positive coalescent-unit
+length, and a gCF of 100\% leaves no discordance to estimate; the plugin leaves
+those CU cells blank rather than printing a misleading number. ASTER may
+reject a wASTRAL run when the gene trees carry no numeric node labels; the
+diagnostic header reports this as \texttt{wASTRAL: rejected}. In that case the
+gCF and ASTRAL-IV qCF panels are still valid, but the wASTRAL CU comparison is
+not available. The \textbf{Save graph} button writes the currently visible
+Overview or Simplex figure; \textbf{Send table to workspace} exports the table
+as a typed item.
+
+Do not read the simplex as a posterior distribution, and do not compare the
+absolute positions of points from analyses with different taxon sets. Read it
+together with the gCF table, the bipartition matrix and the CU column.
+
 \section{Gene tree reconciliation with TreeRecs}
-\todo{P1: blocked until a runnable TreeRecs build is available.}
 
+\textbf{SPECIES TREE $\rightarrow$ TreeRecs 1.2} reconciles a gene tree with a
+species tree, reports duplication and loss events, and optionally writes
+orthology/paralogy events.
+
+\begin{itemize}
+  \item \textbf{Gene tree}: Newick.
+  \item \textbf{Species tree}: Newick.
+  \item \textbf{Duplication cost} (default 2) and \textbf{loss cost} (default
+        1).
+  \item \textbf{Best root by reconciliation}: let TreeRecs choose the root.
+  \item \textbf{Contraction threshold}: omit unless a numeric threshold is
+        needed.
+  \item \textbf{Orthology/paralogy events} and an optional gene-to-species
+        mapping file.
+\end{itemize}
+
+TreeRecs runs with \texttt{-f -q} (fix root, quiet) and creates its output
+directory. A contraction threshold of ``none'' must not be passed as
+\texttt{-t none}; TreeRecs 1.2 aborts on it, so the plugin omits the flag
+unless a numeric threshold is set. Passing \texttt{-p N} or \texttt{-c \_}
+explicitly switches separator mapping on and can break leaf names such as
+\texttt{A/B/C}; both flags are emitted only when changed from their defaults.
+For a separate mapping file, use the mapping option rather than the
+species-prefix convention.
+
+\section{BEST and MrBayes MSC}
+
+\textbf{SPECIES TREE $\rightarrow$ BEST / MrBayes MSC} exposes the MrBayes
+multi-species-coalescent analysis. The input must be a NEXUS data file.
+Partitions may be loaded from \texttt{charset} definitions; the species
+partition uses MrBayes \texttt{speciespartition} syntax.
+
+The panel is block-oriented. It shows the canonical \texttt{MRBAYES} block,
+accepts a complete block back, and reports any lines that were not parsed.
+Check the round-trip response before running. The analysis starts MrBayes
+through the task queue; the consensus tree and chain files can be exported to
+the workspace. A complete block should contain the \texttt{mcmc} command and
+the species-partition directives; an incomplete block may read the data without
+sampling.
+
+%======================================================================
 \chapter{Molecular dating}
-\section{LSD2}
-\section{MrBayes dating}
-\section{MCMCTree (approximate)}
-\section{IQ2MC}
-\todo{P0: document the IQ-TREE -> MCMCTree input conversion and the
-\texttt{usedata=3} workflow.}
+%======================================================================
 
+\section{Choosing a dating route}
+
+YR-MPE offers two implemented routes to a time-scaled tree, plus a planned
+approximate-likelihood route through PAML MCMCTree. Use \textbf{LSD2} for a
+fast point estimate on a reliable fixed tree, \textbf{MrBayes dating} when the
+topology and dates should be inferred jointly with credible intervals, and
+\textbf{MCMCTree approximate} when a Bayesian relaxed clock is needed but the
+full MCMC is too expensive; the latter is an external workflow here.
+
+Enter all ages in one consistent time unit (years before present, million
+years ago, or arbitrary time units). Mixing units is the most common dating
+error and is not detected by the programs.
+
+\section{LSD2}
+
+\textbf{CLOCK $\rightarrow$ LSD2} dates a fixed input tree given calibrations
+(root-to-tip regression) \cite{lsd2}. The current workspace tree is imported automatically.
+
+Set the \textbf{Tree file} (Newick) and, optionally, a sequence file (used only
+to derive sequence length). Root the tree with \textbf{Choose root} (IcyTree)
+or let LSD2 \textbf{Estimate the root}. For tip dates (sampling dates, for
+example virus isolation dates), tick \textbf{Use tip dates $\rightarrow$
+Configure tip dates} and, per OTU, choose a type (Point, Uniform, Upper
+Boundary or Lower Boundary) and an age. For node (MRCA) calibrations, press
+\textbf{+} under \textbf{Calibration points}, then \textbf{Edit} to open the
+MD-MRCA dialog; pick the taxa defining the clade, name it, choose a calibration
+type (Point, Uniform, Upper Boundary, Lower Boundary, Normal or Lognormal) and
+set its parameters. A live preview shows the distribution on the tree.
+
+Optionally enable \textbf{Calculate confidence intervals}: LSD2 simulates 100
+trees under a lognormal model of branch-length uncertainty, with standard
+deviation $q$ (default 0.2; larger $q$ gives wider intervals). Tip dates are
+not resampled. Run LSD2 to write a dated Newick tree plus a \texttt{.result}
+report, drawn in IcyTree.
+
+Sequence length is always passed to LSD2: Disabled uses 1000, Manual uses the
+spin value, and From sequence file computes it. \textbf{Use chosen root} only
+takes effect if a rooted tree file is loaded; otherwise LSD2 runs with
+\texttt{-r a} (estimate the root). The confidence-interval option fixes
+\texttt{-f} at 100 bootstrap trees.
+
+\begin{warning}
+Normal and Lognormal MRCA priors are automatically collapsed to a uniform 95\%
+HPD interval by the YR-MPE dialog, with a red warning. This is a
+\emph{preprocessing choice by YR-MPE}, not a behaviour of LSD2 itself.
+\end{warning}
+
+\section{MrBayes molecular dating}
+
+Dating is a mode inside the MrBayes plugin \cite{mrbayes}. Open
+\textbf{CLOCK $\rightarrow$ MrBayes3-MPI-BEAGLE} (the same plugin as Bayesian
+inference), tick
+\textbf{Enable Phylogenetic Dating}, then click \textbf{Dating Settings...}.
+
+\begin{itemize}
+  \item \textbf{Clock Model}: Strict Clock (default), Independent Gamma Rates
+        (IGR), Compound Poisson Process (CPP) or Thorne--Kishino 2002 (TK02).
+        Relaxed clocks expose a rate prior and mean.
+  \item \textbf{Outgroup Settings}: tick the taxa that form the outgroup, for
+        rooting.
+  \item \textbf{Calibration Nodes}: \textbf{+ Add $\rightarrow$ Edit} each
+        MRCA. Give it a node name, select its taxa, choose a \textbf{Prior
+        Type} (Fixed Value, Uniform Distribution, Offset Exponential, Offset
+        Gamma, Offset Lognormal or Truncated Normal) and set its parameters.
+        Ticking a node's \textbf{Constraint} applies the calibration to that
+        clade.
+\end{itemize}
+
+Set the usual MCMC generations, runs, chains and burn-in, then run
+MrBayes-MPI-BEAGLE. The dating commands are injected automatically and the
+\texttt{sumt} consensus is time-scaled. Per-taxon tip dating is currently wired
+into LSD2 only; for a tip-dated MrBayes run, prepare the command block
+externally.
+
+\section{MCMCTree approximate likelihood}
+
+MCMCTree is part of PAML 4.10.10 \cite{paml,mcmctree}. It estimates divergence
+times under a Bayesian relaxed clock using a tree, an alignment and
+calibrations. The
+\textbf{approximate likelihood} mode (\texttt{usedata = 3}) replaces the exact
+site-pattern likelihood with a Taylor expansion around the ML estimates, using
+the gradient and Hessian stored in \texttt{in.BV}. It is much faster than exact
+MCMCTree and is appropriate for large alignments when the approximation is
+acceptable.
+
+\begin{warning}
+MCMCTree is \emph{not yet wrapped by a YPhylo Workbench plugin} in version
+1.1.0. The \textbf{CLOCK} menu reserves the entry, and \textbf{Import to
+MCMCTree} reports that the import will be wired through PD-Guide. The workflow
+below is the supported external route with PAML.
+\end{warning}
+
+The external workflow:
+
+\begin{enumerate}
+  \item Infer a rooted, branch-length tree with IQ-TREE 3 or RAxML-NG and
+        prepare a PHYLIP alignment with the same taxon labels.
+  \item Write a \texttt{mcmctree.ctl} control file. The essential fields are
+        \texttt{seqfile}, \texttt{treefile}, \texttt{outfile},
+        \texttt{ndata}, \texttt{usedata = 3}, \texttt{clock = 2} (independent
+        rates) or \texttt{clock = 3} (correlated rates), \texttt{RootAge},
+        \texttt{model}, \texttt{alpha}, \texttt{ncatG}, \texttt{cleandata},
+        \texttt{BDparas}, \texttt{rgene\_gamma}, \texttt{sigma2\_gamma},
+        \texttt{burnin}, \texttt{sampfreq} and \texttt{nsample}.
+  \item Write a \texttt{calibration} file for the calibrated nodes. Each line
+        gives the node, a soft or hard bound, and the age parameters; the tree
+        file must contain the corresponding node labels.
+  \item Run once with \texttt{usedata = 2} (exact likelihood) to calculate the
+        gradient and Hessian and write \texttt{in.BV}, then switch to
+        \texttt{usedata = 3}. Inspect the \texttt{mcmc.txt} trace and summary
+        tree for convergence and effective sample sizes.
+\end{enumerate}
+
+The approximation is local: it is reliable when the ML estimates are close to
+the posterior mode and the alignment is not dominated by saturation or model
+misspecification. If the approximate and exact runs disagree, use the exact
+likelihood or a different clock model.
+
+\section{IQ2MC conversion}
+
+IQ2MC is the planned converter from an IQ-TREE analysis to MCMCTree input: it
+will write the PHYLIP alignment, rooted tree, \texttt{mcmctree.ctl},
+\texttt{calibration} file and the \texttt{usedata = 2} run that produces
+\texttt{in.BV}, making the approximate workflow a one-click continuation of an
+IQ-TREE analysis. It is not implemented in 1.1.0; until then, follow the
+external workflow above.
+
+\section{PD-Guide}
+
+\textbf{CLOCK $\rightarrow$ PD-Guide} is a guidance layer over the dating
+controls. It can infer a tree with IQ-TREE, configure tip dates and node
+calibrations, export the calibration table, and run LSD2. Only LSD2 is wired
+end-to-end; the other methods report ``not yet implemented''. Export the table
+to reuse it with MrBayes or MCMCTree.
+
+%======================================================================
 \chapter{Selection analysis}
-\section{NG86 and YN00}
-\section{Codon-based z-test}
+%======================================================================
+
+\section{Codon-based Z-test: NG86 and YN00}
+
+The \textbf{SELECTION} toolbar menu opens the codon-based Z-test panel. The
+input is an in-frame codon alignment in FASTA format (a multiple of three
+nucleotides, with no internal stop codons in the analysed codons). The method
+menu offers two pairwise estimators.
+
+\emph{NG86} counts synonymous and nonsynonymous sites and differences with the
+Nei--Gojobori method and applies the Jukes--Cantor correction. The analytic
+Z-test compares $d_N$ and $d_S$; the variance is
+$\mathrm{Var}(d_N)+\mathrm{Var}(d_S)$, using the numbers of synonymous and
+nonsynonymous sites as the binomial denominators.
+
+\emph{YN00} implements the Yang--Nielsen (2000) method with equal pathway
+weighting, following the default mode of PAML's \texttt{yn00}. Codon
+frequencies are estimated from the average $3\times4$ base composition of the
+pair, one transition/transversion ratio $\kappa$ is estimated for the alignment
+from non-degenerate and fourfold-degenerate sites, and $d_S$ and $d_N$ are
+corrected with the F84 model. The standard errors of $d_S$ and $d_N$ come from
+the F84 variance, and
+$Z=(d_N-d_S)/\sqrt{\mathrm{SE}(d_N)^2+\mathrm{SE}(d_S)^2}$. The implementation
+reproduces PAML \texttt{yn00} on the \texttt{abglobin} example to four decimal
+places \cite{paml}.
+
+The table reports $S$, $N$, $S_d$, $N_d$, $d_S$ (with SE for YN00), $d_N$
+(with SE), $\omega=d_N/d_S$, $Z$, and the conclusion. The matrix view follows
+MEGA: the upper triangle contains two-sided $p$-values and the lower triangle
+contains $\omega$. Cells with $p<0.05$ are bold and tinted (red for
+$d_N>d_S$, green for $d_N<d_S$). Codons with gaps, ambiguous bases, or stops
+are skipped pairwise. Changes that would create a stop codon are excluded when
+counting synonymous sites, and mutation paths through stop codons are discarded
+when counting multi-step codon differences. Export writes the table or matrix
+as TSV or CSV.
+
+\section{Batch dN/dS: NG86, YN00 and IQ-TREE MLE}
+
+The batch panel accepts a folder of codon alignments or alignment items from
+the workspace. In \emph{Counting} mode it applies the same NG86 or YN00
+implementation and writes one row per sequence pair. In \emph{MLE} mode it runs
+IQ-TREE 3 for each alignment with \texttt{--seqtype CODON} and a codon model
+(\texttt{-m GY} or \texttt{-m MG}), then reports the global $\omega$ and
+log-likelihood parsed from the IQ-TREE report. The MLE controls (threads and
+output folder) are enabled only in MLE mode.
+
+Counting is a fast approximation and does not require an external binary; MLE
+is slower but uses a codon-substitution model. Both counting modes and MLE
+export a TSV table. The MLE output folder is required; picking a file instead
+of a folder is not supported. IQ-TREE must be configured before MLE runs. The
+genetic code applies to both counting and MLE paths.
+
 \section{CodeML and HyPhy (planned)}
 
+Site, branch and branch-site models in PAML CodeML \cite{paml} and HyPhy
+\cite{hyphy} are not implemented yet. The \textbf{SELECTION $\rightarrow$ CodeML / HyPhy (planned)}
+entry is disabled. For a site-model analysis today, export the codon alignment
+and run CodeML or HyPhy externally; the workbench can still manage the input
+alignment, the model report and the resulting table as workspace objects.
+
+%======================================================================
 \chapter{Tree visualization}
-\todo{One shared viewer; rooting, support labels, TreeSet selector, export.}
+%======================================================================
 
-\chapter{Troubleshooting}
-\todo{Binary not found, version mismatch, workspace permissions, long jobs,
-MPI/BEAGLE limits.}
+\section{IcyTree viewer}
 
+\textbf{PHYLOGENY $\rightarrow$ Tree Viewer (IcyTree)} opens the embedded
+IcyTree viewer. It also opens automatically whenever a tree result is produced.
+IcyTree is an upstream web application embedded in a Qt window; YR-MPE
+intercepts its file downloads with its own save dialog.
+
+Opening a tree from the workspace auto-loads the latest tree. From the menu,
+use IcyTree's own \textbf{File $\rightarrow$ Load from file...} or
+\textbf{Enter tree directly...}; accepted formats are Newick, NEXUS, PhyloXML
+and NeXML. NEXUS is preferred when the tree carries rich annotations, because
+it can preserve support values, branch lengths and metadata that plain Newick
+may lose.
+
+\section{Display, rooting and support}
+
+The IcyTree menu bar provides:
+
+\begin{itemize}
+  \item \textbf{File} --- load trees or CSV metadata; export the tree as SVG,
+        PNG, JPEG, Newick, NEXUS or PhyloXML. YR-MPE intercepts the export
+        with its own save dialog.
+  \item \textbf{Style} --- rectangular, transmission or cladogram layout;
+        node sorting (ladderize); tip and internal labels; colour edges or
+        nodes by metadata; collapse zero-length edges; axis (age or time);
+        legend; fonts.
+  \item \textbf{Search} --- find and highlight clades.
+  \item \textbf{Statistics} --- lineages-through-time plot, skyline plot and
+        tree statistics.
+\end{itemize}
+
+Right-click a node to re-root. This is the action used by the dating tools'
+\textbf{Choose root}. Rooting in the viewer is display-side unless the exported
+tree is re-imported into the workspace.
+
+To display branch support, open \textbf{Style $\rightarrow$ Internal node text}
+and choose \texttt{label}. Posterior probabilities, bootstrap percentages and
+concordance factors appear on the corresponding nodes. For a tree set,
+double-click the tree-set icon in the workspace; IcyTree opens all member trees
+and its navigation controls switch between them.
+
+\begin{tip}
+Export SVG or PNG for figures, and Newick or NEXUS for downstream software.
+If you reroot a tree for dating, export the rerooted tree and re-import it;
+otherwise the workspace object keeps its original root.
+\end{tip}
+
+Very large trees may be slow in the embedded browser. If the viewer shows an
+error page instead of a tree, the bundled IcyTree assets are missing or the
+Newick string is malformed; check the Console and the installation.
+
+%======================================================================
+\chapter{Working with AI assistance}
+\label{ch:ai-assistance}
+
+YPhylo Workbench exposes the same semantic actions to a human and to an
+external agent. The agent does not drive the GUI by clicking coordinates or
+injecting keystrokes. It writes commands to a local file bridge, the workbench
+executes them on the GUI thread, and the agent reads structured responses and
+events. This chapter describes the bridge, the action surface and the
+workflow-recording mechanism.
+
+\section{What the bridge is}
+
+The bridge is a directory containing:
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.24\linewidth}
+                      >{\raggedright\arraybackslash}p{0.68\linewidth}@{}}
+\toprule
+File & Purpose \\
+\midrule
+\endhead
+\texttt{commands.jsonl} & Agent-to-workbench requests, one JSON object per
+line. \\
+\texttt{responses.jsonl} & One response per command, correlated by
+\texttt{id}. \\
+\texttt{events.jsonl} & Asynchronous progress, log lines, status changes and
+result-ready events. \\
+\texttt{control.json} & Session metadata and the random token; read-only for
+the agent. \\
+\texttt{READY} & Written by the workbench when the session is accepting
+commands. \\
+\bottomrule
+\end{longtable}
+
+The bridge is local-only. It opens no network port, exposes no arbitrary shell
+execution and requires the random token from \texttt{control.json}. The token
+must not be copied into a world-readable file or committed to a repository.
+The agent may append to \texttt{commands.jsonl}; the workbench polls the file
+on the Qt main thread, so widget state is never touched from a worker thread.
+
+\section{Discovering the interface}
+
+An agent should inspect before it acts. Five read-only surfaces are available:
+
+\begin{itemize}
+  \item \texttt{workbench.menu} --- the toolbar tree and a flat list of actions
+        with stable IDs, paths, enabled/checked state and shortcuts.
+  \item \texttt{workbench.workspace} --- datasets, items, runs, streams and
+        imports, including the provenance links between them.
+  \item \texttt{workbench.sidebar} --- the Selected basket, recommendations
+        and the current Inspector operations.
+  \item \texttt{workbench.skills} --- the skill catalog for the installed
+        plugins.
+  \item \texttt{workbench.help\_doc} --- the live document for one plugin,
+        including current values, resolved values and a command preview.
+\end{itemize}
+
+The live help document is the parameter-level contract. A plugin declares
+\texttt{control\_bindings()} that maps a GUI widget to the command-line option
+it represents. For example, the MAFFT direction control maps to
+\texttt{--adjustdirection}, and the RAxML-NG bootstrap control maps to
+\texttt{--bs-trees}. A control with no CLI equivalent is marked GUI-only rather
+than assigned a fictitious flag.
+
+\section{Driving a plugin}
+
+Once a plugin window is open, the generic action surface is:
+
+\begin{itemize}
+  \item \texttt{plugin.inspect\_controls} --- list controls, current values and
+        CLI mappings;
+  \item \texttt{plugin.modify\_options} --- change one or more options
+        atomically; invalid values are rejected before the plugin runs;
+  \item \texttt{plugin.run} --- start the analysis;
+  \item \texttt{plugin.stop} --- request cancellation;
+  \item \texttt{plugin.inspect\_console} --- read the colour-coded console;
+  \item \texttt{plugin.export\_to\_workspace} --- materialise the typed result
+        as workspace items.
+\end{itemize}
+
+The agent does not need to know whether a result came from a GUI click or a
+bridge command: both reach the same handler. Tool-specific APIs, such as the
+OrthoFinder semantic API, override the generic surface where the tool has a
+richer contract.
+
+A minimal command sequence for a one-step alignment looks like this:
+
+\begin{lstlisting}[basicstyle=\ttfamily\small,frame=single]
+{"id":"open","op":"workbench.invoke_plugin","plugin":"mafft",
+ "input":{"item_id":"seq_001"}}
+{"id":"set","op":"plugin.modify_options",
+ "options":{"mode":"Auto mode (--auto)","direction":"--adjustdirection"}}
+{"id":"run","op":"plugin.run"}
+{"id":"export","op":"plugin.export_to_workspace"}
+\end{lstlisting}
+
+Each command receives a response with the same \texttt{id}; long-running
+operations also emit \texttt{events.jsonl} records. Poll \texttt{responses} and
+\texttt{events} until the run reaches a terminal state; do not busy-wait on
+stdout.
+
+\section{Recording a workflow}
+
+A run log records what happened; a workflow specification records what should
+happen next. The workbench writes both. A recorded JSONL workflow has an
+optional header and one object per step:
+
+\begin{lstlisting}[basicstyle=\ttfamily\small,frame=single]
+{"schema":"yrmpe.workflow.v1","kind":"workflow",
+ "name":"sanger-demo","inputs":{"raw":"raw.fas"}}
+{"id":"mafft","op":"mafft.run",
+ "outputs":{"alignment":"work/aligned.fas"},
+ "params":{"input":"raw.fas","output":"work/aligned.fas",
+           "direction":"--adjustdirection"}}
+{"id":"tree","op":"iqtree3.run",
+ "outputs":{"tree":"work/tree.nwk"},
+ "params":{"msa":"work/aligned.fas","model":"MFP",
+           "output":"work/tree.nwk"}}
+\end{lstlisting}
+
+The compiler drops read-only discovery actions and failed steps, assigns each
+output a symbolic placeholder such as \texttt{\%mafft.alignment.fas\%},
+rewrites matching inputs and validates the DAG for duplicate producers,
+unknown placeholders and cycles. The preview renders data items as circles,
+tools as squares and artifact flow as orthogonal arrows. Clicking a tool node
+opens its plugin in workflow mode; path inputs are locked to placeholders and
+the Run button becomes \emph{Close \& Apply}.
+
+\section{A practical agent recipe}
+
+A useful pattern is \emph{inspect, configure, run, verify, record}:
+
+\begin{enumerate}
+  \item Read \texttt{workbench.menu} and \texttt{workbench.workspace}; confirm
+        the input item and its type.
+  \item Open the plugin with \texttt{workbench.invoke\_plugin}; read
+        \texttt{plugin.inspect\_controls} and the live help document.
+  \item Change only the options that matter; keep a record of the values.
+  \item Run, then read \texttt{plugin.inspect\_console} and the result-ready
+        event. Export the typed result to the workspace.
+  \item Inspect the new items and provenance; if the result is valid, keep the
+        recorded JSONL as the workflow specification.
+\end{enumerate}
+
+This pattern is the basis of the open-task case studies and the plugin
+authoring/usage benchmark. The agent is expected to recover the reference
+topology without a prescribed pipeline; the hidden reference trees are never
+exposed through the bridge.
+
+\section{Limits and safety}
+
+\begin{itemize}
+  \item The bridge is local-only and token-protected. Do not expose it on a
+        network interface.
+  \item There is no arbitrary shell action. A plugin may invoke its own
+        configured binary, but the agent cannot run an unregistered command.
+  \item Long runs are asynchronous. Ask for progress rather than assuming a
+        timeout means failure; read the console and the chain files.
+  \item Human review remains necessary. The agent can validate taxon sets,
+        Newick parsing and file existence, but it cannot judge whether a
+        topology is biologically plausible.
+  \item Do not give an agent a hidden benchmark answer, a reference tree or a
+        world-readable token. Treat those as test-harness data, not context.
+\end{itemize}
+
+\chapter{Troubleshooting}\label{ch:troubleshooting}
+%======================================================================
+
+Most failures fall into a small number of categories. Start with the Console
+tab: it shows the exact command, the working directory and the last lines of
+stdout/stderr.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.27\linewidth}
+                      >{\raggedright\arraybackslash}p{0.33\linewidth}
+                      >{\raggedright\arraybackslash}p{0.34\linewidth}@{}}
+\toprule
+Symptom & Likely cause & Action \\
+\midrule
+\endhead
+``Executable file not found'' or a plugin refuses to start &
+The binary path in \texttt{config.json} is empty, wrong, or points to a moved
+file. & Run the Initializer's \textbf{Auto Config}, or edit the entry in
+\texttt{YR\_MPE/config.json}. Verify the path by running the executable with
+\texttt{--version} in a terminal. \\
+Program starts but exits immediately &
+Wrong binary version or missing runtime library (for example MS-MPI or BEAGLE).
+& Check the Console for the loader error. Reinstall the bundled runtime; do not
+mix binaries from different releases. \\
+Model name rejected by RAxML-NG &
+IQ-TREE syntax differs, or \texttt{+FQ} was passed unchanged. &
+Use a RAxML-NG-compatible model; the plugin normalises \texttt{+FQ} to
+\texttt{+FE}, but a hand-edited model string may not be normalised. \\
+ModelTest-NG exits non-zero but writes a report &
+Known Cygwin exit behaviour after a valid run. &
+The plugin accepts the report when the \texttt{.out} file exists; check the
+Output Preview rather than the exit code alone. \\
+Partition merge aborts with ``Fixing branch lengths not supported'' &
+IQ-TREE 3.0.1 partition-merger limitation. &
+The plugin retries with \texttt{--rcluster 10}. If it still fails, reduce the
+partition set or run partitions separately. \\
+Cannot select a workspace / Bayesian run refuses to start &
+Temporary mode is active. &
+Use \textbf{WORKSPACE $\rightarrow$ Select Workspace $\rightarrow$ Select
+Folder...}. MrBayes and PhyloBayes require a persistent workspace for
+checkpointing. \\
+Permission denied when writing output &
+Workspace is on a read-only, network or synchronised folder, or the file is
+open in another program. &
+Use a local writable folder; close the file in other applications; avoid
+OneDrive/Dropbox during long runs. \\
+Long Bayesian run appears frozen &
+MCMC is running; the window is non-modal and the chain writes to disk
+periodically. &
+Check the Console and the \texttt{.mcmc} file; do not close the window. Use
+Stop only if you intend to abandon the run. \\
+MPI fails to start or oversubscribes the CPU &
+\texttt{mpirun} is missing, or the requested processes exceed the machine. &
+Install the bundled MS-MPI runtime; set Runs $\times$ Chains to a number the
+CPU can supply; reduce chains or runs. \\
+BEAGLE error or very slow likelihoods &
+Device, precision or scaling is incompatible with the installed GPU/driver. &
+Switch to CPU, Double precision, Dynamic scaling; update the GPU driver; reduce
+the thread count. \\
+MUSCLE runs out of memory &
+Very long sequences. &
+Use MAFFT, or split the alignment by locus. \\
+ASTRAL/wASTRAL aborts on support labels &
+Composite IQ-TREE labels such as \texttt{/1/100} are passed to ASTER's
+\texttt{std::stod}. &
+The plugin normalises composite labels; if you supply a hand-made tree, use a
+single numeric support value. \\
+CASTER-site returns an unresolved tree &
+Too few informative sites. &
+Use an alignment or supermatrix of at least $\sim$100 kbp, or choose a
+gene-tree method. \\
+Negative branch lengths in a DecentTree tree &
+NJ on a non-additive distance matrix. &
+Treat as zero for display or apply an explicit zero-clamp; compare with an ML
+tree before interpreting branch lengths. \\
+Tree imported but not shown in IcyTree &
+Malformed Newick, missing IcyTree assets, or a rooted/unrooted mismatch. &
+Validate the Newick with a text editor or Biopython; check the Console; export
+and re-import the tree. \\
+Output disappeared after closing the workbench &
+Temporary mode was active. &
+Use a persistent workspace for anything you want to keep. \\
+\bottomrule
+\end{longtable}
+
+\section{Diagnosing a failed run}
+
+\begin{enumerate}
+  \item Read the first Console line. It is the command actually executed.
+  \item Read the last error lines. A tool may write progress to stderr; the
+        return code, not the stream name, determines failure.
+  \item Run the same command in a terminal with the same working directory. If
+        it fails there too, the problem is the binary or the input, not the
+        GUI.
+  \item Check the input format. Most ``parse'' errors are caused by a FASTA
+        header with spaces, a PHYLIP file with the wrong header count, or a
+        Newick tree broken across lines.
+  \item Check the taxon labels. Concatenation, ASTRAL and dating all rely on
+        exact label matching.
+\end{enumerate}
+
+\section{Reporting a bug}
+
+Include the YR-MPE version (About dialog), operating system, the plugin name,
+the exact command from the Console, the input file type and size, and the
+smallest input that reproduces the problem. Do not paste a full multi-gigabyte
+alignment; a reduced example is more useful.
+
+%======================================================================
 \chapter{Plugin development}
-\todo{BasePlugin contract, four tabs, manifest entry, result contract.
-Keep the example short and testable.}
+%======================================================================
 
-% Smoke test for software.bib; remove when real citations are added.
-\nocite{*}
+\section{Two kinds of plugin}
+
+An \textbf{analysis or data plugin} runs a method (an external binary or a
+built-in Python analysis) and produces one or more workspace objects:
+alignment, model, distance matrix, tree, tree set, chain, table or dataset.
+It follows the full contract: a \texttt{BasePlugin} subclass, a
+\texttt{BaseProcessThread} subclass when a process is involved, the four
+inherited tabs, a \texttt{ResultSpec} export, and a \texttt{PluginEntry.run()}
+method.
+
+A \textbf{viewer or utility plugin} consumes an existing object and does not
+produce a dataset (IcyTree, MiniTracer, a preview tool). It may use a
+specialised widget instead of the four-tab layout, but it still declares its
+metadata, citation keys and entry point, and it never mutates the workspace
+directly.
+
+\section{Module and class layout}
+
+A typical analysis plugin module is
+\path{YR_MPE/plugins/<tool>_plugin.py}. It defines a
+\texttt{<Tool>Thread} (a \texttt{BaseProcessThread} subclass), a
+\texttt{<Tool>Plugin} (a \texttt{BasePlugin} subclass) and a
+\texttt{<Tool>PluginEntry}. The plugin class implements:
+
+\begin{itemize}
+  \item \texttt{init\_plugin\_info()} --- metadata, tool name, citation keys,
+        input and output types;
+  \item \texttt{setup\_input\_tab()} --- the parameter form;
+  \item \texttt{setup\_output\_tab()} --- the result preview;
+  \item \texttt{run\_analysis()} --- validation, command construction, thread
+        start;
+  \item \texttt{stop\_analysis()} --- cancellation, when the worker is
+        cancellable.
+\end{itemize}
+
+The entry point must accept
+\texttt{import\_from=None, import\_data=None, workdir=None, **kwargs} and
+return the plugin widget. Do not rename an existing \texttt{source} value or
+action id without a migration; persisted workspaces and agent scripts depend on
+them.
+
+\section{The four tabs}
+
+Use the inherited tabs; do not recreate them. Put the parameters in a
+scrollable \textbf{Input \& Parameters} form of \texttt{QGroupBox} sections,
+and give \textbf{Output Preview} summary counts, a table/tree/text preview, an
+explicit empty state and an export action. \textbf{Console} and
+\textbf{Citation} are inherited: emit the command and output at the correct
+level, and keep citation keys in the plugin rather than formatted text.
+
+\section{Metadata, configuration and citations}
+
+\texttt{init\_plugin\_info()} must set \texttt{plugin\_name},
+\texttt{tool\_name}, \texttt{citation\_keys}, \texttt{input\_types},
+\texttt{output\_types} and \texttt{plugin\_path}. A MAFFT plugin, for example,
+sets \texttt{tool\_name} to \texttt{"MAFFT"}, \texttt{citation\_keys} to a
+list containing \texttt{katoh2013mafft}, and \texttt{input\_types} to a
+dictionary mapping \texttt{"Alignment FASTA"} to the extensions \texttt{fas},
+\texttt{fna}, \texttt{fa} and \texttt{fasta}. A plugin that wraps an external
+binary must also have a \texttt{config.json} entry with a \texttt{name}
+matching the tool and a \texttt{path} relative to \texttt{YR\_MPE/} (for
+example, \texttt{/bin/mafft/mafft.bat}).
+
+The \texttt{name} and \texttt{tool\_name} must match case-insensitively.
+Paths are relative to \texttt{YR\_MPE/} and must not contain a drive letter or
+home directory. A built-in plugin may override \texttt{config()} to return
+true but must still expose citation keys; a plugin needing a second binary
+(BLAST+, MPI, BEAGLE) must validate it by name before the run. Citations are
+data: store one BibTeX/RIS entry per tool with a DOI where available, and keep
+only the keys in the plugin, in display order.
+
+\section{Process contract}
+
+All external processes must run through \texttt{BaseProcessThread} (or an
+equivalent thread). The thread emits \texttt{progress(str)} for user-facing
+progress, \texttt{console\_output(...)} for each useful line,
+\texttt{result\_ready(object)} for a parsed result, \texttt{finished} with the
+output files exactly once on success, and \texttt{error(str)} on failure.
+
+The thread must check \texttt{self.is\_running} between loop iterations and
+must never touch a widget or open a dialog. On Windows, use
+\texttt{run\_hidden()} or \texttt{popen\_hidden()} from
+\texttt{YR\_MPE/runtime/subprocess\_utils.py}; direct \texttt{subprocess.run()}
+or \texttt{Popen()} calls allocate a console window under \texttt{pythonw}.
+Pass argument lists rather than shell strings, pass \texttt{cwd} explicitly,
+and classify failures by the return code, including the last stderr lines in
+the error message.
+
+\section{Result contract}
+
+New analysis plugins must not add a bespoke export signal. Build a
+\texttt{ResultSpec} and call \texttt{self.export\_result()}. The result contains
+a stable lowercase \texttt{source}, one or more \texttt{DatasetSpec} objects
+with \texttt{DatasetItemSpec} items, \texttt{artifacts} (output paths), a
+machine-readable \texttt{summary}, non-fatal \texttt{warnings} and a
+\texttt{schema} version.
+
+The host owns workspace mutation. The plugin emits a validated result and the
+workbench converts it into typed objects. Store output paths in the result, not
+only in the console log.
+
+\section{Standalone registration}
+
+To expose a standalone plugin in the YRTools sidebar, add an entry to
+\texttt{settings.json} with \texttt{name}, \texttt{placement} (path, priority
+and favicon), \texttt{entry\_point} (for example
+\texttt{YR\_MPE.icytree:IcyTreePluginEntry}) and \texttt{runtime}. The
+\texttt{runtime.type} must be \texttt{polypyplug}.
+
+\section{AI-readiness requirements}
+
+A plugin is not finished when it works by mouse. The same analysis must be
+discoverable and runnable through the semantic surface described in
+Chapter~\ref{ch:ai-assistance}. The following requirements are normative for
+new analysis plugins; legacy plugins are migrated in the Phase A/B/C order
+used by the development standard.
+
+\subsection{Controls must have a machine-readable binding}
+
+Every executable-backed analysis plugin must implement
+\texttt{control\_bindings()}. Each entry maps one GUI control to the command
+line it produces:
+
+\begin{lstlisting}[basicstyle=\ttfamily\small,frame=single]
+{"id": "direction", "widget": "adjust_direction_combo",
+ "label": "Direction adjustment", "kind": "choice",
+ "choices": {"No adjustment": [],
+             "Adjust direction (--adjustdirection)":
+                 ["--adjustdirection"]},
+ "cli": ["{value}"],
+ "notes": "Nucleotide data only."}
+\end{lstlisting}
+
+The binding is the contract used by \texttt{plugin.inspect\_controls},
+\texttt{plugin.modify\_options}, the live help document and the skill file. A
+control with no command-line equivalent must set \texttt{"cli": []} and explain
+why in \texttt{notes}; it must not be assigned a fictitious flag. A boolean,
+integer, choice or path control must declare its type so an agent can validate
+the value before the run.
+
+\subsection{Every plugin needs a skill document}
+
+Add \texttt{YR\_MPE/skills/<plugin-id>.md} and register it in the skill
+manifest. The document should contain, in this order:
+
+\begin{enumerate}
+  \item \textbf{Purpose} --- what the plugin does and what it does not do;
+  \item \textbf{Inputs} --- accepted object types and file formats;
+  \item \textbf{GUI workflow} --- the menu path and the minimum steps;
+  \item \textbf{Agent notes} --- the semantic actions, the result type and the
+        items written to the workspace;
+  \item \textbf{Interpretation} --- what the output means and what it does not
+        mean;
+  \item \textbf{Citation} --- the citation keys and any method caveat.
+\end{enumerate}
+
+The skill is part of the release, not an afterthought. An agent that can read
+the menu but not the skill will guess parameter meanings; an agent that can
+read both can reproduce the GUI workflow.
+
+\subsection{Results and status must be machine-readable}
+
+The result contract in the previous section is also the agent contract. A
+plugin must return a \texttt{ResultSpec}; it must not require an agent to parse
+the Console or scrape a preview widget. The \texttt{source}, item types,
+summary keys and artifact paths are stable API. Errors must be returned as
+errors with the return code and the last stderr lines, not as a successful
+empty result.
+
+For analyses that produce no dataset (for example a terminal summary), the
+plugin may emit the approved one-line \texttt{YMPE\_SUMMARY \{json\}} record
+(schema \texttt{yrmpe.summary.v1}) in addition to the normal display. That
+record is a fallback for terminal-only tools, not a substitute for
+\texttt{ResultSpec} in an analysis plugin.
+
+\subsection{Multi-step tools need a semantic API}
+
+A simple wrapper can rely on the generic surface
+(\texttt{plugin.inspect\_controls}, \texttt{modify\_options}, \texttt{run},
+\texttt{stop}, \texttt{inspect\_console}, \texttt{export\_to\_workspace}). A
+tool with a multi-step workflow (input scan, runtime check, preview, partial
+results) should expose a tool-specific API in the style of OrthoFinder:
+\texttt{inspect\_options}, \texttt{modify\_options}, \texttt{status},
+\texttt{console}, \texttt{preview\_results}, \texttt{actions} and
+\texttt{agent\_invoke}. The tool-specific API overrides the generic surface
+only where it is richer; the generic actions must still behave sensibly.
+
+\subsection{Provenance and run ownership}
+
+Do not fabricate a \texttt{run\_id} or a workspace record. The host wrapper
+creates the run, links inputs and outputs and records the command. The plugin
+reports the command, working directory, version and artifact paths; the host
+owns the graph. A plugin that writes outside its work directory, silently
+overwrites an input, or leaves a temporary file in the workspace root is not
+AI-ready because the provenance cannot be reconstructed.
+
+\subsection{AI-assisted development norms}
+
+AI tools may draft code, tests, documentation and translations, but a human
+contributor remains responsible for the commit. In particular:
+
+\begin{itemize}
+  \item \textbf{Review the contract, not only the diff.} Check
+        \texttt{control\_bindings()}, \texttt{ResultSpec}, citation keys and
+        error paths against this chapter.
+  \item \textbf{Run the tests.} A generated plugin is not accepted until the
+        GUI test, the agent test, the hidden-subprocess test and the Stop test
+        pass on the target Windows build.
+  \item \textbf{Do not paste secrets or hidden data.} Tokens, benchmark
+        reference trees and unpublished reviewer material must not be placed
+        in prompts, logs, commit messages or public issues.
+  \item \textbf{Do not invent citations or benchmark numbers.} Every citation
+        key must resolve to a real BibTeX/RIS entry; every timing or accuracy
+        claim must come from a recorded run.
+  \item \textbf{Disclose the assistance where it matters.} In a pull request
+        or release note, state which parts were AI-assisted and who reviewed
+        them. This is a provenance statement, not a authorship claim.
+  \item \textbf{Keep the human decision.} The agent may propose a model, a
+        partition scheme or a topology; the human decides whether the
+        biological result is credible.
+\end{itemize}
+
+\section{Checklist for a new plugin}
+
+\begin{enumerate}
+  \item Does it work standalone and in the workbench, validate before starting
+        a thread, and refuse to close during a run?
+  \item Does the Console show the command and working directory, and does the
+        preview work without opening an external folder?
+  \item Does every external process use \texttt{run\_hidden()} with argument
+        lists and an explicit \texttt{cwd}?
+  \item Does it emit a \texttt{ResultSpec}, with output paths in the result?
+  \item Do the citation keys resolve, and is the tool version recorded?
+  \item Are failures reported with the last stderr lines, and is the tool
+        listed in its menu and, if user-facing, in this manual?
+  \item Does \texttt{control\_bindings()} cover every parameter that maps to
+        the command line, with GUI-only controls marked explicitly?
+  \item Does the skill document exist, resolve through the skill manifest and
+        describe the result type and the agent actions?
+  \item Can an agent inspect, modify, run, stop, read the console and export
+        the result without parsing a widget or the Console text?
+  \item Are the agent bridge token, hidden benchmark data and unpublished
+        material absent from logs, prompts, commits and documentation?
+\end{enumerate}
+
+%======================================================================
+\appendix
+\chapter{File formats and conventions}
+%======================================================================
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.20\linewidth}
+                      >{\raggedright\arraybackslash}p{0.72\linewidth}@{}}
+\toprule
+Format & Use and conventions \\
+\midrule
+\endhead
+FASTA & Sequences and alignments. The full header after \texttt{>} is the
+taxon identifier for concatenation and matching. Avoid spaces and duplicate
+headers unless the tool explicitly supports them. \\
+PHYLIP & Distance matrices and alignments. MrBayes and PhyloBayes expect
+PHYLIP or NEXUS; the workbench converts FASTA automatically where it can. \\
+NEXUS & Partitioned datasets, MrBayes blocks, tree blocks. \texttt{charset}
+definitions use 1-based coordinates. \\
+Newick & Trees. One tree per line for tree sets and ASTRAL input. A Newick
+string must not contain a line break. \\
+\texttt{.mldist} & IQ-TREE lower-triangular ML distance matrix. \\
+\texttt{.dist} & Uncorrected p-distance matrix written by the p-distance
+plugin. \\
+\texttt{.p} & MrBayes parameter trace. \\
+\texttt{.trace} & PhyloBayes parameter trace. \\
+\texttt{.con.tre} & MrBayes consensus tree. \\
+\texttt{.treefile}, \texttt{.contree} & IQ-TREE and MPBoot best tree and
+consensus tree. \\
+\texttt{.best\_scheme.nex} & IQ-TREE partition model scheme. \\
+\texttt{.result} & LSD2 dating report. \\
+\bottomrule
+\end{longtable}
+
+Throughout, ESS is the effective sample size, PSRF the Gelman--Rubin
+potential scale reduction factor, and HPD the highest posterior density
+interval. A ``time unit'' is whatever unit is used consistently for ages and
+rates; the software does not convert between years and millions of years.
+Menu paths use $\rightarrow$, and an ellipsis means that a control opens a
+dialog.
+
 \printbibliography
 
 \end{document}

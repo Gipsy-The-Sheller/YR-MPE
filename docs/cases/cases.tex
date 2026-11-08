@@ -1,130 +1,790 @@
 \documentclass[11pt]{report}
 \input{shared/preamble}
-
-\title{YR-MPE Case Studies}
-\author{Zhi-Jie Xu}
-\date{Draft --- \today}
+\graphicspath{{cases/figures/}{figures/}}
 
 \begin{document}
-\maketitle
+\supportingtitlepage{YR-MPE Case Studies}
+  {Worked examples for molecular phylogenetics and evolution analysis}
 \tableofcontents
 
 \chapter{Single-gene maximum-likelihood phylogeny}
 \section{Question}
-\section{Data}
-\section{Before you start}
-\section{Steps}
-\section{Parameter rationale}
-\section{Expected output}
-\section{Interpretation}
-\section{Pitfalls}
-\section{Citation}
-\todo{Base on \texttt{YR-MPE.wiki/workflow/single\_gene\_phylogeny.md}
-(389 lines, 10 screenshots). Replace wiki UI strings with the current code.}
+Can a single non-coding marker recover the relationships among closely
+related species when the marker is variable, contains indels, and includes
+sequences of unknown orientation?
 
-\chapter{Concatenated multi-gene phylogeny}
-\section{Question}
 \section{Data}
+The example follows the ITS2 data set of Wu and Liu (2019): 25 sequences from
+the nuclear ITS2 region, spanning \textit{Euconulus}, \textit{Vitrea},
+\textit{Oxychilus}, \textit{Sinoxychilus} and the outgroup
+\textit{Pseudiberus}. The GenBank accessions are MK299689--MK299747,
+AY014113--AY014116, JF837183 and MN056414--MN056417. The sequences are
+unaligned and include the 5.8S/28S flanks; the tutorial analyses the ITS2
+region between them.
+
 \section{Before you start}
+Create a persistent workspace. ITS2 is non-coding, so use MAFFT, MUSCLE~5 or
+Clustal Omega; MACSE is for protein-coding sequences and is not appropriate
+here.
+
 \section{Steps}
+\begin{enumerate}
+  \item Import \texttt{its2\_raw.fasta} with \textbf{ALIGN} $\rightarrow$
+  \textbf{Open Sequence Files}. Confirm that 25 sequences appear in the
+  workspace.
+  \item Open \textbf{ALIGN} $\rightarrow$ \textbf{Align by} $\rightarrow$
+  \textbf{MAFFT}. In \textbf{Advanced Parameters}, set \textbf{Direction
+  adjustment} to \texttt{--adjustdirection}; the ITS2 records come from
+  mixed sources and need not share an orientation. Run MAFFT and import the
+  alignment.
+  \item Trim with \textbf{ALIGN} $\rightarrow$ \textbf{Trim Alignment by}
+  $\rightarrow$ \textbf{TrimAl}, mode \texttt{-automated1}. The example
+  alignment contracts from 1,458 to 1,408 columns; inspect the preview before
+  importing.
+  \item Optionally run \textbf{DISTANCE} $\rightarrow$ \textbf{Calculate \&
+  Plot Substitution Saturation} with pairwise deletion. ITS2 is variable but
+  should not show the near-complete transition/transversion overlap of a
+  saturated marker.
+  \item Run \textbf{MODEL} $\rightarrow$ \textbf{Find Best Substitution Model
+  (ML)} with BIC. The example selects \texttt{TIM2+F+G4}.
+  \item Run \textbf{PHYLOGENY} $\rightarrow$ \textbf{Maximum Likelihood}
+  $\rightarrow$ \textbf{IQ-TREE 3} with the selected model and UFBoot (1,000
+  replicates). Alternatively leave the model on \texttt{AUTO} and let
+  IQ-TREE run ModelFinder internally.
+  \item Open the tree in IcyTree. Use \textbf{Style} $\rightarrow$
+  \textbf{Internal node text} $\rightarrow$ \textbf{Label} to show UFBoot
+  support. Reroot at the \textit{Pseudiberus} clade (MN056414 and MN056415)
+  by hovering the branch and Shift-clicking.
+  \item Export the tree as Newick/NEXUS for reuse or as SVG/PNG for a figure.
+\end{enumerate}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{case_single_gene.pdf}
+  \caption{Single-gene ITS2 case. (A) The 25-sequence alignment after MAFFT
+  with \texttt{--adjustdirection} and TrimAl. (B) ModelFinder BIC table; the
+  selected model is TIM2+F+G4. (C) IQ-TREE 3 maximum-likelihood tree with
+  UFBoot support, displayed in IcyTree.}
+  \label{fig:case-single-gene}
+\end{figure}
+
+\subsection{Alternative ML engine: RAxML-NG}
+RAxML-NG is a second maximum-likelihood engine for the same single-gene
+alignment. It is not a separate case: use the same trimmed alignment and the
+same model-selection decision, then choose the engine that fits the analysis.
+
+\begin{itemize}
+  \item Open \textbf{PHYLOGENY} $\rightarrow$ \textbf{Maximum Likelihood}
+        $\rightarrow$ \textbf{RAxML-NG}. Load the alignment and choose a
+        RAxML-NG-compatible model. Model names are not identical to IQ-TREE:
+        a model selected as \texttt{TIM2+F+G4} in ModelFinder may need a
+        compatible RAxML-NG model or a ModelTest-NG run.
+  \item Set bootstraps with \texttt{--bs-trees} (1,000 for a final tree) and
+        set threads explicitly. For partitions, provide a RAxML partition
+        file or build the partitioned matrix in the workbench.
+  \item Root the tree after inference at the outgroup; RAxML-NG returns an
+        unrooted ML tree.
+\end{itemize}
+
+Use IQ-TREE when ModelFinder, partition merging and a single model-selection
+report are the priority. Use RAxML-NG when its model set or its throughput is
+preferred. Report the engine, model string and bootstrap method; do not mix
+support values from the two programs in one figure.
+
 \section{Parameter rationale}
+ITS2 is non-coding and length-variable, so a generic nucleotide aligner with
+direction correction is appropriate. \texttt{-automated1} removes
+gap-rich, low-information columns without manual, non-reproducible trimming.
+BIC is the default ModelFinder criterion and penalises the extra parameters of
+the TIM2+F+G4 model. UFBoot is fast but should use at least 1,000 replicates
+for a final tree.
+
 \section{Expected output}
+A 25-taxon alignment, a ModelFinder table, an IQ-TREE report and a Newick
+tree. The tree should contain all 25 accessions; the outgroup clade
+MN056414/MN056415 is used only for display rooting.
+
 \section{Interpretation}
+The tree shows the ITS2 relationships recovered under the selected model.
+Support values are UFBoot percentages, not posterior probabilities. Because
+ITS2 is a single non-coding marker, the topology is a hypothesis for the
+sampled region, not a species tree; concordant nuclear and mitochondrial
+markers are needed before taxonomic conclusions.
+
 \section{Pitfalls}
+Do not align ITS2 with MACSE. Check for reverse-complemented records before
+trusting a gap-rich alignment; \texttt{--adjustdirection} is the fast fix.
+Do not over-trim: removing too many variable columns lowers likelihood and
+can collapse the ingroup. Rooting is a display operation for time-reversible
+models; it does not change the unrooted likelihood.
+
 \section{Citation}
-\todo{Base on \texttt{multi\_gene\_phylogeny.md}. Use the 20 simulated loci in
-\texttt{exp/loci*.phy} or a smaller public dataset.}
+MAFFT \cite{mafft}; TrimAl \cite{trimal}; IQ-TREE 3 \cite{iqtree3};
+IcyTree (Vaughan, 2017); the ITS2 data are from Wu and Liu (2019).
+
+\chapter{Concatenated multi-gene phylogeny from Sanger amplicons}
+\section{Question}
+Can a partitioned alignment assembled from raw Sanger reads recover the
+species tree when one locus is incomplete and some reads have an unknown
+orientation?
+
+\section{Data}
+The example uses \texttt{benchmark/open\_tasks/task02}: 12 taxa, three
+amplicons spanning the ribosomal cluster (18S, ITS and 28S), and one missing
+ITS record (\texttt{B3421}). The FASTAs are unaligned amplicon exports; the
+ITS partition contains high-indel regions.
+
+\section{Before you start}
+Open a persistent workspace (\textbf{WORKSPACE} $\rightarrow$ \textbf{Select
+Workspace} $\rightarrow$ \textbf{Select Folder}), because the case keeps the
+per-locus alignments and the concatenated matrix as separate workspace items.
+
+\section{Steps}
+\begin{enumerate}
+  \item Open \textbf{WORKSPACE} $\rightarrow$ \textbf{Dataset} $\rightarrow$
+  \textbf{Create by SeqMatrix}. Import the three FASTA files with
+  \textbf{Import from Sequences}. Drag each file's sequences into the
+  corresponding partition column and rename the columns \texttt{18S},
+  \texttt{ITS} and \texttt{28S}. The empty \texttt{B3421} ITS cell is left
+  blank; SeqMatrix will encode it as \texttt{?} in the supermatrix.
+  \item Click \textbf{Import as a dataset} to send the matrix and its
+  partition definitions to the workbench.
+  \item Align each partition with \textbf{ALIGN} $\rightarrow$ \textbf{Align
+  by} $\rightarrow$ \textbf{MAFFT}. In \textbf{Advanced Parameters}, set
+  \textbf{Direction adjustment} to \textbf{Adjust direction}
+  (\texttt{--adjustdirection}). This detects reads that were returned in the
+  reverse orientation and reverse-complements them before alignment. Keep the
+  option off for protein data.
+  \item Trim the ITS alignment with \textbf{ALIGN} $\rightarrow$ \textbf{Trim
+  Alignment by} $\rightarrow$ \textbf{TrimAl} using \texttt{-automated1}, and
+  inspect the trimming report before accepting it.
+  \item Open \textbf{Dataset} $\rightarrow$ \textbf{Sequence Concatenator},
+  add the three aligned partitions, and export the concatenated FASTA plus a
+  partitioned NEXUS charset file. Confirm that the concatenation order and
+  the taxon headers match across partitions.
+  \item Run \textbf{MODEL} $\rightarrow$ \textbf{Find Best Substitution
+  Model (ML)} in partition mode with edge-linked proportional branch lengths,
+  then \textbf{PHYLOGENY} $\rightarrow$ \textbf{Maximum Likelihood} $\rightarrow$
+  \textbf{IQ-TREE 3} with the resulting partition scheme and UFBoot.
+\end{enumerate}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{case_sanger.pdf}
+  \caption{Multi-locus Sanger case. (A) SeqMatrix with 12 taxa and the 18S,
+  ITS and 28S partitions; the missing ITS amplicon is retained as an empty
+  cell. (B) MAFFT advanced parameters with \texttt{--adjustdirection}
+  selected. (C) Concatenated maximum-likelihood tree inferred with IQ-TREE 3
+  and displayed in IcyTree.}
+  \label{fig:case-sanger}
+\end{figure}
+
+\section{Parameter rationale}
+\texttt{--adjustdirection} is appropriate because Sanger reads are often
+assembled without orientation control; the option is limited to nucleotide
+data and requires at least two sequences. Partitioned model selection is used
+because the three amplicons differ in substitution process and gap
+distribution. \texttt{-automated1} removes the most aggressively gapped
+ITS columns while retaining parsimony-informative sites.
+
+\section{Expected output}
+A 12-taxon concatenated alignment, a partition file, an IQ-TREE report and a
+rooted-for-display Newick tree. The tree should contain all 12 taxon labels;
+the missing ITS record must not appear as an empty taxon.
+
+\section{Interpretation}
+The case demonstrates the intended handoff: unaligned reads $\rightarrow$
+partitioned matrix $\rightarrow$ per-locus alignments $\rightarrow$ trimmed
+supermatrix $\rightarrow$ model $\rightarrow$ tree. The topology should be
+read as a demonstration on a small simulated/benchmark data set, not as a
+taxonomic conclusion.
+
+\section{Pitfalls}
+Taxon matching in the concatenator uses the exact FASTA header. Rename
+headers before concatenation if the source files disagree. Do not
+concatenate unaligned amplicons. Check the \texttt{\_R\_} prefixes that MAFFT
+adds when it reverse-complements a read, and verify that the ITS alignment
+does not retain long gap-only blocks.
+
+\section{Citation}
+MAFFT \cite{mafft}; TrimAl \cite{trimal};
+IQ-TREE 3 \cite{iqtree3}; SeqMatrix is part of YR-MPE.
+
+\chapter{Comparative organelle genomics}
+\section{Question}
+How do gene order and annotation differ among annotated organelle genomes,
+and how can a standardized per-locus data set be exported for phylogeny?
+
+\section{Data}
+Four complete chloroplast genomes from the test data:
+\textit{Eucalyptus grandis} (HM347959), \textit{Sesamum indicum} (JN637766),
+\textit{Andrographis paniculata} (KF150644) and \textit{Camellia pubicosta}
+(KJ806277). Each GenBank record contains gene, CDS, tRNA and rRNA features.
+
+\section{Before you start}
+Keep the GenBank files as one folder. SeqDBG reads the feature table and does
+not need an external alignment program.
+
+\section{Steps}
+\begin{enumerate}
+  \item Open \textbf{WORKSPACE} $\rightarrow$ \textbf{Dataset} $\rightarrow$
+  \textbf{Create by SeqDBG}. Add the four \texttt{.gb} files with the
+  \textbf{+} button.
+  \item In \textbf{Taxon Management}, confirm that all four genome identifiers
+  are present. In the \textbf{Gene Statistics} table, inspect the left/right
+  neighbour counts; a red neighbour count marks a rearrangement or an
+  annotation inconsistency.
+  \item Click a gene row (for example \texttt{ycf15}) to draw its
+  left--current--right adjacency Sankey plot on the \textbf{Plot} tab.
+  \item Review the \textbf{Standardization} tab. The built-in rules map common
+  aliases such as \texttt{cox1} to \texttt{COX1}; add project-specific rules
+  if the annotations use different names for the same gene.
+  \item On the \textbf{Dataset} tab choose \textbf{Nucleotide} (CDS, tRNA,
+  rRNA) or \textbf{Amino Acid} (CDS), select all loci or a custom set, and
+  export FASTA files or send the dataset to the workbench.
+  \item Align the CDS partitions with MACSE~2 (or MAFFT for non-coding
+  partitions), trim, concatenate, and infer the species tree with IQ-TREE~3.
+\end{enumerate}
+
+\subsection{Alternative path: One-Step OrthoFinder}
+SeqDBG is the right tool when the annotations share a usable gene vocabulary
+and the question is about gene order or annotation consistency. When the
+input is a batch of genomes with heterogeneous or anonymous annotations, use
+the \textbf{One-Step OrthoFinder for Organelle Genomes} plugin instead.
+
+\begin{enumerate}
+  \item Open \textbf{WORKSPACE} $\rightarrow$ \textbf{Dataset} $\rightarrow$
+  \textbf{One-Step OrthoFinder}. Select a folder of GBFF/GB/GBK files, one
+  file per organelle genome, or a multi-record GenBank file. Set the genetic
+  code, pseudogene handling and internal-stop policy.
+  \item The plugin parses the CDS features, translates them, and writes
+  \texttt{proteomes/<sample>.faa}, \texttt{cds/<sample>.fna} and
+  \texttt{cds\_map.tsv}. It then runs OrthoFinder and identifies single-copy
+  orthogroups.
+  \item In the output table, inspect the single-copy orthogroups and the
+  species/CDS/OG summary. For each orthogroup the plugin writes a protein
+  FASTA, an in-frame CDS FASTA and a mapping table.
+  \item Send the CDS orthogroups to MACSE~2 for codon-aware alignment, trim
+  with TrimAl, concatenate, and infer the tree with IQ-TREE~3 as above.
+\end{enumerate}
+
+The two routes answer different questions. SeqDBG visualises and exports
+\emph{annotated features}; OrthoFinder infers \emph{orthology from sequence
+similarity} and is therefore better when gene names are inconsistent or when
+the annotations contain duplicated copies. Use SeqDBG first to understand the
+gene-order variation, then OrthoFinder for the orthology-based matrix.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{case_organelle.pdf}
+  \caption{Comparative organelle case. (A) SeqDBG gene-statistics table and
+  adjacency Sankey for four annotated chloroplast genomes; the selected gene
+  and its left/right neighbours are highlighted. (B) Species tree recovered
+  from the linked organelle CDS workflow and displayed in IcyTree.}
+  \label{fig:case-organelle}
+\end{figure}
+
+\section{Parameter rationale}
+SeqDBG is used before alignment because organelle annotations frequently
+differ in gene naming and boundaries. Standardizing names and inspecting
+adjacency first prevents non-orthologous CDS sequences from entering the
+concatenation. MACSE is preferred for CDS because it aligns at the codon
+level and flags frameshifts and premature stops.
+
+\section{Expected output}
+A standardized per-locus FASTA set with one sequence per genome and locus, a
+gene inventory, and a species tree. The SeqDBG table should show the selected
+gene in all four genomes; missing genes are visible as reduced taxon counts.
+
+\section{Interpretation}
+Conserved adjacencies support collinearity; red or asymmetric neighbour
+counts flag rearrangements, duplicated annotations or naming differences.
+The tree demonstrates the workflow, not the organismal phylogeny.
+
+\section{Pitfalls}
+Amino-acid export requires a \texttt{/translation} qualifier on every CDS;
+verify this before export. Nucleotide export skips records whose identifier
+contains \texttt{\_protein}. Do not treat a whole organelle contig as one
+locus; the point of the case is per-feature orthology.
+
+\section{Citation}
+SeqDBG and YR-MPE; MACSE~2 \cite{macse}; IQ-TREE~3
+\cite{iqtree3}.
 
 \chapter{Distance-based phylogeny}
 \section{Question}
-\section{Data}
-\section{Before you start}
-\section{Steps}
-\section{Parameter rationale}
-\section{Expected output}
-\section{Interpretation}
-\section{Pitfalls}
-\section{Citation}
-\todo{New case: p-distance / ML distance -> saturation -> DecentTree.
-Explain negative branch lengths; show the diagnostic panel.}
+When is a distance tree an appropriate first look at a data set, and how do
+p-distances, model-corrected distances and substitution saturation affect the
+result?
 
-\chapter{RAxML-NG maximum likelihood}
-\section{Question}
 \section{Data}
-\section{Before you start}
-\section{Steps}
-\section{Parameter rationale}
-\section{Expected output}
-\section{Interpretation}
-\section{Pitfalls}
-\section{Citation}
-\todo{New case after the RAxML-NG plugin lands: model, partition,
-bootstrap, outgroup.}
+\texttt{examples/cases/distance/} contains the trimmed ITS2 alignment from
+Chapter~1 and two distance matrices: the IQ-TREE \texttt{.mldist} file and an
+eight-taxon square subset for display. The alignment is 25 taxa $\times$ 1,408
+columns; the subset keeps five ingroup accessions, \textit{Vitrea} and the two
+\textit{Pseudiberus} outgroup sequences.
 
-\chapter{Bayesian inference and convergence}
-\section{Question}
-\section{Data}
 \section{Before you start}
+Use a persistent workspace. Distance methods need a rectangular alignment;
+remove or mask columns with excessive ambiguity first. Decide whether gaps
+are handled by pairwise or complete deletion and keep that choice fixed across
+the comparison.
+
 \section{Steps}
+\begin{enumerate}
+  \item Import \texttt{its2\_trimmed.fasta} with \textbf{ALIGN} $\rightarrow$
+  \textbf{Open Sequence Files}.
+  \item Run \textbf{DISTANCE} $\rightarrow$ \textbf{Compute Uncorrected
+  Distances (p-distance)} with pairwise deletion. Inspect the matrix; p-distance
+  is the raw proportion of differing sites and does not correct multiple hits.
+  \item Run \textbf{DISTANCE} $\rightarrow$ \textbf{Compute Pairwise
+  Distances (ML)} with IQ-TREE 3, model \texttt{TIM2+F+G4} and the same gap
+  policy. The plugin writes a \texttt{.mldist} matrix and previews it.
+  \item Run \textbf{DISTANCE} $\rightarrow$ \textbf{Calculate \& Plot
+  Substitution Saturation} with pairwise deletion. Read the Ti/Tv versus
+  p-distance plot and the C-value; a strongly saturating marker should not be
+  used for deep nodes.
+  \item Open \textbf{PHYLOGENY} $\rightarrow$ \textbf{Distance Methods}
+  $\rightarrow$ \textbf{DecentTree}. Select the ML distance matrix and choose
+  \texttt{BIONJ-R} (or another NJ variant).
+  \item Inspect the tree in IcyTree. If the bundled DecentTree build fails on
+  a particular matrix, use the IQ-TREE NJ tree from the same matrix as a
+  fallback and record which program produced the figure.
+\end{enumerate}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.78\linewidth]{case_distance.pdf}
+  \caption{ITS2 distance case. The eight-taxon subset of the ML distance
+  matrix under TIM2+F+G4. The full matrix is in
+  \texttt{examples/cases/distance/its2.mldist}.}
+  \label{fig:case-distance}
+\end{figure}
+
 \section{Parameter rationale}
+p-distance is fast and assumption-free but underestimates substitutions when
+multiple hits are common. ML distance uses the substitution model and is the
+better input for a distance tree when the model is adequate. Pairwise
+deletion retains more information in a gappy alignment; complete deletion is
+cleaner but can remove most of the variable sites. BIONJ is a fast
+neighbour-joining variant; it returns an unrooted tree.
+
 \section{Expected output}
+A p-distance matrix, an ML distance matrix, a saturation plot and a Newick
+tree. The tree may contain negative branch lengths. This is a property of
+fitting an additive tree to a non-additive distance matrix, not evidence of
+negative evolutionary time; do not pass such a tree to a dating program
+without correcting or constraining the branch lengths.
+
 \section{Interpretation}
+A distance tree is a summary of pairwise similarity, not a full likelihood
+analysis. It is useful for a quick check of taxon placement, for identifying
+obvious mislabels and for producing a starting tree. If the ML and p-distance
+trees disagree strongly, inspect the alignment and the saturation plot before
+choosing either.
+
 \section{Pitfalls}
+Do not compare distances computed under different gap policies. Do not use a
+saturated marker for a deep divergence. Do not interpret a negative branch as
+a biological result. If DecentTree rejects a lower-triangular \texttt{.mldist}
+file, convert it to a square matrix first; the example includes both forms.
+
 \section{Citation}
-\todo{Base on \texttt{bayesian\_inference\_tutorial.md} and
-\texttt{mixed\_model\_phylobayes.md}; include MiniTracer ESS/PSRF.}
+IQ-TREE 3 \cite{iqtree3}; DecentTree \cite{decenttree}; the ITS2 data are from
+Wu and Liu (2019).
+
+\chapter{Bayesian inference with MrBayes}
+\section{Question}
+How can a MrBayes analysis be configured with independent runs and multiple
+Metropolis-coupled chains, and how are its traces checked before the
+consensus tree is accepted?
+
+\section{Data}
+The example uses \texttt{dev/fig3/mrbayes/locus001.nex}, a 10-taxon nucleotide
+alignment with 1,000 sites. The two MrBayes runs in the same folder
+(\texttt{locus001.nex.run1.p} and \texttt{locus001.nex.run2.p}) are the input
+for the diagnostics.
+
+\section{Before you start}
+Select a persistent workspace. MrBayes writes checkpoint, \texttt{.p},
+\texttt{.t} and consensus files during the run; a temporary workspace is not
+sufficient. Keep MPI and BEAGLE enabled only when the runtime check passes.
+
+\section{Steps}
+\begin{enumerate}
+  \item Open \textbf{PHYLOGENY} $\rightarrow$ \textbf{Bayesian Inference}
+  $\rightarrow$ \textbf{MrBayes3-MPI-BEAGLE}. Load
+  \texttt{locus001.nex}. The plugin reads the existing MrBayes block or
+  converts the alignment to an interleaved NEXUS block.
+  \item Set \textbf{Type} to \texttt{DNA}, the substitution model to
+  \texttt{GTR} (six rate classes) and state frequencies to
+  \texttt{estimated(dirichlet)}. Keep \textbf{Gamma (+G)} with four
+  categories.
+  \item In \textbf{MCMC \& Run Settings}, set \textbf{Generations} to
+  30,000, \textbf{Sampling Freq.} to 100, \textbf{Runs} to 2 and
+  \textbf{Chains} to 4. Set the burn-in fraction after inspecting the traces;
+  do not guess it before the run.
+  \item Run MrBayes. When it finishes, open the consensus tree in IcyTree and
+  confirm that the taxon set and support labels are present.
+  \item Open \textbf{PHYLOGENY} $\rightarrow$ \textbf{Bayesian Inference}
+  $\rightarrow$ \textbf{MCMC Diagnostics (MiniTracer)}. Load both
+  \texttt{.p} files and set the burn-in fraction (0.100 in the example).
+  \item Inspect the ESS column. Rows are green at ESS $\ge 200$, yellow at
+  100--200 and red below 100. Select \texttt{lnLike} to see its
+  post-burn-in trace, marginal density, 95\% HPD and summary statistics.
+  \item Select both files and open \textbf{Compare 2 Chains}. The table
+  reports each chain's sample count and mean, the correlation coefficient
+  \textbf{R}, and the Gelman--Rubin \textbf{PSRF (R-hat)}. Values close to 1
+  indicate agreement between runs.
+\end{enumerate}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{case_mrbayes.pdf}
+  \caption{MrBayes convergence case. (A) MiniTracer single-chain view for
+  \texttt{lnLike}: post-burn-in trace, marginal density, ESS and 95\% HPD.
+  (B) Two-run comparison with the Gelman--Rubin PSRF (R-hat) in the table and
+  plot title.}
+  \label{fig:case-mrbayes}
+\end{figure}
+
+\section{Parameter rationale}
+Two independent runs are the minimum needed to separate within-chain from
+between-chain variance. Four chains per run allow Metropolis coupling to
+escape local optima. GTR + $\Gamma_4$ is a flexible nucleotide model; the
+gamma categories absorb rate variation among sites. MPI and BEAGLE accelerate
+the likelihood without changing the model.
+
+\section{Expected output}
+Two \texttt{.p} traces, two \texttt{.t} tree files, a consensus tree and
+MiniTracer diagnostics. A converged analysis has ESS $\ge 200$ for every
+reported parameter, stable traces without trends, and PSRF close to 1.
+
+\section{Interpretation}
+ESS measures within-chain mixing; PSRF compares between-chain and
+within-chain variance. Neither statistic proves that the model is correct.
+The PSRF in MiniTracer is a per-parameter two-chain R-hat, not a multivariate
+PSRF over the whole model. Read it together with the trace, the density and
+the MrBayes \texttt{sumt} output.
+
+\section{Pitfalls}
+A short chain can look stationary while ESS is still far below 200. Burn-in is
+entered as a fraction, not a generation count. Do not compare runs with
+different parameter sets. MiniTracer truncates the two chains to the shorter
+post-burn-in length before computing PSRF, so unequal run lengths are handled
+conservatively.
+
+\section{Citation}
+MrBayes \cite{mrbayes}; MiniTracer is part of YR-MPE.
+
+\chapter{Inferring deep evolution with infinite mixture models}
+\section{Question}
+How can a site-heterogeneous infinite-CAT model be used for a deep
+phylogenetic problem, and how is the resulting chain summarised?
+
+\section{Data}
+\texttt{dev/cases/bayes/prmA.phy} is a 55-taxon, 411-amino-acid alignment
+used to demonstrate the PhyloBayes-MPI infinite CAT configuration. The
+alignment is deliberately small enough to run on a workstation; a production
+analysis should use the full marker set and a much longer chain.
+
+\section{Before you start}
+Use a persistent workspace and check that the PhyloBayes-MPI and
+\texttt{mpiexec} paths resolve. CAT is computationally expensive; budget more
+time than for a nucleotide GTR analysis of the same size.
+
+\section{Steps}
+\begin{enumerate}
+  \item Open \textbf{PHYLOGENY} $\rightarrow$ \textbf{Bayesian Inference}
+  $\rightarrow$ \textbf{PhyloBayes-MPI}. Load \texttt{prmA.phy} as a PHYLIP
+  alignment.
+  \item Enable \textbf{Site Heterogeneity Model} and select \textbf{Infinite
+  (CAT)}. Keep \textbf{Rate Heterogeneity} on with four gamma categories and
+  choose \textbf{GTR} for the exchangeabilities.
+  \item Set \textbf{Number of Parallel Chains} to 2 or more and set a chain
+  length appropriate for the data. For a real analysis, increase the
+  generations until the traces and \texttt{bpcomp} agree; do not stop at the
+  short demonstration length.
+  \item Run PhyloBayes-MPI. When the chains finish, open \textbf{Compare \&
+  Consensus}, load the chains from the results, and run \textbf{bpcomp} to
+  obtain the majority-rule consensus and the bipartition list.
+  \item Treat \texttt{maxdiff} below 0.1 as agreement between chains. Inspect
+  the consensus tree in IcyTree and export it as Newick/NEXUS.
+  \item If the chains disagree, extend the run, increase the burn-in, or add
+  chains; do not average chains that have not converged.
+\end{enumerate}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.72\linewidth]{case_infcat_setup.pdf}
+  \caption{PhyloBayes-MPI configured with GTR, four discrete gamma categories
+  and the infinite CAT mixture. Two independent chains are requested; the
+  chain length shown is a demonstration value, not a convergence guarantee.}
+  \label{fig:case-infcat}
+\end{figure}
+
+\section{Parameter rationale}
+The infinite CAT mixture lets each site draw from a potentially unbounded
+number of equilibrium frequency profiles. This is useful when the data are
+site-heterogeneous and long-branch attraction is a concern. GTR supplies the
+exchangeability matrix; the discrete gamma handles rate variation. CAT is a
+mixture of profiles, not a partition model, so it does not require a
+partition file.
+
+\section{Expected output}
+Two or more PhyloBayes chains, a consensus tree, a bipartition list and a
+\texttt{bpcomp} \texttt{maxdiff} close to zero. A converged analysis has
+stable traces and agreement between independent chains.
+
+\section{Interpretation}
+The CAT model is a statement about site heterogeneity, not a guarantee that
+the topology is correct. Compare the result with a homogeneous model and with
+a partition model; a topology that appears only under CAT is a hypothesis
+that needs independent support. Read \texttt{maxdiff} together with the
+trace plots, not as a substitute for them.
+
+\section{Pitfalls}
+CAT is slow; a short chain may look stationary while the tail is still
+moving. Do not confuse infinite CAT with finite nCAT: nCAT fixes the maximum
+number of profiles. Do not compare chains with different parameter sets or
+different taxon sets.
+
+\section{Citation}
+PhyloBayes \cite{phylobayes}; the CAT model follows Lartillot and Philippe
+(2004).
 
 \chapter{Species tree, concordance factors, and reconciliation}
 \section{Question}
+How do gene-tree and site-based concordance factors localise conflict on a
+species tree, and how is a gene tree reconciled with that species tree?
+
 \section{Data}
+\texttt{examples/cases/species\_tree/} contains a simulated 10-taxon species
+tree (\texttt{species\_ils.nwk}), 150 gene trees simulated under incomplete
+lineage sorting (\texttt{gene\_trees\_150.trees}), and the gCF, sCF and MSC
+diagnostic tables. A duplicated gene tree
+(\texttt{dup\_gene.nwk}) is included for the TreeRecs exercise.
+
 \section{Before you start}
+All gene trees must use the same taxon labels as the species tree. ASTRAL
+treats gene trees as unrooted; the species tree is used as a fixed tree for
+gCF and sCF. If wASTRAL is requested, the gene-tree node labels must be
+numeric; trees without numeric labels are rejected rather than silently
+downweighted.
+
 \section{Steps}
+\begin{enumerate}
+  \item Open \textbf{SPECIES TREE} $\rightarrow$ \textbf{ASTRAL-IV} and load
+  the 150 gene trees. Run ASTRAL-IV, then repeat with wASTRAL if the gene
+  trees have numeric support labels. ASTRAL-Hybrid is a wASTRAL preset, not a
+  third method.
+  \item Open \textbf{SPECIES TREE} $\rightarrow$ \textbf{Gene Concordance
+  (gCF)} with the species tree and the same gene trees. Inspect the gCF table
+  and the split names; every split is named by its smaller taxon side.
+  \item Open \textbf{SPECIES TREE} $\rightarrow$ \textbf{Site Concordance
+  (sCF)} with the species tree and the alignment used for the gene trees.
+  Use the likelihood estimator and keep the quartet count fixed.
+  \item Open \textbf{SPECIES TREE} $\rightarrow$ \textbf{MSC Diagnostics
+  (gCF + ASTER CU)}. Read the Table, Overview, Simplex and Bipartition info
+  tabs together. Each simplex point is an internal split; a 10-taxon tree has
+  at most seven points.
+  \item Open \textbf{SPECIES TREE} $\rightarrow$ \textbf{TreeRecs 1.2} with
+  \texttt{dup\_gene.nwk} and the species tree. Inspect the reconciliation SVG;
+  squares mark duplications and crosses mark losses. Export the Newick event
+  tree if needed.
+\end{enumerate}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{case_species_tree.pdf}
+  \caption{Species-tree case. (A) ASTRAL-IV species tree from the 150-gene-tree
+  ILS data set. (B) gCF/qCF simplex; each point is an internal split and colour
+  encodes gDFP. (C) TreeRecs reconciliation of a duplicated gene tree, with
+  duplication and loss symbols.}
+  \label{fig:case-species-tree}
+\end{figure}
+
 \section{Parameter rationale}
+ASTRAL-IV is the standard unweighted quartet method. wASTRAL downweights
+poorly supported quartets and long branches; ASTRAL-Hybrid is its
+support/length preset. gCF measures the proportion of decisive gene trees
+supporting a split; sCF measures the same idea at the site level. They answer
+different questions and should not be treated as branch support.
+TreeRecs is used after the species tree is accepted; it explains a gene tree,
+not the species tree itself.
+
 \section{Expected output}
+A species tree, gCF/sCF tables, a simplex view, a bipartition matrix and a
+reconciliation with duplication/loss events. The tables must use the same
+split names as the species tree. ASTRAL/wASTRAL CU cells are blank when the
+gCF is at or below 1/3 or exactly 100\%; those values are not estimable.
+
 \section{Interpretation}
+A split near the gCF vertex is concordant; a split near a gDF vertex is in
+conflict. A high gDFP colour value means polyphyly or other non-NNI conflict,
+not a clean alternative topology. ASTRAL-IV qCF is a quartet concordance
+factor, not a support value. The TreeRecs events are hypotheses under the
+chosen gene/species tree pair.
+
 \section{Pitfalls}
+Do not read the simplex as a posterior distribution; it has one point per
+split, not one point per gene tree. Do not compare simplexes from different
+taxon sets. Do not force a CU inversion when gCF $\le 1/3$. A wASTRAL run
+without numeric labels will be rejected; use ASTRAL-IV or add valid labels.
+
 \section{Citation}
-\todo{Base on \texttt{aster\_tutorial.md}; add sCF/gCF and TreeRecs once
-available.}
+ASTRAL/ASTER \cite{astral}; wASTRAL (Zhang and Mirarab, 2022); IQ-TREE 3
+\cite{iqtree3}; TreeRecs is described in the YR-MPE plugin documentation.
 
 \chapter{Molecular dating}
 \section{Question}
+How can a fixed phylogeny be converted into a time-scaled tree with a root
+calibration, and what is the difference between least-squares dating and a
+Bayesian clock analysis?
+
 \section{Data}
+\texttt{examples/cases/dating/} contains a simulated six-taxon tree
+(\texttt{simulated6.nwk}) with branch lengths in substitutions and a date
+file (\texttt{simulated6.dates}) that sets all tips to 0 and the root to
+$-60$ Mya. The expected output is \texttt{simulated6\_dated.nexus}, a NEXUS
+tree with \texttt{[\&date="..."]} annotations on every node.
+
 \section{Before you start}
+Use a persistent workspace. Decide the time unit once (years, Mya or
+million years) and keep it for every calibration. Do not date a tree with
+negative or zero branches without inspecting it; LSD2 collapses very short
+branches by default. If dates are years before present, the root age is
+negative and the tips are 0; the opposite sign produces a temporal-constraint
+conflict.
+
 \section{Steps}
+\begin{enumerate}
+  \item Import \texttt{simulated6.nwk} with \textbf{ALIGN} $\rightarrow$
+  \textbf{Open Sequence Files}. Root the tree at the outgroup or let LSD2
+  estimate the root.
+  \item Open \textbf{CLOCK} $\rightarrow$ \textbf{LSD2}. Load the tree and set
+  the sequence length to 1,000.
+  \item Enable \textbf{Use tip dates} and set the tips date to 0. Add a root
+  calibration: \textbf{Calibration points} $\rightarrow$ \textbf{+} $\rightarrow$
+  \textbf{Edit}, select all six taxa, choose a fixed date and enter $-60$.
+  \item Optionally enable \textbf{Calculate confidence intervals} with the
+  default lognormal standard deviation $q=0.2$. The interval is generated by
+  simulating branch-length noise; it is not a posterior distribution.
+  \item Run LSD2. Inspect the dated NEXUS tree and the rate estimate in the
+  report. The example gives a rate of about $3.30\times10^{-3}$ substitutions
+  per site per time unit and a root date of $-60$.
+  \item For a full Bayesian alternative, open \textbf{CLOCK} $\rightarrow$
+  \textbf{MrBayes3-MPI-BEAGLE}, enable \textbf{Phylogenetic Dating}, choose a
+  strict or relaxed clock, add the same calibration and run the chain.
+\end{enumerate}
+
 \section{Parameter rationale}
+LSD2 is a least-squares method: it finds a rate and node dates that minimise
+the squared deviation from the observed branch lengths. It is fast and needs
+only a fixed tree and a few calibrations. MrBayes co-estimates topology and
+dates and returns credible intervals, at the cost of a much longer MCMC run.
+Use a strict clock when the rate is expected to be constant; use a relaxed
+clock (IGR, CPP or TK02) when branch-rate variation is plausible.
+
 \section{Expected output}
+A time-scaled tree with node dates, a rate estimate and, if requested,
+confidence intervals. The date annotations should increase from the tips
+(0) to the root ($-60$). A root date that is younger than a tip, or a
+calibration that conflicts with another calibration, produces an error rather
+than a dated tree.
+
 \section{Interpretation}
+The dated tree is a hypothesis conditional on the tree, the calibrations and
+the clock model. LSD2's intervals are simulation-based and should not be read
+as Bayesian credible intervals. MrBayes intervals are posterior summaries but
+still depend on the priors and the calibrations.
+
 \section{Pitfalls}
+Do not mix time units. Do not pass a distance tree with negative branches to a
+dating program. Do not use a point calibration when the fossil only provides a
+minimum bound. Do not compare rates from analyses with different time units or
+different root calibrations.
+
 \section{Citation}
-\todo{New case: LSD2 / MrBayes dating; MCMCTree approximate + IQ2MC once
-implemented.}
+LSD2 \cite{lsd2}; MrBayes \cite{mrbayes}; the example tree is simulated for
+this manual.
 
 \chapter{Selection analysis}
 \section{Question}
-\section{Data}
-\section{Before you start}
-\section{Steps}
-\section{Parameter rationale}
-\section{Expected output}
-\section{Interpretation}
-\section{Pitfalls}
-\section{Citation}
-\todo{New case after the selection module lands: NG86/YN00, z-test, and
-the CodeML/HyPhy entry points.}
+How can a codon alignment be screened for departures from neutrality with
+pairwise $d_N/d_S$ estimates, and when is a codon model preferable?
 
-\chapter{Genome-scale dataset formation with OrthoFinder}
-\section{Question}
 \section{Data}
+\texttt{examples/cases/selection/codon.fas} contains four short codon
+alignments (A--D), 26 codons each. The example is deliberately small: it
+demonstrates the table and matrix interface, not a biological conclusion.
+The same alignment is used for NG86, YN00 and the batch MLE route.
+
 \section{Before you start}
+The input must be an in-frame codon alignment (length a multiple of three)
+with no internal stop codons in the analysed codons. Check the reading frame
+and remove alignment columns that are mostly gaps or ambiguous bases. For a
+real analysis, use a codon-aware alignment (MACSE~2) rather than a nucleotide
+alignment translated after the fact.
+
 \section{Steps}
+\begin{enumerate}
+  \item Open \textbf{SELECTION} $\rightarrow$ \textbf{Codon-based Z-test}.
+  Load \texttt{codon.fas} and confirm the reported number of usable codons.
+  \item Choose \textbf{NG86} and run. The table reports $S$, $N$, $S_d$,
+  $N_d$, $d_S$, $d_N$, $\omega=d_N/d_S$, $Z$ and a conclusion for every
+  sequence pair.
+  \item Switch the view to \textbf{Matrix (MEGA style)}. The upper triangle
+  contains two-sided $p$-values; the lower triangle contains $\omega$.
+  Significant cells are bold and tinted: red for $d_N>d_S$, green for
+  $d_N<d_S$.
+  \item Repeat with \textbf{YN00}. The F84 correction and its standard errors
+  can change the call; compare the two estimators rather than reporting only
+  one.
+  \item For a larger set, open \textbf{SELECTION} $\rightarrow$ \textbf{Batch
+  dN/dS}. Use \emph{Counting} mode for NG86/YN00 or \emph{MLE} mode for
+  IQ-TREE \texttt{--seqtype CODON} with \texttt{-m GY} or \texttt{-m MG}.
+\end{enumerate}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{case_selection.pdf}
+  \caption{Codon selection case. (A) Pairwise NG86 table with $d_S$, $d_N$,
+  $\omega$, $Z$ and the selection call. (B) MEGA-style matrix; upper triangle
+  is the two-sided $p$-value and lower triangle is $\omega$.}
+  \label{fig:case-selection}
+\end{figure}
+
 \section{Parameter rationale}
+NG86 is a fast counting method with a Jukes--Cantor correction; YN00 adds an
+F84 correction and estimates transition/transversion bias. Both are pairwise
+and assume a common codon frequency model. The MLE route fits a codon
+substitution model to the whole alignment and is preferable when the
+alignment is long enough and the phylogeny is known or co-estimated.
+
 \section{Expected output}
+A pairwise table, a matrix view and, in batch mode, one row per pair or
+alignment. A $d_S$ that is saturated or not estimable is reported as
+\texttt{NA}, not as zero. A significant negative $Z$ with $d_N<d_S$ indicates
+purifying selection; a significant positive $Z$ with $d_N>d_S$ indicates
+positive selection; a non-significant test is not evidence of neutrality.
+
 \section{Interpretation}
+The example's very short alignment produces unstable $d_S$ estimates and
+several saturated pairs. That is the intended lesson: a small $p$-value from
+a short alignment is not a robust selection claim. Use a codon-aware
+alignment, check the $d_S$ standard error and compare NG86, YN00 and MLE
+before interpreting a single pair.
+
 \section{Pitfalls}
+Do not translate a nucleotide alignment in a different frame. Do not treat
+\texttt{NA} as zero. Do not compare $\omega$ across pairs with very different
+$d_S$ precision. CodeML/HyPhy site and branch-site models are not exposed in
+this version; the menu entry is a placeholder.
+
 \section{Citation}
-\todo{New case after the OrthoFinder plugin lands: GFF3+genome and mt/cp
-GenBank inputs; single-copy orthogroups; protein-to-CDS back-mapping.}
+NG86 and YN00 follow the methods implemented in PAML \cite{paml}; the MLE
+route uses IQ-TREE 3 \cite{iqtree3}.
 
 % Smoke test for software.bib; remove when real citations are added.
 \nocite{*}

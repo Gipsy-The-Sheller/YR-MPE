@@ -1,6 +1,7 @@
 # LaTeX build artifacts
 /manual.pdf
 /cases.pdf
+/manual/tool-reference.pdf
 *.aux
 *.bcf
 *.bbl

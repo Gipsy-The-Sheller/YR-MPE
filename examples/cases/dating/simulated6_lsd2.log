@@ -1,0 +1,15 @@
+
+TREE 1
+*PROCESSING:
+Reading the tree ... 
+Collapse 0 (over 3) internal branches having branch length <= 0.0005
+ (settable via option -l)
+Parameter to adjust variances was set to 0.075 (settable via option -b)
+Minimum branch length of time scaled tree (settable via option -u and -U): 0
+Estimating the root position on all branches using fast method ...
+
+*RESULTS:
+- Dating results:
+ rate 0.00329898, tMRCA -60 , objective function 0.0112534
+
+TOTAL ELAPSED TIME: 0 seconds
