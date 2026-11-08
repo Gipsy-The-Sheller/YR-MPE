@@ -73,8 +73,9 @@ More interface figures are in the [user manual](docs/manual/manual.pdf) and
    [release page](https://github.com/Gipsy-The-Sheller/YR-MPE/releases/tag/v1.1.0)
    and extract it so that the repository root is
    `<YRTools_root>/plugins/YR-MPE/`.
-3. Either extract `YR-MPE-bins-win64.zip` into `YR_MPE/bin`, or let the
-   **Initializer** download it from GitHub or Gitee.
+3. Either extract `YR-MPE-bins-win64.zip` at the `YR_MPE/` level so its
+   `bin/` directory merges into `YR_MPE/bin`, or let the **Initializer**
+   download it from GitHub or Gitee.
 4. Run `launcher.vbs` in the YRTools root. If VBScript is blocked, run
    `python main.py` instead.
 5. Open **YPhylo Workbench** from the YR-MPE sidebar.
