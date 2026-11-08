@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Gipsy-The-Sheller/YR-MPE)
 
-<img src="/YR_MPE/icons/yr-mpea.svg" width="auto" height="50"/><img src="/YR_MPE/icons/software/clustalo.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/muscle.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mafft.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/macse.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/trimal.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/gblocks.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/iqtree.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mrbayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/phylobayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/caster.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/icytree.svg" width="auto" height="25"/>
+<img src="/YR_MPE/icons/yr-mpea.svg" width="auto" height="50"/><img src="/YR_MPE/icons/software/clustalo.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/muscle.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mafft.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/macse.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/trimal.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/gblocks.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/iqtree.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/raxml.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mrbayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/phylobayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/caster.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/icytree.svg" width="auto" height="25"/>
 
 > [!NOTE]
 > 
@@ -22,9 +22,9 @@
 | Data Management | <img src="/YR_MPE/icons/workspace.svg" width="auto" height="25"/> | SeqMatrix <br> SeqDBG <br> Sequence Concatenator <br> TreeMerger |<img src="/YR_MPE/icons/seqmatrix/seqmatrix.svg" width="auto" height="25"/><img src="/YR_MPE/icons/seqdbg/seqdbg.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/concatenator.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/treemerger.svg" width="auto" height="25"/>|
 | Align |<img src="/YR_MPE/icons/align.svg" width="auto" height="25"/><img src="/YR_MPE/icons/alignby.svg" width="auto" height="25"/>| Clustal Omega <br> MAFFT <br> Muscle 5 <br> MACSE | <span><img src="/YR_MPE/icons/software/clustalo.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/muscle.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mafft.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/macse.svg" width="auto" height="25"/> |
 | Trim |<img src="/YR_MPE/icons/align.svg" width="auto" height="25"/><img src="/YR_MPE/icons/trim.svg" width="auto" height="25"/></span>| TrimAl <br> GBlocks | <img src="/YR_MPE/icons/software/trimal.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/gblocks.svg" width="auto" height="25"/> |
-| Model |<img src="/YR_MPE/icons/model.svg" width="auto" height="25"/>| ModelFinder | <img src="/YR_MPE/icons/find_model.svg" width="auto" height="25"/> |
+| Model |<img src="/YR_MPE/icons/model.svg" width="auto" height="25"/>| ModelFinder <br> ModelTest-NG | <img src="/YR_MPE/icons/find_model.svg" width="auto" height="25"/><img src="/YR_MPE/icons/find_model.svg" width="auto" height="25"/> |
 | Distance |<img src="/YR_MPE/icons/distance.svg" width="auto" height="25"/>| ML-distance (IQ-Tree 3) <br> Uncorrected distance | <img src="/YR_MPE/icons/dist.svg" width="auto" height="25"/><img src="/YR_MPE/icons/dist.svg" width="auto" height="25"/> |
-| Phylogeny |<img src="/YR_MPE/icons/phylogeny.svg" width="auto" height="25"/><img src="/YR_MPE/icons/coalescent.svg" width="auto" height="25"/>| IQ-Tree 3 <br> MrBayes3-MPI-BEAGLE3 <br> PhyloBayes-MPI <br> DecentTree (NJ methods) <br> MPBoot (Maximum Parsimony) <br> CASTER-site <br> ASTRAL|<img src="/YR_MPE/icons/software/iqtree.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mrbayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/phylobayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/bionj.svg" width="auto" height="25"/><img src="/YR_MPE/icons/mp.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/caster.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/astral.svg" width="auto" height="25"/>|
+| Phylogeny |<img src="/YR_MPE/icons/phylogeny.svg" width="auto" height="25"/><img src="/YR_MPE/icons/coalescent.svg" width="auto" height="25"/>| IQ-Tree 3 <br> RAxML-NG <br> MrBayes3-MPI-BEAGLE3 <br> PhyloBayes-MPI <br> DecentTree (NJ methods) <br> MPBoot (Maximum Parsimony) <br> CASTER-site <br> ASTRAL|<img src="/YR_MPE/icons/software/iqtree.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/raxml.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/mrbayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/phylobayes.svg" width="auto" height="25"/><img src="/YR_MPE/icons/bionj.svg" width="auto" height="25"/><img src="/YR_MPE/icons/mp.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/caster.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/astral.svg" width="auto" height="25"/>|
 | Visualizations ||Sequence Viewer <br> Distance Visualization <br> Calculate & Plot Substitution Satucation <br> MiniTracer <br> IcyTree|<img src="/YR_MPE/icons/file/sequence.svg" width="auto" height="25"/><img src="/YR_MPE/icons/dist.svg" width="auto" height="25"/><img src="/YR_MPE/icons/saturation.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/minitracer.svg" width="auto" height="25"/><img src="/YR_MPE/icons/software/icytree.svg" width="auto" height="25"/>|
 | Platform & Workflow | | YR-MPEA | <img src="/YR_MPE/icons/yr-mpea.svg" width="auto" height="25"/> |
 
@@ -45,7 +45,7 @@ Owing to a good architecture, the source codes of `YR-MPE` do not need any compi
 > | PhyloBayes-MPI | The first stable MPI support of PhyloBayes on Windows. |
 > | MPBoot | The first public release on Windows. |
 > | DecentTree | The first public release on Windows. |
-> | RaxML-NG (implementation planned) | The first public release on Windows |
+> | RAxML-NG | The first public release on Windows |
 >
 > All binaries compiled by the authors, plus source codes, configuration and building files, are deposited in [this repository](https://github.com/Gipsy-The-Sheller/YR-MPE-Windows-x86_64-softwares) and distributed with their original licenses.
 
@@ -59,7 +59,6 @@ The wiki of `YR-MPE` provides detailed introduction and usage. You can access it
 
 ## The development plan for next versions
 
-- Integrate RAxML-NG
 - Integrate Terraphast for phylogenetic terrace analysis
 - Enable Robinson-Fould (RF) distance calculation
 - Enable general majority-rule consensus for raw tree sets
@@ -78,6 +77,8 @@ Inform developers of your opinion via issue or email: zjxmolls@outlook.com.
 
 > *First transplant release on x86_64 windows
 
-**Latest version: 2026.3.8 - v0.3.0 - Support for multigene phylogeny; distance methods (DecentTree\*); maximum parsimony (MPBoot\*); molecular dating (LSD2, MrBayes); nucleotide substitution saturation analysis (BaCoCa C-value reimplement); model parameter estimation (ModelFinder); dataset management (SeqDBG); uncalibrated distance (p-distance) calculation.**
+**Latest version: 2026.11.9 - v1.1.0 - Agent bridge and workflow compiler; YPhylo Workbench provenance/selection; gCF/sCF/CASTER/MSC diagnostics; RAxML-NG, ModelTest-NG, TreeRecs, ASTER/ASTRAL, selection tests; revised user manual and case studies; dual-source Windows binary initializer.**
+
+2026.3.8 - v0.3.0 - Support for multigene phylogeny; distance methods (DecentTree\*); maximum parsimony (MPBoot\*); molecular dating (LSD2, MrBayes); nucleotide substitution saturation analysis (BaCoCa C-value reimplement); model parameter estimation (ModelFinder); dataset management (SeqDBG); uncalibrated distance (p-distance) calculation.
 
 2026.1.9 - v0.2.0 - Bayesian inference plugins (MrBayes-MPI-BEAGLE3\*, PhyloBayes-MPI\*), fixed IcyTree bugs, added console plugin.

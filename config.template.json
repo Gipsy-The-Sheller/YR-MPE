@@ -1,38 +1,142 @@
 [
     {
         "name": "Muscle5",
-        "cmd": ["muscle","muscle5"],
+        "cmd": ["muscle", "muscle5"],
+        "bundled": "muscle5/muscle.exe",
         "website": "https://www.drive5.com/muscle5/",
         "path": ""
     },
     {
         "name": "Clustal Omega",
-        "cmd": ["clustalo","clustalomega"],
+        "cmd": ["clustalo", "clustalomega"],
+        "bundled": "clustalo/clustalo.exe",
         "website": "http://www.clustal.org/omega/",
         "path": ""
     },
     {
         "name": "MAFFT",
         "cmd": ["mafft"],
-        "website": "http://mafft.cbrc.jp/alignment/software/",
+        "bundled": "mafft/mafft.bat",
+        "website": "https://mafft.cbrc.jp/alignment/software/",
         "path": ""
     },
     {
-        "name": "IQ-Tree 3",
-        "cmd": ["iqtree"],
+        "name": "IQ-TREE 3",
+        "cmd": ["iqtree", "iqtree3"],
+        "bundled": "iqtree3/iqtree3.exe",
         "website": "https://iqtree.github.io/",
+        "path": ""
+    },
+    {
+        "name": "ModelTest-NG",
+        "cmd": ["modeltest-ng"],
+        "bundled": "modeltest-ng/modeltest-ng.exe",
+        "website": "https://github.com/ddarriba/modeltest",
+        "path": ""
+    },
+    {
+        "name": "RAxML-NG",
+        "cmd": ["raxml-ng"],
+        "bundled": "raxml-ng/raxml-ng.exe",
+        "website": "https://github.com/amkozlov/raxml-ng",
         "path": ""
     },
     {
         "name": "TrimAl",
         "cmd": ["trimal"],
+        "bundled": "trimAl/bin/trimal.exe",
         "website": "https://vicfero.github.io/trimal/",
         "path": ""
     },
     {
         "name": "GBlocks",
-        "cmd": ["gblocks"],
+        "cmd": ["gblocks", "Gblocks"],
+        "bundled": "Gblocks/Gblocks.exe",
         "website": "https://molevol-ibe.csic.es/Gblocks.html",
+        "path": ""
+    },
+    {
+        "name": "PhyloBayes-mpi",
+        "cmd": ["pb_mpi"],
+        "bundled": "pbmpi-1.9/pb_mpi.exe",
+        "website": "https://github.com/bayesiancook/pbmpi",
+        "path": ""
+    },
+    {
+        "name": "MPIRun",
+        "cmd": ["mpiexec", "mpirun"],
+        "bundled": "msmpi/mpiexec.exe",
+        "website": "https://learn.microsoft.com/en-us/message-passing-interface/microsoft-mpi",
+        "path": ""
+    },
+    {
+        "name": "PhyloBayes-bpcomp",
+        "cmd": ["bpcomp"],
+        "bundled": "pbmpi-1.9/bpcomp.exe",
+        "website": "https://github.com/bayesiancook/pbmpi",
+        "path": ""
+    },
+    {
+        "name": "MrBayes-MPI-BEAGLE",
+        "cmd": ["mb", "mrbayes"],
+        "bundled": "mb/mb.exe",
+        "website": "https://nbisweden.github.io/MrBayes/",
+        "path": ""
+    },
+    {
+        "name": "caster-site",
+        "cmd": ["caster-site"],
+        "bundled": "aster/caster-site.exe",
+        "website": "https://github.com/chaoszhang/ASTER",
+        "path": ""
+    },
+    {
+        "name": "astral",
+        "cmd": ["astral", "astral4"],
+        "bundled": "aster/astral.bat",
+        "website": "https://github.com/chaoszhang/ASTER",
+        "path": ""
+    },
+    {
+        "name": "MACSE2",
+        "cmd": ["macse", "macse2"],
+        "bundled": "macse/macse.bat",
+        "website": "https://bioweb.supagro.inrae.fr/macse/",
+        "path": ""
+    },
+    {
+        "name": "LSD2",
+        "cmd": ["lsd2", "lsd"],
+        "bundled": "lsd2/lsd2.exe",
+        "website": "https://github.com/tothuhien/lsd2",
+        "path": ""
+    },
+    {
+        "name": "DecentTree",
+        "cmd": ["decenttree"],
+        "bundled": "decenttree/decenttree.exe",
+        "website": "https://github.com/ulises-rosas-puchuri/DecentTree",
+        "path": ""
+    },
+    {
+        "name": "MPBoot",
+        "cmd": ["mpboot"],
+        "bundled": "mpboot/mpboot.exe",
+        "website": "https://github.com/diepthihoang/mpboot",
+        "path": ""
+    },
+    {
+        "name": "TreeRecs",
+        "cmd": ["treerecs"],
+        "bundled": "treerecs/treerecs.exe",
+        "website": "https://github.com/PropanDec/TreeRecs",
+        "path": ""
+    },
+    {
+        "name": "OrthoFinder",
+        "cmd": ["orthofinder"],
+        "bundled": "",
+        "website": "https://github.com/davidemms/OrthoFinder",
         "path": ""
     }
 ]

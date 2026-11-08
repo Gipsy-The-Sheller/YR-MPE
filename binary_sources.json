@@ -1,0 +1,13 @@
+{
+    "archive": "YR-MPE-bins-win64.zip",
+    "sources": [
+        {
+            "name": "GitHub",
+            "url": "https://github.com/Gipsy-The-Sheller/YR-MPE/releases/latest/download/YR-MPE-bins-win64.zip"
+        },
+        {
+            "name": "Gitee",
+            "url": "https://gitee.com/ZJXMolls/YR-MPE/releases/download/v{version}/YR-MPE-bins-win64.zip"
+        }
+    ]
+}

@@ -19,4 +19,4 @@ from .templates.base_process_thread import BaseProcessThread
 
 __all__ = ['BasePlugin', 'BaseProcessThread']
 
-__version__ = "0.2.0"
+__version__ = "1.1.0"

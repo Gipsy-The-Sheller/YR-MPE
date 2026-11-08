@@ -1,0 +1,37 @@
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Local working material
+_umwork/
+YR-MPE.wiki/
+dev/temp/
+
+# Generated case-study assets (curated inputs live in examples/cases/)
+dev/fig3/
+dev/cases/assets/
+dev/cases/bayes/
+dev/cases/figures/
+
+# LaTeX build artifacts
+docs/cases.bcf-SAVE-ERROR
+docs/cases.bbl-SAVE-ERROR
+docs/cases.bcf
+docs/cases.bbl
+docs/cases.aux
+docs/cases.log
+docs/cases.out
+docs/cases.toc
+docs/cases.fls
+docs/cases.fdb_latexmk
+docs/cases.run.xml
+docs/manual.bcf
+docs/manual.bbl
+docs/manual.aux
+docs/manual.log
+docs/manual.out
+docs/manual.toc
+docs/manual.fls
+docs/manual.fdb_latexmk
+docs/manual.run.xml
