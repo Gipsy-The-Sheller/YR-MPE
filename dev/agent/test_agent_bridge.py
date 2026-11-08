@@ -47,7 +47,8 @@ class AgentBridgeTests(unittest.TestCase):
         self.registry.register("demo.echo", lambda p: {"echo": p.get("value")})
         self.session = self.root / "session"
         self.bridge = bridge.AgentBridge(
-            str(self.session), registry=self.registry, heartbeat_interval=0
+            str(self.session), registry=self.registry,
+            allow_anonymous=True, heartbeat_interval=0,
         )
 
     def tearDown(self):
@@ -114,6 +115,43 @@ class AgentBridgeTests(unittest.TestCase):
             self.assertIn("token", response["error"])
         finally:
             secured.close()
+
+    def test_token_is_generated_and_required_by_default(self):
+        secured = bridge.AgentBridge(
+            str(self.root / "default_token"), registry=self.registry,
+            heartbeat_interval=0,
+        )
+        try:
+            self.assertTrue(secured.token)
+            control = json.loads(
+                (self.root / "default_token" / "control.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(control["token_required"])
+            self.assertNotIn("token", control)
+            self._append_to(secured, {"id": "t1", "op": "math.add", "params": {"a": 1, "b": 2}})
+            secured.poll_once()
+            response = self._last_response(secured)
+            self.assertFalse(response["ok"])
+            self.assertIn("token", response["error"])
+            self._append_to(secured, {
+                "id": "t2", "op": "math.add", "params": {"a": 1, "b": 2},
+                "token": secured.token,
+            })
+            secured.poll_once()
+            self.assertTrue(self._last_response(secured)["ok"])
+        finally:
+            secured.close()
+
+    def _append_to(self, bridge_obj, command):
+        path = Path(bridge_obj.session_dir) / "commands.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(command) + "\n")
+
+    @staticmethod
+    def _last_response(bridge_obj):
+        path = Path(bridge_obj.session_dir) / "responses.jsonl"
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line]
+        return json.loads(lines[-1])
 
     def test_builtin_actions_and_control(self):
         self._append({"id": "p", "op": "bridge.ping"})

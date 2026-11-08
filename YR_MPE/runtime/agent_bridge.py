@@ -9,7 +9,7 @@ directory containing append-only JSONL files and raw stdout/stderr logs:
       responses.jsonl   # request/response pairs only
       stdout.log        # raw stdout/app lines
       stderr.log        # raw stderr/error lines
-      control.json      # session, token, pid, action list
+      control.json      # session, pid, action list (never the token)
       READY             # present while the bridge is alive
 
 The host polls ``poll_once()`` from a Qt timer (GUI thread) or
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import tempfile
 import threading
 import time
@@ -71,6 +72,7 @@ class AgentBridge:
         session_dir: Optional[str] = None,
         registry: Optional[UIActionRegistry] = None,
         token: Optional[str] = None,
+        allow_anonymous: bool = False,
         heartbeat_interval: float = 5.0,
     ):
         if session_dir:
@@ -81,6 +83,8 @@ class AgentBridge:
             )
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.registry = registry or UIActionRegistry()
+        if token is None and not allow_anonymous:
+            token = secrets.token_urlsafe(24)
         self.token = token
         self.heartbeat_interval = float(heartbeat_interval)
 
@@ -139,7 +143,6 @@ class AgentBridge:
             "stdout": self.stdout_path.name,
             "stderr": self.stderr_path.name,
             "token_required": bool(self.token),
-            "token": self.token or "",
             "actions": self.registry.list_actions(),
         })
 

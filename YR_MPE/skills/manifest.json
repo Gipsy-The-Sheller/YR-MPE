@@ -1,0 +1,762 @@
+{
+  "schema": "yrmpe.skills.v1",
+  "skills": [
+    {
+      "id": "orthofinder",
+      "title": "One-Step OrthoFinder",
+      "summary": "Build a genomic dataset from GB/GBFF/GFF files: OrthoFinder, single-copy orthogroups, CDS extraction and workspace import.",
+      "plugin_names": [
+        "One-Step OrthoFinder (for Organelle Genomes)"
+      ],
+      "tool_names": [
+        "OrthoFinder"
+      ],
+      "class_names": [
+        "OrthoFinderPlugin"
+      ],
+      "menu_path": [
+        "WORKSPACE",
+        "Dataset",
+        "One-Step OrthoFinder (for Organelle Genomes)"
+      ],
+      "actions": [
+        "orthofinder.inspect_options",
+        "orthofinder.modify_options",
+        "orthofinder.validate",
+        "orthofinder.run",
+        "orthofinder.stop",
+        "orthofinder.inspect_status",
+        "orthofinder.inspect_console",
+        "orthofinder.inspect_actions",
+        "orthofinder.preview_results",
+        "orthofinder.export_to_workspace"
+      ],
+      "file": "orthofinder.md"
+    },
+    {
+      "id": "mafft",
+      "title": "MAFFT",
+      "summary": "Multiple sequence alignment with MAFFT; outputs an alignment item and feeds trimming/model selection.",
+      "plugin_names": [
+        "MAFFT Aligner"
+      ],
+      "tool_names": [
+        "MAFFT"
+      ],
+      "menu_path": [
+        "ALIGN",
+        "Align by...",
+        "MAFFT"
+      ],
+      "actions": [],
+      "file": "mafft.md"
+    },
+    {
+      "id": "macse",
+      "title": "MACSE2",
+      "summary": "Codon-aware alignment of coding sequences, preserving reading frames and producing NT/AA alignments.",
+      "plugin_names": [
+        "MACSE2 Codon Aligner"
+      ],
+      "tool_names": [
+        "MACSE2"
+      ],
+      "menu_path": [
+        "ALIGN",
+        "Align by...",
+        "MACSE"
+      ],
+      "actions": [],
+      "file": "macse.md"
+    },
+    {
+      "id": "trimal",
+      "title": "TrimAl",
+      "summary": "Trim alignment columns by gap threshold, consistency or automated heuristics.",
+      "plugin_names": [
+        "TrimAl Trimmer"
+      ],
+      "tool_names": [
+        "TrimAl"
+      ],
+      "menu_path": [
+        "ALIGN",
+        "Trim Alignment by...",
+        "Trimal"
+      ],
+      "actions": [],
+      "file": "trimal.md"
+    },
+    {
+      "id": "gblocks",
+      "title": "GBlocks",
+      "summary": "Select conserved alignment blocks and remove divergent or gap-rich columns.",
+      "plugin_names": [
+        "GBlocks Trimmer"
+      ],
+      "tool_names": [
+        "GBlocks"
+      ],
+      "menu_path": [
+        "ALIGN",
+        "Trim Alignment by...",
+        "GBlocks"
+      ],
+      "actions": [],
+      "file": "gblocks.md"
+    },
+    {
+      "id": "muscle5",
+      "title": "MUSCLE5",
+      "summary": "Fast multiple sequence alignment using MUSCLE 5.",
+      "plugin_names": [
+        "MUSCLE5 Aligner"
+      ],
+      "tool_names": [
+        "Muscle5"
+      ],
+      "menu_path": [
+        "ALIGN",
+        "Align by...",
+        "Muscle 5"
+      ],
+      "actions": [],
+      "file": "muscle5.md"
+    },
+    {
+      "id": "clustal-omega",
+      "title": "Clustal Omega",
+      "summary": "Multiple sequence alignment using Clustal Omega.",
+      "plugin_names": [
+        "Clustal Omega Aligner"
+      ],
+      "tool_names": [
+        "Clustal Omega"
+      ],
+      "menu_path": [
+        "ALIGN",
+        "Align by...",
+        "Clustal Omega"
+      ],
+      "actions": [],
+      "file": "clustal-omega.md"
+    },
+    {
+      "id": "modelfinder",
+      "title": "IQ-TREE ModelFinder",
+      "summary": "Select a substitution model with IQ-TREE ModelFinder (TESTONLY) and import the best model.",
+      "plugin_names": [
+        "IQ-TREE ModelFinder"
+      ],
+      "tool_names": [
+        "IQ-Tree 3"
+      ],
+      "menu_path": [
+        "MODEL",
+        "Find Best Substitution Model (ML)"
+      ],
+      "actions": [],
+      "file": "modelfinder.md"
+    },
+    {
+      "id": "modeltest-ng",
+      "title": "ModelTest-NG",
+      "summary": "Select DNA/protein substitution models with ModelTest-NG; reports BIC, AIC and AICc.",
+      "plugin_names": [
+        "ModelTest-NG"
+      ],
+      "tool_names": [
+        "ModelTest-NG"
+      ],
+      "class_names": [
+        "ModelTestNGPlugin"
+      ],
+      "menu_path": [
+        "MODEL",
+        "Find Best Substitution Model (ModelTest-NG)"
+      ],
+      "actions": [],
+      "file": "modeltest_ng.md"
+    },
+    {
+      "id": "model-parameters",
+      "title": "Model Parameter Estimation",
+      "summary": "Estimate substitution model parameters and report them as a model item.",
+      "plugin_names": [
+        "Estimate Model Parameters (DNA, ML)"
+      ],
+      "tool_names": [
+        "IQ-TREE 3"
+      ],
+      "menu_path": [
+        "MODEL",
+        "Estimate Model Parameters (DNA, ML)"
+      ],
+      "actions": [],
+      "file": "model-parameters.md"
+    },
+    {
+      "id": "iqtree",
+      "title": "IQ-TREE 3",
+      "summary": "Maximum-likelihood tree inference with IQ-TREE 3, including model and partition options.",
+      "plugin_names": [
+        "IQ-TREE Phylogeny"
+      ],
+      "tool_names": [
+        "IQ-TREE 3"
+      ],
+      "menu_path": [
+        "PHYLOGENY",
+        "Maximum Likelihood (ML)",
+        "IQ-Tree 3"
+      ],
+      "actions": [],
+      "file": "iqtree.md"
+    },
+    {
+      "id": "raxml-ng",
+      "title": "RAxML-NG",
+      "summary": "Maximum-likelihood tree inference with RAxML-NG, including bootstrap and autoMRE.",
+      "plugin_names": [
+        "RAxML-NG"
+      ],
+      "tool_names": [
+        "RAxML-NG"
+      ],
+      "class_names": [
+        "RAxMLNGPlugin"
+      ],
+      "menu_path": [
+        "PHYLOGENY",
+        "Maximum Likelihood (ML)",
+        "RAxML-NG"
+      ],
+      "actions": [],
+      "file": "raxmlng.md"
+    },
+    {
+      "id": "mrbayes",
+      "title": "MrBayes",
+      "summary": "Bayesian phylogenetic inference with MrBayes MPI/BEAGLE and MCMC diagnostics.",
+      "plugin_names": [
+        "MrBayes-MPI-BEAGLE Phylogeny"
+      ],
+      "tool_names": [
+        "MrBayes-MPI-BEAGLE"
+      ],
+      "menu_path": [
+        "PHYLOGENY",
+        "Bayesian Inference (BI)",
+        "MrBayes3-MPI-BEAGLE"
+      ],
+      "actions": [],
+      "file": "mrbayes.md"
+    },
+    {
+      "id": "phylobayes",
+      "title": "PhyloBayes-MPI",
+      "summary": "Bayesian phylogenetics with PhyloBayes-MPI and bpcomp diagnostics.",
+      "plugin_names": [
+        "PhyloBayes-MPI Phylogeny"
+      ],
+      "tool_names": [
+        "PhyloBayes-MPI"
+      ],
+      "menu_path": [
+        "PHYLOGENY",
+        "Bayesian Inference (BI)",
+        "PhyloBayes-MPI"
+      ],
+      "actions": [],
+      "file": "phylobayes.md"
+    },
+    {
+      "id": "mpboot",
+      "title": "MPBoot",
+      "summary": "Maximum-parsimony tree inference with bootstrap support.",
+      "plugin_names": [
+        "MPBoot Phylogeny"
+      ],
+      "tool_names": [
+        "MPBoot"
+      ],
+      "menu_path": [
+        "PHYLOGENY",
+        "Maximum Parsimony (MPBoot)"
+      ],
+      "actions": [],
+      "file": "mpboot.md"
+    },
+    {
+      "id": "decenttree",
+      "title": "DecentTree",
+      "summary": "Distance-based tree construction from a distance matrix.",
+      "plugin_names": [
+        "DecentTree Distance Methods"
+      ],
+      "tool_names": [
+        "DecentTree"
+      ],
+      "menu_path": [
+        "PHYLOGENY",
+        "Distance Methods (DecentTree)"
+      ],
+      "actions": [],
+      "file": "decenttree.md"
+    },
+    {
+      "id": "astral",
+      "title": "ASTRAL-IV / wASTRAL",
+      "summary": "Coalescent species-tree inference from a set of gene trees.",
+      "plugin_names": [
+        "ASTRAL"
+      ],
+      "tool_names": [
+        "astral"
+      ],
+      "menu_path": [
+        "SPECIES TREE",
+        "ASTRAL-IV"
+      ],
+      "actions": [],
+      "file": "astral.md"
+    },
+    {
+      "id": "caster-site",
+      "title": "CASTER-site",
+      "summary": "Site-based coalescence-aware species-tree inference from alignments.",
+      "plugin_names": [
+        "CASTER-site"
+      ],
+      "tool_names": [
+        "caster-site"
+      ],
+      "menu_path": [
+        "SPECIES TREE",
+        "CASTER-site"
+      ],
+      "actions": [],
+      "file": "caster-site.md"
+    },
+    {
+      "id": "treerecs",
+      "title": "TreeRecs",
+      "summary": "Reconcile gene trees with a species tree and report duplication/loss events.",
+      "plugin_names": [
+        "TreeRecs 1.2"
+      ],
+      "tool_names": [
+        "TreeRecs"
+      ],
+      "menu_path": [
+        "SPECIES TREE",
+        "TreeRecs 1.2"
+      ],
+      "actions": [],
+      "file": "treerecs.md"
+    },
+    {
+      "id": "lsd2",
+      "title": "LSD2",
+      "summary": "Least-squares dating of a phylogeny from tip dates.",
+      "plugin_names": [
+        "LSD2"
+      ],
+      "tool_names": [
+        "LSD2"
+      ],
+      "menu_path": [
+        "CLOCK",
+        "LSD2"
+      ],
+      "actions": [],
+      "file": "lsd2.md"
+    },
+    {
+      "id": "minitracer",
+      "title": "MiniTracer",
+      "summary": "MCMC diagnostics: traces, ESS, HPD, harmonic means, skyline and chain comparison.",
+      "plugin_names": [
+        "MiniTracer"
+      ],
+      "class_names": [
+        "MiniTracerPlugin"
+      ],
+      "menu_path": [
+        "PHYLOGENY",
+        "Bayesian Inference (BI)",
+        "MCMC Diagnostics (MiniTracer)"
+      ],
+      "actions": [],
+      "file": "minitracer.md"
+    },
+    {
+      "id": "rf",
+      "title": "Robinson-Foulds Comparison",
+      "summary": "Compare trees or tree sets with IQ-TREE pairwise RF distances.",
+      "plugin_names": [
+        "Pairwise Robinson-Foulds Comparison"
+      ],
+      "tool_names": [
+        "IQ-TREE 3"
+      ],
+      "menu_path": [
+        "PHYLOGENY",
+        "Tree Comparison",
+        "Pairwise Robinson-Foulds (IQ-TREE)"
+      ],
+      "actions": [],
+      "file": "rf.md"
+    },
+    {
+      "id": "codon-ztest",
+      "title": "Codon-based Z-test",
+      "summary": "NG86 codon-based Z-test for synonymous/nonsynonymous divergence.",
+      "plugin_names": [
+        "Codon-based Z-test (NG86 / YN00)"
+      ],
+      "tool_names": [
+        "Built-in Python Implementation"
+      ],
+      "menu_path": [
+        "SELECTION",
+        "Codon-based Z-test (NG86 / YN00)"
+      ],
+      "actions": [],
+      "file": "codon-ztest.md"
+    },
+    {
+      "id": "batch-dnds",
+      "title": "Batch dN/dS",
+      "summary": "Batch dN/dS estimation with NG86/YN00 or IQ-TREE.",
+      "plugin_names": [
+        "Batch dN/dS (NG86 / IQ-TREE)"
+      ],
+      "tool_names": [
+        "IQ-TREE 3"
+      ],
+      "menu_path": [
+        "SELECTION",
+        "Batch dN/dS (NG86 / YN00 / IQ-TREE)"
+      ],
+      "actions": [],
+      "file": "batch-dnds.md"
+    },
+    {
+      "id": "icytree",
+      "title": "IcyTree",
+      "summary": "Interactive tree viewing, rooting and annotation.",
+      "plugin_names": [
+        "IcyTree"
+      ],
+      "class_names": [
+        "IcyTreePlugin"
+      ],
+      "menu_path": [
+        "PHYLOGENY",
+        "Tree Viewer (IcyTree)"
+      ],
+      "actions": [],
+      "file": "icytree.md"
+    },
+    {
+      "id": "seqmatrix",
+      "title": "SeqMatrix",
+      "summary": "Edit sequence names/partitions and build a partitioned dataset.",
+      "plugin_names": [
+        "SeqMatrix"
+      ],
+      "class_names": [
+        "Lg_SeqMatrix",
+        "SeqMatrixPluginEntry"
+      ],
+      "menu_path": [
+        "WORKSPACE",
+        "Dataset",
+        "Create by SeqMatrix"
+      ],
+      "actions": [],
+      "file": "seqmatrix.md"
+    },
+    {
+      "id": "seqdbg",
+      "title": "SeqDBG",
+      "summary": "Annotation-graph dataset builder and sequence debugger.",
+      "plugin_names": [
+        "SeqDBG"
+      ],
+      "class_names": [
+        "SeqDBGWindow",
+        "SeqDBGPluginEntry"
+      ],
+      "menu_path": [
+        "WORKSPACE",
+        "Dataset",
+        "Create by SeqDBG"
+      ],
+      "actions": [],
+      "file": "seqdbg.md"
+    },
+    {
+      "id": "sequence-concatenator",
+      "title": "Sequence Concatenator",
+      "summary": "Concatenate alignments into a supermatrix with a partition scheme.",
+      "plugin_names": [
+        "Sequence Concatenator"
+      ],
+      "class_names": [
+        "SequenceConcatenatorPlugin"
+      ],
+      "menu_path": [
+        "WORKSPACE"
+      ],
+      "actions": [],
+      "file": "sequence-concatenator.md"
+    },
+    {
+      "id": "tree-merger",
+      "title": "Tree Merger",
+      "summary": "Merge source trees into a consensus/supertree-style result.",
+      "plugin_names": [
+        "Tree Merger"
+      ],
+      "class_names": [
+        "TreeMergerPlugin"
+      ],
+      "menu_path": [
+        "PHYLOGENY"
+      ],
+      "actions": [],
+      "file": "tree-merger.md"
+    },
+    {
+      "id": "best-mrbayes",
+      "title": "BEST / MrBayes Multi-Species Coalescent",
+      "summary": "Full-likelihood multispecies-coalescent inference through MrBayes, with block import/export and agent-operable controls.",
+      "plugin_names": [
+        "BEST / MrBayes MSC",
+        "best",
+        "best_mrbayes"
+      ],
+      "tool_names": [
+        "MrBayes-MPI-BEAGLE"
+      ],
+      "class_names": [
+        "BestDialog"
+      ],
+      "menu_path": [
+        "SPECIES TREE",
+        "BEST / MrBayes MSC"
+      ],
+      "actions": [
+        "best.inspect_options",
+        "best.modify_options",
+        "best.apply_block",
+        "best.preview_block",
+        "best.write_block",
+        "best.set_input",
+        "best.run",
+        "best.stop",
+        "best.inspect_status",
+        "best.inspect_console",
+        "best.export_to_workspace"
+      ],
+      "file": "best.md"
+    },
+    {
+      "id": "ml-distance",
+      "title": "ML distance calculation",
+      "summary": "Maximum-likelihood pairwise distances with IQ-TREE, exported as a distance matrix item.",
+      "plugin_names": [
+        "IQ-TREE ML Distance",
+        "distance calculation (ML)"
+      ],
+      "tool_names": [
+        "IQ-TREE 3"
+      ],
+      "class_names": [
+        "MLDistancePlugin"
+      ],
+      "menu_path": [
+        "DISTANCE",
+        "Compute Pairwise Distances (ML)"
+      ],
+      "actions": [],
+      "file": "ml-distance.md"
+    },
+    {
+      "id": "uncorrected-distance",
+      "title": "Uncorrected p-distance",
+      "summary": "Uncorrected p-distance matrix with pairwise/complete deletion and DNA substitution rules.",
+      "plugin_names": [
+        "Uncorrected Distance (p-distance)",
+        "Uncorrected p-distance"
+      ],
+      "tool_names": [],
+      "class_names": [
+        "UncorrectedDistancePlugin"
+      ],
+      "menu_path": [
+        "DISTANCE",
+        "Compute Uncorrected Distances (p-distance)"
+      ],
+      "actions": [],
+      "file": "uncorrected-distance.md"
+    },
+    {
+      "id": "saturation",
+      "title": "Substitution saturation (BaCoCa C-value)",
+      "summary": "BaCoCa C = std(Ti/Tv)/std(p): saturation plots and per-alignment statistics.",
+      "plugin_names": [
+        "Substitution Saturation Analysis"
+      ],
+      "tool_names": [],
+      "class_names": [
+        "SubstitutionSaturationPlugin"
+      ],
+      "menu_path": [
+        "DISTANCE",
+        "Calculate & Plot Substitution Saturation"
+      ],
+      "actions": [],
+      "file": "saturation.md"
+    },
+    {
+      "id": "pdguide",
+      "title": "PD-Guide",
+      "summary": "Calibration setup and dating guidance over LSD2, with method slots for other engines.",
+      "plugin_names": [
+        "PD-Guide"
+      ],
+      "tool_names": [
+        "LSD2"
+      ],
+      "class_names": [
+        "PdGuidePlugin"
+      ],
+      "menu_path": [
+        "PHYLOGENY",
+        "PD-Guide"
+      ],
+      "actions": [],
+      "file": "pdguide.md"
+    },
+    {
+      "id": "sequence-viewer",
+      "title": "Sequence Viewer",
+      "summary": "View, edit, save and hand off multiple-sequence alignments.",
+      "plugin_names": [
+        "Sequence Viewer"
+      ],
+      "tool_names": [],
+      "class_names": [
+        "SequenceAlignmentViewer"
+      ],
+      "menu_path": [
+        "ALIGN",
+        "Open Sequence Files"
+      ],
+      "actions": [],
+      "file": "sequence-viewer.md"
+    },
+    {
+      "id": "console",
+      "title": "YR-MPE Console",
+      "summary": "Open a shell with the bundled tool paths or create a PhyloBOT project.",
+      "plugin_names": [
+        "YR-MPE Console"
+      ],
+      "tool_names": [],
+      "class_names": [
+        "YRMPEConsolePlugin"
+      ],
+      "menu_path": [
+        "WORKSPACE"
+      ],
+      "actions": [],
+      "file": "console.md"
+    },
+    {
+      "id": "gcf",
+      "title": "Gene Concordance Factors (gCF)",
+      "summary": "IQ-TREE 3 gene concordance factors on a fixed species tree, exported as a split table.",
+      "plugin_names": [
+        "Gene Concordance Factors (gCF)"
+      ],
+      "tool_names": [
+        "IQ-TREE 3"
+      ],
+      "class_names": [
+        "GeneConcordancePlugin"
+      ],
+      "menu_path": [
+        "SPECIES TREE",
+        "Gene Concordance (gCF)"
+      ],
+      "actions": [],
+      "file": "gcf.md"
+    },
+    {
+      "id": "scf",
+      "title": "Site Concordance Factors (sCF)",
+      "summary": "IQ-TREE 3 likelihood site concordance factors on a fixed species tree, exported as a split table.",
+      "plugin_names": [
+        "Site Concordance Factors (sCF)"
+      ],
+      "tool_names": [
+        "IQ-TREE 3"
+      ],
+      "class_names": [
+        "SiteConcordancePlugin"
+      ],
+      "menu_path": [
+        "SPECIES TREE",
+        "Site Concordance (sCF)"
+      ],
+      "actions": [],
+      "file": "scf.md"
+    },
+    {
+      "id": "site-diagnostics",
+      "title": "Site Concordance Diagnostics (sCF + CASTER q1-q3)",
+      "summary": "Compare IQ-TREE 3 likelihood sCF with CASTER-site q1/q2/q3 on a fixed species tree.",
+      "plugin_names": [
+        "Site Concordance Diagnostics (sCF + CASTER q1-q3)"
+      ],
+      "tool_names": [
+        "IQ-TREE 3",
+        "caster-site"
+      ],
+      "class_names": [
+        "SiteDiagnosticsPlugin"
+      ],
+      "menu_path": [
+        "SPECIES TREE",
+        "Site Diagnostics (sCF + CASTER)"
+      ],
+      "actions": [],
+      "file": "site-diagnostics.md"
+    },
+    {
+      "id": "msc-diagnostics",
+      "title": "MSC Branch Diagnostics (gCF + ASTER CU)",
+      "summary": "Joint gCF, ASTRAL-IV and wASTRAL coalescent-unit diagnostics on a fixed species tree.",
+      "plugin_names": [
+        "MSC Branch Diagnostics (gCF + ASTER CU)"
+      ],
+      "tool_names": [
+        "IQ-TREE 3",
+        "astral"
+      ],
+      "class_names": [
+        "MSCDiagnosticsPlugin"
+      ],
+      "menu_path": [
+        "SPECIES TREE",
+        "MSC Diagnostics (gCF + ASTER CU)"
+      ],
+      "actions": [],
+      "file": "msc-diagnostics.md"
+    }
+  ]
+}

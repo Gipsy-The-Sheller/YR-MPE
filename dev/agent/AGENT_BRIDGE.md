@@ -13,13 +13,14 @@
   responses.jsonl   # request/response pairs only
   stdout.log        # raw stdout/app lines
   stderr.log        # raw stderr/error lines
-  control.json      # session id, pid, token, action list
+  control.json      # session id, pid, action list (never the token)
   READY             # present while the bridge is alive
 ```
 
-`control.json` has `session_dir`, `schema`, `pid`, `token_required`,
-`token`, and the registered action list. `<temp>/yrmpe-agent-*/latest.txt`
-points at the most recent session.
+`control.json` has `session_dir`, `schema`, `pid`, `token_required` and the
+registered action list. It never contains the token itself; the token is
+copied from About → Agent bridge. `<temp>/yrmpe-agent-*/latest.txt` points at
+the most recent session.
 
 ## Command
 
@@ -110,7 +111,8 @@ printf '%s\n' '{"id":"c1","op":"bridge.ping"}' >> "$SESSION/commands.jsonl"
 - Local files only; no TCP port, no shell execution.
 - Only registered semantic actions can run. There is no `eval`, `exec`, or
   arbitrary command action.
-- Optional `token` in `control.json`; commands must echo it.
+- Sessions started from About require a random token; commands must echo it.
+  `control.json` only reports `token_required`, never the token value.
 - The session directory inherits the user's OS permissions; do not place it in
   a world-writable directory.
 - Paths supplied to actions are validated by the action handler (for example,
@@ -140,7 +142,33 @@ reuse the same command/response schema.
 Start with `QTimer`; add a thread only if the GUI stalls or sub-50 ms command
 latency is required. Tool runs, not file I/O, dominate the workflow.
 
-## Host wiring (next step)
+## Starting a session from the Workbench
+
+When YPhylo Workbench runs inside a host such as YRTools, no bridge exists
+unless the user starts one. Use **WORKSPACE → About YPhylo Workbench →
+Agent bridge → Start agent session**. The host creates a token-protected
+`AgentBridge` in a temporary session directory and polls it from a `QTimer`
+on the GUI thread; the About dialog then shows the ready-to-copy prompt.
+
+The default registry exposes:
+
+- `workbench.info` — application, workspace and runtime paths.
+- `workbench.list_datasets` — workspace datasets, items and sequence counts.
+- `workbench.list_windows` — open plugin windows that expose `agent_invoke`.
+- `workbench.invoke_plugin` — call a plugin action by `window_id` and action id.
+- `workbench.open_orthofinder` — open the One-Step OrthoFinder window.
+
+Call `workbench.list_windows` first, then pass its `window_id` plus the
+plugin's native action id (for example `orthofinder.run`) to
+`workbench.invoke_plugin`. This keeps one stable host API while plugins keep
+their own action namespaces.
+
+A launcher that already created a bridge (for example
+`E:/YPhylo-Workbench-AgentTest/start_workbench.py`) sets
+`window.agent_bridge`; About reuses that session and does not start a second
+one.
+
+## Host wiring
 
 1. Create `UIActionRegistry` at app startup.
 2. Register the active plugins/panels:
@@ -163,3 +191,69 @@ actions that manipulate widgets.
 - The `op` values are exactly `UIActionRegistry` ids, not invented commands.
 - A future named-pipe / Unix-socket / localhost JSON-RPC transport can reuse
   the same command/response/event schema.
+
+## Discovery and skills
+
+An agent should not guess plugin names. The host exposes:
+
+- `workbench.menu` - toolbar menu tree plus a flat list of generated action
+  ids, labels, paths, enabled/checked state and a short `description` taken
+  from the plugin manifest / skill catalog; `query` matches id, label or
+  description. `workbench.invoke_menu` triggers
+  a leaf action by id or label path; triggers are deferred so a modal dialog
+  does not block the bridge response.
+- `workbench.workspace` - datasets, items, selection states, basket ids and
+  run/stream/import history.
+- `workbench.sidebar` - Selected basket contents, recommended send-to
+  operations (available and unavailable with reasons), the current Inspector
+  operations and the task-queue summary.
+- `workbench.jobs` - list queued/running/finished/error tasks. Each row has a
+  stable `job_id`, `state`, `status`, progress text, command preview and
+  artifact paths.
+- `workbench.job_status` / `workbench.inspect_job` - inspect one job by
+  `job_id`.
+- `workbench.cancel_job` - cancel a queued or running job. A plugin's own
+  Stop button uses the same queue cancellation path when the job is queued.
+- `workbench.skills` - the skill catalog under `YR_MPE/skills/manifest.json`.
+- `workbench.help_doc` - fetch a skill by id, plugin name, or open window id.
+  A live plugin document includes `controls`: one row per GUI control with
+  `current`, `resolved`, `cli_args`, and any GUI-only note.
+
+Every `BasePlugin` also exposes a generic window API through
+`workbench.invoke_plugin`:
+
+- `plugin.help_doc`
+- `plugin.inspect_status`
+- `plugin.inspect_controls`
+- `plugin.inspect_console`
+- `plugin.modify_options` (`options` object keyed by control id/widget)
+- `plugin.run` - submits through the host task queue and returns `job_id`
+  when the workbench started a queue; poll `workbench.job_status`
+- `plugin.stop` - cancels the queue job when one is active
+- `plugin.export_to_workspace`
+- `plugin.close`
+
+Plugin-specific APIs such as `orthofinder.*` override the generic surface.
+
+The skill contract requires `control_bindings()` to map each CLI-capable GUI
+control to the exact option printed by the tool's `--help`. GUI-only controls
+use `"cli": []` and a note. Tests for ModelTest-NG and RAxML-NG assert every
+declared flag occurs in the executable's `--help` output.
+
+## Workflow preview
+
+- `workbench.workflow_graph` returns the current workspace (or a supplied
+  compiled `plan`) as data/tool nodes and edges.
+- `workbench.show_workflow_preview` opens the workspace graph.
+- `workbench.preview_workflow` opens a compiled `yrmpe.workflow.v1` plan.
+- Clicking a tool node opens its plugin in placeholder-locked workflow mode;
+  the plugin exposes `workflow_configured` instead of running immediately.
+
+## BEST / MrBayes MSC
+
+- `workbench.open_tool` with `tool="best"` opens the BEST window.
+- `best.apply_block` accepts a complete MRBAYES block; the form is updated
+  from the parsed values and the response returns `canonical_block`,
+  `unparsed_lines` and `roundtrip_equal`.
+- `best.modify_options` addresses individual controls; `best.run` starts the
+  single-process MrBayes runner; `best.stop` cancels it.
