@@ -257,7 +257,8 @@ def columns_for(mode: str) -> List[str]:
                 "sN", "branch_length"]
     if mode == "site_diagnostics":
         return ["split", "split_size", "branch_id", "sCF", "sDF1", "sDF2",
-                "sN", "q1_caster", "q2_caster", "q3_caster", "q_negative"]
+                "sN", "q1_caster", "q2_caster", "q3_caster", "CU_caster",
+                "q_negative"]
     return ["split", "split_size", "branch_id", "gCF", "gDF1", "gDF2",
             "gDFP", "gN", "qCF", "qDF1", "qDF2", "CU_astral", "CU_wastral",
             "x_gcf", "gDFP_flag", "wastral_status"]
@@ -434,6 +435,7 @@ def merge_site_diagnostics_rows(
         q1 = caster.get("q1", "")
         q2 = caster.get("q2", "")
         q3 = caster.get("q3", "")
+        cu = caster.get("CULength", "")
         negative = False
         for value in (q1, q2, q3):
             try:
@@ -452,6 +454,7 @@ def merge_site_diagnostics_rows(
             "q1_caster": q1,
             "q2_caster": q2,
             "q3_caster": q3,
+            "CU_caster": cu,
             "q_negative": "yes" if negative else "",
         })
         seen.add(split)
@@ -461,6 +464,7 @@ def merge_site_diagnostics_rows(
         q1 = caster.get("q1", "")
         q2 = caster.get("q2", "")
         q3 = caster.get("q3", "")
+        cu = caster.get("CULength", "")
         negative = False
         for value in (q1, q2, q3):
             try:
@@ -479,6 +483,7 @@ def merge_site_diagnostics_rows(
             "q1_caster": q1,
             "q2_caster": q2,
             "q3_caster": q3,
+            "CU_caster": cu,
             "q_negative": "yes" if negative else "",
         })
     rows.sort(key=lambda row: (int(row["split_size"]), row["split"]))

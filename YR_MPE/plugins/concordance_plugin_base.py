@@ -435,6 +435,9 @@ class ConcordancePluginBase(BasePlugin):
         self.table_view.horizontalHeader().setStretchLastSection(True)
         self.view_tabs.addTab(self.table_view, "Table")
 
+        # Tab index -> (figure, filename stem) for the Save graph button.
+        self._graph_figures = {}
+
         overview = QWidget()
         overview_layout = QVBoxLayout(overview)
         overview_layout.setContentsMargins(0, 0, 0, 0)
@@ -442,20 +445,33 @@ class ConcordancePluginBase(BasePlugin):
         self.overview_canvas = FigureCanvas(self.overview_figure)
         self.overview_canvas.setMinimumHeight(260)
         overview_layout.addWidget(self.overview_canvas)
-        self.view_tabs.addTab(overview, "Overview")
+        index = self.view_tabs.addTab(overview, "Overview")
+        self._graph_figures[index] = (self.overview_figure, "overview")
 
-        simplex = QWidget()
-        simplex_layout = QVBoxLayout(simplex)
-        simplex_layout.setContentsMargins(0, 0, 0, 0)
-        self.simplex_note = QLabel("")
-        self.simplex_note.setWordWrap(True)
-        self.simplex_note.setStyleSheet("color: palette(mid);")
-        simplex_layout.addWidget(self.simplex_note)
-        self.simplex_figure = Figure(figsize=(6.0, 4.0), dpi=100)
-        self.simplex_canvas = FigureCanvas(self.simplex_figure)
-        self.simplex_canvas.setMinimumHeight(260)
-        simplex_layout.addWidget(self.simplex_canvas, 1)
-        self.view_tabs.addTab(simplex, "Simplex")
+        self.simplex_views = {}
+        self.simplex_notes = {}
+        for key, title in self._simplex_tab_specs():
+            simplex = QWidget()
+            simplex_layout = QVBoxLayout(simplex)
+            simplex_layout.setContentsMargins(0, 0, 0, 0)
+            note = QLabel("")
+            note.setWordWrap(True)
+            note.setStyleSheet("color: palette(mid);")
+            simplex_layout.addWidget(note)
+            figure = Figure(figsize=(6.0, 4.0), dpi=100)
+            canvas = FigureCanvas(figure)
+            canvas.setMinimumHeight(260)
+            simplex_layout.addWidget(canvas, 1)
+            index = self.view_tabs.addTab(simplex, title)
+            stem = "simplex" if key == "combined" else "simplex_%s" % key
+            self._graph_figures[index] = (figure, stem)
+            self.simplex_views[key] = (figure, canvas)
+            self.simplex_notes[key] = note
+            if "simplex_figure" not in self.__dict__:
+                # Backward-compatible aliases for the first simplex view.
+                self.simplex_figure = figure
+                self.simplex_canvas = canvas
+                self.simplex_note = note
         self._draw_simplex_placeholder()
 
         bipartition = QWidget()
@@ -495,8 +511,9 @@ class ConcordancePluginBase(BasePlugin):
             note = QLabel(
                 "q1/q2/q3 are CASTER-site quartet scores and may be negative "
                 "because of negative quartet weights. sCF is sensitive to "
-                "multiple hits. Blank cells indicate a split missing from "
-                "that program."
+                "multiple hits. The CU_caster column is the CASTER "
+                "coalescent-unit length used to colour the qCF simplex. "
+                "Blank cells indicate a split missing from that program."
             )
             note.setWordWrap(True)
             note.setStyleSheet("color: palette(mid);")
@@ -518,6 +535,17 @@ class ConcordancePluginBase(BasePlugin):
         layout.addLayout(controls)
         self.view_tabs.currentChanged.connect(self._update_graph_button)
         self._draw_placeholder()
+
+    def _simplex_tab_specs(self):
+        """One tab per simplex that can be read on its own.
+
+        sCF and CASTER q1-q3 are separate closed compositions with independent
+        DF1/DF2 ordering, so the site diagnostics plugin shows two figures
+        rather than stacking both triangles in one canvas.
+        """
+        if self.MODE == "site_diagnostics":
+            return [("scf", "sCF simplex"), ("caster", "CASTER qCF simplex")]
+        return [("combined", "Simplex")]
 
     def _draw_placeholder(self):
         self.overview_figure.clear()
@@ -612,15 +640,16 @@ class ConcordancePluginBase(BasePlugin):
         self.bipartition_key.setText(key or "No splits.")
 
     def _draw_simplex_placeholder(self):
-        self.simplex_figure.clear()
-        axis = self.simplex_figure.add_subplot(111)
-        axis.text(0.5, 0.5, "Run the analysis to see the simplex",
-                  ha="center", va="center", transform=axis.transAxes,
-                  color="#6b7280")
-        axis.set_axis_off()
-        self.simplex_canvas.draw_idle()
+        for figure, canvas in self.simplex_views.values():
+            figure.clear()
+            axis = figure.add_subplot(111)
+            axis.text(0.5, 0.5, "Run the analysis to see the simplex",
+                      ha="center", va="center", transform=axis.transAxes,
+                      color="#6b7280")
+            axis.set_axis_off()
+            canvas.draw_idle()
 
-    def _simplex_note_text(self):
+    def _simplex_note_text(self, key="combined"):
         if self.MODE == "gcf":
             return ("Ternary = closed composition of gCF, gDF1 and gDF2; "
                     "colour encodes gDFP (%).")
@@ -628,62 +657,78 @@ class ConcordancePluginBase(BasePlugin):
             return "Ternary = closed composition of sCF, sDF1 and sDF2."
         if self.MODE == "diagnostics":
             return ("gCF panel is normalized over (gCF, gDF1, gDF2) with "
-                    "gDFP as colour; qCF panel uses ASTRAL-IV q1-q3. Panels "
-                    "are separate because DF1/DF2 order may differ.")
-        return ("sCF and CASTER q1-q3 are closed compositions; panels are "
-                "separate because DF1/DF2 order may differ. Negative CASTER "
-                "q values cannot be plotted and are omitted.")
+                    "gDFP as colour; the ASTRAL-IV qCF panel uses q1-q3 and "
+                    "encodes CULength as colour. Panels are separate because "
+                    "DF1/DF2 order may differ.")
+        if key == "caster":
+            return ("Ternary = closed composition of CASTER q1, q2 and q3; "
+                    "colour encodes CULength. Negative q values cannot be "
+                    "plotted and are omitted.")
+        return "Ternary = closed composition of sCF, sDF1 and sDF2."
 
     def _draw_simplex(self, rows):
-        self.simplex_note.setText(self._simplex_note_text())
-        self.simplex_figure.clear()
+        for key, note in self.simplex_notes.items():
+            note.setText(self._simplex_note_text(key))
         if not rows:
-            axis = self.simplex_figure.add_subplot(111)
-            axis.text(0.5, 0.5, "No rows", ha="center", va="center",
-                      transform=axis.transAxes, color="#6b7280")
-            axis.set_axis_off()
-            self.simplex_canvas.draw_idle()
+            for figure, canvas in self.simplex_views.values():
+                figure.clear()
+                axis = figure.add_subplot(111)
+                axis.text(0.5, 0.5, "No rows", ha="center", va="center",
+                          transform=axis.transAxes, color="#6b7280")
+                axis.set_axis_off()
+                canvas.draw_idle()
             return
 
         if self.MODE == "gcf":
-            panels = [(
-                rows, ("gCF", "gDF1", "gDF2"),
-                ("gCF", "gDF1", "gDF2"), "gCF simplex", "gDFP",
-            )]
+            panels_by_view = {"combined": [(
+                rows, ("gCF", "gDF1", "gDF2"), ("gCF", "gDF1", "gDF2"),
+                "gCF simplex", "gDFP", "gDFP (%)", (0, 100),
+            )]}
         elif self.MODE == "scf":
-            panels = [(
-                rows, ("sCF", "sDF1", "sDF2"),
-                ("sCF", "sDF1", "sDF2"), "sCF simplex", None,
-            )]
+            panels_by_view = {"combined": [(
+                rows, ("sCF", "sDF1", "sDF2"), ("sCF", "sDF1", "sDF2"),
+                "sCF simplex", None, "", None,
+            )]}
         elif self.MODE == "site_diagnostics":
-            panels = [
-                (rows, ("sCF", "sDF1", "sDF2"),
-                 ("sCF", "sDF1", "sDF2"), "sCF simplex", None),
-                (rows, ("q1_caster", "q2_caster", "q3_caster"),
-                 ("q1", "q2", "q3"), "CASTER q1-q3 simplex", None),
-            ]
+            panels_by_view = {
+                "scf": [(
+                    rows, ("sCF", "sDF1", "sDF2"), ("sCF", "sDF1", "sDF2"),
+                    "sCF simplex", None, "", None,
+                )],
+                "caster": [(
+                    rows, ("q1_caster", "q2_caster", "q3_caster"),
+                    ("q1", "q2", "q3"), "CASTER qCF simplex",
+                    "CU_caster", "CULength (CU)", None,
+                )],
+            }
         else:
-            panels = [
-                (rows, ("gCF", "gDF1", "gDF2"),
-                 ("gCF", "gDF1", "gDF2"), "gCF simplex", "gDFP"),
-                (rows, ("qCF", "qDF1", "qDF2"),
-                 ("qCF", "qDF1", "qDF2"), "ASTRAL-IV qCF simplex", None),
-            ]
+            panels_by_view = {"combined": [
+                (rows, ("gCF", "gDF1", "gDF2"), ("gCF", "gDF1", "gDF2"),
+                 "gCF simplex", "gDFP", "gDFP (%)", (0, 100)),
+                (rows, ("qCF", "qDF1", "qDF2"), ("qCF", "qDF1", "qDF2"),
+                 "ASTRAL-IV qCF simplex", "CU_astral",
+                 "CULength (CU)", None),
+            ]}
 
-        if len(panels) == 1:
-            axes = [self.simplex_figure.add_subplot(111)]
-        else:
-            grid = self.simplex_figure.add_gridspec(1, 2)
-            axes = [
-                self.simplex_figure.add_subplot(grid[0, 0]),
-                self.simplex_figure.add_subplot(grid[0, 1]),
-            ]
-        for axis, panel in zip(axes, panels):
-            self._draw_simplex_panel(axis, *panel)
-        self.simplex_figure.tight_layout()
-        self.simplex_canvas.draw_idle()
+        for key, panels in panels_by_view.items():
+            view = self.simplex_views.get(key)
+            if view is None:
+                continue
+            figure, canvas = view
+            figure.clear()
+            if len(panels) == 1:
+                axes = [figure.add_subplot(111)]
+            else:
+                grid = figure.add_gridspec(1, len(panels))
+                axes = [figure.add_subplot(grid[0, index])
+                        for index in range(len(panels))]
+            for axis, panel in zip(axes, panels):
+                self._draw_simplex_panel(axis, *panel)
+            figure.tight_layout()
+            canvas.draw_idle()
 
-    def _draw_simplex_panel(self, axis, rows, keys, labels, title, color_key):
+    def _draw_simplex_panel(self, axis, rows, keys, labels, title, color_key,
+                            color_label="", color_range=None):
         root3 = math.sqrt(3.0)
         axis.plot([0, 1, 0.5, 0], [0, 0, root3 / 2, 0],
                   color="#374151", linewidth=1.0)
@@ -720,27 +765,60 @@ class ConcordancePluginBase(BasePlugin):
             a, b, c = [value / total for value in values]
             points.append((c + 0.5 * a, a * root3 / 2))
             if color_key:
-                color_values.append(_float(row.get(color_key)) or 0.0)
+                color_values.append(_float(row.get(color_key)))
+
+        def _plain_scatter(selection):
+            if not selection:
+                return
+            axis.scatter(
+                [point[0] for point in selection],
+                [point[1] for point in selection],
+                color="#4e699a", s=28, edgecolors="white",
+                linewidths=0.5, alpha=0.9, zorder=3,
+            )
 
         if points:
-            xs = [point[0] for point in points]
-            ys = [point[1] for point in points]
-            if color_key and max(color_values) > 0:
-                scatter = axis.scatter(
-                    xs, ys, c=color_values, cmap="Blues", vmin=0, vmax=100,
-                    s=28, edgecolors="#4e699a", linewidths=0.5, alpha=0.9,
-                    zorder=3,
+            if color_key:
+                colored = [
+                    (point[0], point[1], value)
+                    for point, value in zip(points, color_values)
+                    if value is not None
+                ]
+                missing = [
+                    point for point, value in zip(points, color_values)
+                    if value is None
+                ]
+                values = [entry[2] for entry in colored]
+                usable = bool(colored) and (
+                    color_range is None or max(values) > 0
                 )
-                colorbar = self.simplex_figure.colorbar(
-                    scatter, ax=axis, fraction=0.046, pad=0.03
-                )
-                colorbar.set_label("gDFP (%)", fontsize=7)
-                colorbar.ax.tick_params(labelsize=6)
+                if usable:
+                    kwargs = {}
+                    if color_range is not None:
+                        kwargs["vmin"], kwargs["vmax"] = color_range
+                    scatter = axis.scatter(
+                        [entry[0] for entry in colored],
+                        [entry[1] for entry in colored],
+                        c=[entry[2] for entry in colored], cmap="Blues",
+                        s=28, edgecolors="#4e699a", linewidths=0.5,
+                        alpha=0.9, zorder=3, **kwargs,
+                    )
+                    colorbar = axis.figure.colorbar(
+                        scatter, ax=axis, fraction=0.046, pad=0.03
+                    )
+                    colorbar.set_label(color_label, fontsize=7)
+                    colorbar.ax.tick_params(labelsize=6)
+                    if missing:
+                        axis.scatter(
+                            [point[0] for point in missing],
+                            [point[1] for point in missing],
+                            color="#cbd5e1", s=24, edgecolors="white",
+                            linewidths=0.5, zorder=2,
+                        )
+                else:
+                    _plain_scatter(points)
             else:
-                axis.scatter(
-                    xs, ys, color="#4e699a", s=28, edgecolors="white",
-                    linewidths=0.5, alpha=0.9, zorder=3,
-                )
+                _plain_scatter(points)
         else:
             axis.text(0.5, 0.45, "No non-negative complete vectors",
                       ha="center", va="center", color="#6b7280",
@@ -1006,14 +1084,16 @@ class ConcordancePluginBase(BasePlugin):
             return
         if index is None:
             index = self.view_tabs.currentIndex()
-        self.save_graph_button.setEnabled(index in (1, 2))
+        self.save_graph_button.setEnabled(
+            index in getattr(self, "_graph_figures", {})
+        )
 
     def _save_graph(self):
         index = self.view_tabs.currentIndex()
-        if index not in (1, 2):
+        entry = getattr(self, "_graph_figures", {}).get(index)
+        if entry is None:
             return
-        figure = self.overview_figure if index == 1 else self.simplex_figure
-        stem = "overview" if index == 1 else "simplex"
+        figure, stem = entry
         path, selected = QFileDialog.getSaveFileName(
             self,
             "Save graph",

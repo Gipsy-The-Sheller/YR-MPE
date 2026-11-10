@@ -27,6 +27,14 @@ from YR_MPE.runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec  # n
 
 APP = QApplication.instance() or QApplication(sys.argv)
 
+# Repo config.json stores tool paths relative to YR_MPE/ with a leading
+# slash; on Windows os.path.isabs() treats that as absolute, so the base
+# plugin would block on its configuration-guide dialog. These tests draw
+# widgets only and never execute a tool.
+from YR_MPE.templates.base_plugin_ui import BasePlugin  # noqa: E402
+
+BasePlugin.show_config_guide = lambda self: None
+
 
 class ConcordanceCommonTests(unittest.TestCase):
     def test_smaller_side_is_canonical(self):
@@ -120,7 +128,8 @@ class ConcordanceCommonTests(unittest.TestCase):
             }
         ]
         caster_rows = {
-            ("A", "B"): {"q1": "0.6", "q2": "-0.1", "q3": "0.5"}
+            ("A", "B"): {"q1": "0.6", "q2": "-0.1", "q3": "0.5",
+                         "CULength": "0.8"}
         }
         cols, rows, summary = common.merge_site_diagnostics_rows(
             columns, cf_rows, caster_rows
@@ -128,6 +137,7 @@ class ConcordanceCommonTests(unittest.TestCase):
         self.assertEqual(cols, columns)
         self.assertEqual(rows[0]["sCF"], "70")
         self.assertEqual(rows[0]["q2_caster"], "-0.1")
+        self.assertEqual(rows[0]["CU_caster"], "0.8")
         self.assertEqual(rows[0]["q_negative"], "yes")
         self.assertEqual(summary["caster_branches"], 1)
 
@@ -294,11 +304,17 @@ class ConcordancePluginTests(unittest.TestCase):
         try:
             site._draw_simplex([
                 {"split": "A,B", "sCF": "70", "sDF1": "20", "sDF2": "10",
-                 "q1_caster": "0.6", "q2_caster": "0.2", "q3_caster": "0.2"},
+                 "q1_caster": "0.6", "q2_caster": "0.2", "q3_caster": "0.2",
+                 "CU_caster": "0.8"},
                 {"split": "A,B,C", "sCF": "30", "sDF1": "50", "sDF2": "20",
-                 "q1_caster": "0.2", "q2_caster": "0.7", "q3_caster": "0.1"},
+                 "q1_caster": "0.2", "q2_caster": "0.7", "q3_caster": "0.1",
+                 "CU_caster": "0.4"},
             ])
-            self.assertEqual(len(site.simplex_figure.axes), 2)
+            # Two independent figures: sCF and CASTER qCF.
+            self.assertEqual(set(site.simplex_views), {"scf", "caster"})
+            self.assertEqual(len(site.simplex_views["scf"][0].axes), 1)
+            # CASTER figure carries a CULength colourbar.
+            self.assertEqual(len(site.simplex_views["caster"][0].axes), 2)
         finally:
             site.close()
 
@@ -311,6 +327,20 @@ class ConcordancePluginTests(unittest.TestCase):
             self.assertEqual(len(gcf.simplex_figure.axes), 1)
         finally:
             gcf.close()
+
+        diag = self._plugin(MSCDiagnosticsPlugin)
+        try:
+            diag._draw_simplex([
+                {"split": "A,B", "gCF": "70", "gDF1": "20", "gDF2": "10",
+                 "gDFP": "10", "qCF": "0.6", "qDF1": "0.25",
+                 "qDF2": "0.15", "CU_astral": "0.9"},
+            ])
+            # One Simplex tab with two panels; each panel has its own
+            # colourbar (gDFP and CULength).
+            self.assertEqual(set(diag.simplex_views), {"combined"})
+            self.assertEqual(len(diag.simplex_figure.axes), 4)
+        finally:
+            diag.close()
 
     def test_table_result_spec(self):
         plugin = self._plugin(GeneConcordancePlugin)
