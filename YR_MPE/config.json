@@ -1,86 +1,149 @@
 [
-    {
-        "name": "Muscle5",
-        "path": "/bin/muscle5/muscle.exe",
-        "citations": ["edgar2022muscle5"]
-    },
-    {
-        "name": "Clustal Omega",
-        "path": "/bin/clustalo/clustalo.exe",
-        "citations": ["sievers2011fast"]
-    },
-    {
-        "name": "MAFFT",
-        "path": "/bin/mafft/mafft.bat",
-        "citations": ["katoh2013mafft"]
-    },
-    {
-        "name": "IQ-TREE 3",
-        "path": "/bin/iqtree3/iqtree3.exe",
-        "citations": ["minh2020iqtree", "wong2025iqtree"]
-    },
-    {
-        "name": "TrimAl",
-        "path": "/bin/trimAl/bin/trimal.exe",
-        "citations": ["capellagutierrez2009trimal"]
-    },
-    {
-        "name": "GBlocks",
-        "path": "/bin/Gblocks/GBlocks.exe",
-        "citations": ["talavera2007improvement"]
-    },
-    {
-        "name": "PhyloBayes-mpi",
-        "path": "/bin/pbmpi-1.9/pb_mpi.exe",
-        "citations": ["lartillot2004a", "lartillot2006computing", "lartillot2007suppression", "lartillot2009phylobayes"]
-    },
-    {
-        "name": "MPIRun",
-        "path": "/bin/msmpi/mpiexec.exe"
-    },
-    {
-        "name": "PhyloBayes-bpcomp",
-        "path": "/bin/pbmpi-1.9/bpcomp.exe",
-        "citations": ["lartillot2009phylobayes"]
-    },
-    {
-        "name": "MrBayes-MPI-BEAGLE",
-        "path": "/bin/mb/mb.exe",
-        "citations": ["ronquist2012mrbayes", "ayres2019beagle"]
-    },
-    {
-        "name": "caster-site",
-        "path": "/bin/aster/caster-site.exe",
-        "citations": ["zhang2025aster", "zhang2025caster"]
-    },
-    {
-        "name": "astral",
-        "path": "/bin/aster/astral.bat",
-        "citations": ["zhang2025aster"]
-    },
-    {
-        "name": "MACSE2",
-        "path": "/bin/macse/macse.bat",
-        "citations": ["ranwez2018macse", "ranwez2011macse"]
-    },
-    {
-        "name": "LSD2",
-        "path": "/bin/lsd2/lsd2.exe",
-        "citations": ["to2016fast"]
-    },
-    {
-        "name": "DecentTree",
-        "path": "/bin/decenttree/decenttree.exe",
-        "citations": ["wang2023decenttree"]
-    },
-    {
-        "name": "MPBoot",
-        "path": "/bin/mpboot/mpboot.exe",
-        "citations": ["hoang2018mpboot"]
-    },
-    {
-        "name": "OrthoFinder",
-        "path": "E:/YR-MPE_tutorial/YR-MPE_dev/dev/bin/orthofinder/orthofinder.exe",
-        "citations": ["emms2019orthofinder", "camacho2009blast", "vandongen2000mcl", "cock2009biopython"]
-    }
+  {
+    "name": "Muscle5",
+    "path": "/bin/muscle5/muscle.exe",
+    "citations": [
+      "edgar2022muscle5"
+    ]
+  },
+  {
+    "name": "Clustal Omega",
+    "path": "/bin/clustalo/clustalo.exe",
+    "citations": [
+      "sievers2011fast"
+    ]
+  },
+  {
+    "name": "MAFFT",
+    "path": "/bin/mafft/mafft.bat",
+    "citations": [
+      "katoh2013mafft"
+    ]
+  },
+  {
+    "name": "IQ-TREE 3",
+    "path": "/bin/iqtree3/iqtree3.exe",
+    "citations": [
+      "wong2026iqtree"
+    ]
+  },
+  {
+    "name": "ModelTest-NG",
+    "path": "/bin/modeltest-ng/modeltest-ng.exe",
+    "citations": [
+      "darriba2020modeltest"
+    ]
+  },
+  {
+    "name": "RAxML-NG",
+    "path": "/bin/raxml-ng/raxml-ng.exe",
+    "citations": [
+      "kozlov2019raxmlng"
+    ]
+  },
+  {
+    "name": "TrimAl",
+    "path": "/bin/trimAl/bin/trimal.exe",
+    "citations": [
+      "capellagutierrez2009trimal"
+    ]
+  },
+  {
+    "name": "GBlocks",
+    "path": "/bin/Gblocks/GBlocks.exe",
+    "citations": [
+      "talavera2007improvement"
+    ]
+  },
+  {
+    "name": "PhyloBayes-mpi",
+    "path": "/bin/pbmpi-1.9/pb_mpi.exe",
+    "citations": [
+      "lartillot2004a",
+      "lartillot2006computing",
+      "lartillot2007suppression",
+      "lartillot2009phylobayes",
+      "lartillot2013phylobayes"
+    ]
+  },
+  {
+    "name": "MPIRun",
+    "path": "/bin/msmpi/mpiexec.exe"
+  },
+  {
+    "name": "PhyloBayes-bpcomp",
+    "path": "/bin/pbmpi-1.9/bpcomp.exe",
+    "citations": [
+      "lartillot2009phylobayes"
+    ]
+  },
+  {
+    "name": "MrBayes-MPI-BEAGLE",
+    "path": "/bin/mb/mb.exe",
+    "citations": [
+      "ronquist2012mrbayes",
+      "ayres2019beagle"
+    ]
+  },
+  {
+    "name": "caster-site",
+    "path": "/bin/aster/caster-site.exe",
+    "citations": [
+      "zhang2025aster",
+      "zhang2025caster"
+    ]
+  },
+  {
+    "name": "astral",
+    "path": "/bin/aster/astral.bat",
+    "citations": [
+      "zhang2025aster"
+    ]
+  },
+  {
+    "name": "MACSE2",
+    "path": "/bin/macse/macse.bat",
+    "citations": [
+      "ranwez2018macse",
+      "ranwez2011macse"
+    ]
+  },
+  {
+    "name": "LSD2",
+    "path": "/bin/lsd2/lsd2.exe",
+    "citations": [
+      "to2016fast"
+    ]
+  },
+  {
+    "name": "DecentTree",
+    "path": "/bin/decenttree/decenttree.exe",
+    "citations": [
+      "wang2023decenttree"
+    ]
+  },
+  {
+    "name": "MPBoot",
+    "path": "/bin/mpboot/mpboot.exe",
+    "citations": [
+      "hoang2018mpboot"
+    ]
+  },
+  {
+    "name": "TreeRecs",
+    "path": "/bin/treerecs/treerecs.exe",
+    "citations": [
+      "penel2020treerecs"
+    ]
+  },
+  {
+    "name": "OrthoFinder",
+    "path": "E:/YR-MPE_tutorial/YR-MPE_dev/dev/bin/orthofinder/orthofinder.exe",
+    "citations": [
+      "emms2019orthofinder",
+      "camacho2009blast",
+      "vandongen2000mcl",
+      "cock2009biopython"
+    ]
+  }
 ]

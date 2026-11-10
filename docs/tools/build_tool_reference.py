@@ -39,6 +39,9 @@ GROUPS = [
     ("Dating and selection", [
         "lsd2", "pdguide", "codon-ztest", "batch-dnds",
     ]),
+    ("Workflow execution", [
+        "workflow-runner",
+    ]),
     ("Visualization and diagnostics", [
         "icytree", "minitracer", "rf", "console",
     ]),
@@ -92,7 +95,15 @@ def inline(text: str) -> str:
     text = text.replace("\uE000", "|")
 
     def code(match):
-        return hold(r"\texttt{%s}" % latex_escape(match.group(1)))
+        value = latex_escape(match.group(1))
+        # Long option lists and paths have no natural spaces. Give TeX
+        # explicit break points so they wrap instead of crossing the margin.
+        value = value.replace("|", "|\\allowbreak ")
+        value = value.replace("/", "/\\allowbreak ")
+        value = value.replace(".", ".\\allowbreak ")
+        value = value.replace("\\_", "\\_\\allowbreak ")
+        value = value.replace("(", "\\allowbreak (")
+        return hold(r"\texttt{%s}" % value)
 
     text = re.sub(r"`([^`]+)`", code, text)
 
@@ -131,14 +142,18 @@ def table(lines: list[str]) -> str:
         r">{\raggedright\arraybackslash}p{%.2f\linewidth}" % width
         for _ in range(ncols)
     ) + "@{}"
-    out = [r"\begin{longtable}{%s}" % spec, r"\toprule"]
+    out = [
+        r"{\footnotesize",
+        r"\begin{longtable}{%s}" % spec,
+        r"\toprule",
+    ]
     header = rows[0] + [""] * (ncols - len(rows[0]))
     out.append(" & ".join(inline(cell) for cell in header) + r" \\")
     out.extend([r"\midrule", r"\endhead"])
     for row in rows[1:]:
         row = row + [""] * (ncols - len(row))
         out.append(" & ".join(inline(cell) for cell in row) + r" \\")
-    out.extend([r"\bottomrule", r"\end{longtable}", ""])
+    out.extend([r"\bottomrule", r"\end{longtable}", r"}", ""])
     return "\n".join(out)
 
 
@@ -254,11 +269,23 @@ def main():
         r"\documentclass[11pt]{report}",
         r"\input{shared/preamble}",
         r"\usepackage{lmodern}",
-        r"\title{YPhylo Workbench Tool Reference}",
-        r"\author{Zhi-Jie Xu}",
-        r"\date{Version 1.1.0 --- \today}",
+        "",
+        "% Command lines in this reference are often wider than the text block.",
+        "% Wrap them instead of running into the margin.",
+        r"\lstset{",
+        r"  basicstyle=\ttfamily\small,",
+        r"  breaklines=true,",
+        r"  breakatwhitespace=false,",
+        r"  breakindent=0pt,",
+        r"  columns=fullflexible,",
+        r"  keepspaces=true,",
+        r"  showstringspaces=false,",
+        r"  frame=single,",
+        r"}",
+        r"\setlength{\emergencystretch}{3em}",
         r"\begin{document}",
-        r"\maketitle",
+        r"\supportingtitlepage{YPhylo Workbench Tool Reference}",
+        r"  {Plugin-by-plugin GUI, CLI and agent reference}",
         r"\setcounter{tocdepth}{1}",
         r"\tableofcontents",
         r"\chapter*{Preface}",
@@ -271,10 +298,12 @@ def main():
         "explicitly instead of inventing a command line.",
         "",
         "The skill files remain the source of truth. Regenerate this document "
-        "with \\texttt{python docs/tools/build\\_tool\\_reference.py} from the "
-        "repository root, then build it with "
-        "\\texttt{latexmk -lualatex manual/tool-reference.tex} from "
-        "\\texttt{docs/}.",
+        "from the repository root and build it from \\texttt{docs/}:",
+        "",
+        r"\begin{lstlisting}",
+        "python docs/tools/build_tool_reference.py",
+        "latexmk -lualatex manual/tool-reference.tex",
+        r"\end{lstlisting}",
         "",
     ]
 

@@ -3,17 +3,17 @@
   "plugin_group": "YR-MPE",
   "plugins": [
     {
-      "name": "YR-MPEA",
-      "version": "0.1.0",
+      "name": "YPhylo Workbench",
+      "version": "%version%",
       "author": "YRTools Official Plugin Base",
-      "description": "desktop workbench for molecular evolution and phylogenetics",
+      "description": "YPhylo Workbench: desktop platform for molecular evolution and phylogenetics",
       "category": "Molecular Evolution",
       "placement": {
         "path": "%MPEPATH%",
         "priority": 0,
         "favicon": "YR_MPE/icons/yr-mpea.svg"
       },
-      "entry_point": "YR_MPE.platforms:YR_MPEA_entry",
+      "entry_point": "YR_MPE.platforms.mpea:YR_MPEA_entry",
       "runtime": {
         "type": "polypyplug",
         "dependencies": []

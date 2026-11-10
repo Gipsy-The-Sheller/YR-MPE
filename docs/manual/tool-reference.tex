@@ -1,6 +1,20 @@
 \documentclass[11pt]{report}
 \input{shared/preamble}
 \usepackage{lmodern}
+
+% Command lines in this reference are often wider than the text block.
+% Wrap them instead of running into the margin.
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  breakatwhitespace=false,
+  breakindent=0pt,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  frame=single,
+}
+\setlength{\emergencystretch}{3em}
 \begin{document}
 \supportingtitlepage{YPhylo Workbench Tool Reference}
   {Plugin-by-plugin GUI, CLI and agent reference}
@@ -10,7 +24,12 @@
 \addcontentsline{toc}{chapter}{Preface}
 This reference is generated from the agent-facing skill files in \texttt{YR\_MPE/skills}. Each tool section states what the tool does, how the GUI controls map to command-line options or NEXUS directives, the recommended workflow, and the pitfalls that are easy to hit. Tools that are implemented entirely in Python or in the GUI say so explicitly instead of inventing a command line.
 
-The skill files remain the source of truth. Regenerate this document with \texttt{python docs/tools/build\_tool\_reference.py} from the repository root, then build it with \texttt{latexmk -lualatex manual/tool-reference.tex} from \texttt{docs/}.
+The skill files remain the source of truth. Regenerate this document from the repository root and build it from \texttt{docs/}:
+
+\begin{lstlisting}
+python docs/tools/build_tool_reference.py
+latexmk -lualatex manual/tool-reference.tex
+\end{lstlisting}
 
 \chapter{Alignment and trimming}
 \section{MAFFT}
@@ -23,8 +42,9 @@ Align nucleotide or protein FASTA files and import each alignment into the works
 
 \subsection{GUI to CLI}
 
-\texttt{control\_bindings()} is the source of truth. The expected mapping is:
+\texttt{control\_\allowbreak bindings\allowbreak ()} is the source of truth. The expected mapping is:
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -33,12 +53,13 @@ GUI control & CLI option & Notes \\
 File input & positional & Appended after all options \\
 Alignment mode & \texttt{--auto}, \texttt{--localpair}, \texttt{--genafpair}, \texttt{--globalpair}, \texttt{--retree} & High-accuracy modes also add \texttt{--maxiterate 1000} \\
 Threads & \texttt{--thread} & \texttt{-1}/automatic is omitted \\
-Direction adjustment & \texttt{--adjustdirection} & Detects and reverse-complements sequences that appear reversed; marks them with \texttt{\_R\_} \\
-Direction adjustment (accurate) & \texttt{--adjustdirectionaccurately} & Slower, more reliable for divergent or long reads; also marks reversed records with \texttt{\_R\_} \\
+Direction adjustment & \texttt{--adjustdirection} & Detects and reverse-complements sequences that appear reversed; marks them with \texttt{\_\allowbreak R\_\allowbreak } \\
+Direction adjustment (accurate) & \texttt{--adjustdirectionaccurately} & Slower, more reliable for divergent or long reads; also marks reversed records with \texttt{\_\allowbreak R\_\allowbreak } \\
 Advanced penalties & \texttt{--op}, \texttt{--ep}, \texttt{--maxiterate}, \texttt{--clustalout}, \texttt{--reorder}, ... & Set in Advanced Parameters \\
 Output suffix & none & GUI-only; MAFFT writes to stdout and the plugin saves it beside the input \\
 \bottomrule
 \end{longtable}
+}
 
 Verify options with:
 
@@ -49,7 +70,7 @@ mafft --help
 \subsection{Flow}
 
 \begin{enumerate}
-  \item Select an alignment/sequence or open \texttt{ALIGN -> Align by... -> MAFFT}.
+  \item Select an alignment/sequence or open \texttt{ALIGN -> Align by.\allowbreak .\allowbreak .\allowbreak  -> MAFFT}.
   \item Choose mode and threads; run.
   \item Import the resulting alignment. When MAFFT was launched from a workspace dataset, each alignment updates the matching item in that same dataset (the dataset itself is not duplicated).
   \item Continue with TrimAl/GBlocks, ModelTest-NG or ModelFinder, then RAxML-NG/ IQ-TREE.
@@ -61,7 +82,7 @@ mafft --help
   \item MAFFT writes to stdout; the plugin, not MAFFT's \texttt{-o}, creates the output file.
   \item Batch mode runs one MAFFT process per input file.
   \item Advanced parameters are only included when they differ from MAFFT defaults.
-  \item With direction adjustment enabled, MAFFT prefixes reverse-complemented records with \texttt{\_R\_}. The plugin strips this prefix from output headers so downstream taxon matching (OrthoFinder/concatenation) is not broken; the sequences themselves remain reverse-complemented. Do not re-add \texttt{\_R\_} when constructing taxon labels.
+  \item With direction adjustment enabled, MAFFT prefixes reverse-complemented records with \texttt{\_\allowbreak R\_\allowbreak }. The plugin strips this prefix from output headers so downstream taxon matching (OrthoFinder/concatenation) is not broken; the sequences themselves remain reverse-complemented. Do not re-add \texttt{\_\allowbreak R\_\allowbreak } when constructing taxon labels.
   \item Direction adjustment is off by default. Enable it for Sanger amplicons or other data of unknown orientation.
 \end{itemize}
 
@@ -83,6 +104,7 @@ macse -prog alignSequences -seq <input> [options] -out_NT <nt> -out_AA <aa>
 macse -prog refineAlignment -align <input> [options] -out_NT <nt> -out_AA <aa>
 \end{lstlisting}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -90,15 +112,16 @@ GUI control & CLI option & Notes \\
 \endhead
 Mode = Align sequences & \texttt{-prog alignSequences -seq PATH} &  \\
 Mode = Refine existing alignment & \texttt{-prog refineAlignment -align PATH} &  \\
-Genetic code & \texttt{-gc\_def N} &  \\
-AA alphabet & \texttt{-alphabet\_AA NAME} & Default SE\_B\_8 \\
-Score matrix & \texttt{-score\_matrix NAME} & BLOSUM62, VTML200\_BIS, VTML240 \\
+Genetic code & \texttt{-gc\_\allowbreak def N} &  \\
+AA alphabet & \texttt{-alphabet\_\allowbreak AA NAME} & Default SE\_B\_8 \\
+Score matrix & \texttt{-score\_\allowbreak matrix NAME} & BLOSUM62, VTML200\_BIS, VTML240 \\
 Optimization cycles & \texttt{-optim N} & Default 2 \\
-NT output & \texttt{-out\_NT PATH} & Plugin-managed \\
-AA output & \texttt{-out\_AA PATH} & Plugin-managed \\
+NT output & \texttt{-out\_\allowbreak NT PATH} & Plugin-managed \\
+AA output & \texttt{-out\_\allowbreak AA PATH} & Plugin-managed \\
 Preferred result & none & GUI-only: selects NT or AA for import \\
 \bottomrule
 \end{longtable}
+}
 
 Advanced parameters are free text and are appended verbatim to the MACSE command after shell-style splitting.
 
@@ -141,8 +164,9 @@ Fast multiple-sequence alignment with MUSCLE5.
 
 \subsection{GUI to CLI}
 
-The runner calls \texttt{muscle -align|-super5 <input> -output <output>}.
+The runner calls \texttt{muscle -align|\allowbreak -super5 <input> -output <output>}.
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -152,9 +176,10 @@ Input FASTA & positional &  \\
 Mode = Standard alignment & \texttt{-align} & Default \\
 Mode = Large dataset & \texttt{-super5} & For many sequences \\
 Output & \texttt{-output PATH} & Plugin-managed \\
-Output suffix & none & GUI-only; default \texttt{\_m5.fas} beside the input \\
+Output suffix & none & GUI-only; default \texttt{\_\allowbreak m5.\allowbreak fas} beside the input \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{Flow}
 
@@ -190,6 +215,7 @@ The runner calls:
 clustalo -i <input> -o <output> --outfmt=fa [--auto] [--seqtype T] [--threads N] [--outorder=tree-order]
 \end{lstlisting}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -197,13 +223,14 @@ GUI control & CLI option & Notes \\
 \endhead
 Input FASTA & \texttt{-i PATH} &  \\
 Auto options & \texttt{--auto} & Default on \\
-Sequence type & \texttt{--seqtype Protein|RNA|DNA} & Auto is omitted \\
+Sequence type & \texttt{--seqtype Protein|\allowbreak RNA|\allowbreak DNA} & Auto is omitted \\
 Threads & \texttt{--threads N} & Omitted when 1 \\
 Output order = tree-order & \texttt{--outorder=tree-order} & Input order adds nothing \\
 Output & \texttt{-o PATH} & Plugin-managed \\
 Output format & \texttt{--outfmt=fa} & Always FASTA \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{Flow}
 
@@ -236,6 +263,7 @@ Trim gap-rich and ambiguous columns from a multiple-sequence alignment with Trim
 
 The runner builds \texttt{trimal -in <input> -out <output> [mode] [format]}.
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -243,14 +271,16 @@ GUI control & CLI option & Notes \\
 \endhead
 Input alignment & \texttt{-in PATH} & One run per file in batch mode \\
 Trimming mode & \texttt{-gappyout}, \texttt{-strict}, \texttt{-strictplus}, \texttt{-automated1} & Default: automated1 \\
-Output format & \texttt{-clustal}, \texttt{-nexus}, \texttt{-phylip}, \texttt{-phylip3.2}, \texttt{-mega}, \texttt{-nbrf} & FASTA adds no flag \\
+Output format & \texttt{-clustal}, \texttt{-nexus}, \texttt{-phylip}, \texttt{-phylip3.\allowbreak 2}, \texttt{-mega}, \texttt{-nbrf} & FASTA adds no flag \\
 Output file & \texttt{-out PATH} & Plugin-managed \\
 Output suffix & none & GUI-only; output is beside the input \\
 \bottomrule
 \end{longtable}
+}
 
 Advanced parameters (applied only after accepting the dialog):
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.47\linewidth}>{\raggedright\arraybackslash}p{0.47\linewidth}@{}}
 \toprule
 GUI control & CLI option \\
@@ -272,6 +302,7 @@ Complementary alignment & \texttt{-complementary} \\
 Column numbering & \texttt{-colnumbering} \\
 \bottomrule
 \end{longtable}
+}
 
 Thresholds are only emitted when greater than zero; the default mode supplies its own internal thresholds.
 
@@ -306,6 +337,7 @@ Select conserved alignment blocks with GBlocks 0.91b.
 
 The runner calls \texttt{GBlocks <input> [options] -p=n -q=n -r=n -e=-gb}.
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -317,19 +349,20 @@ Minimum block length & \texttt{-b1=N} & Omitted at 0 \\
 Minimum conserved positions & \texttt{-b2=N} & Omitted at 0 \\
 Max contiguous non-conserved & \texttt{-b3=N} & Omitted at 8 \\
 Minimum flank positions & \texttt{-b4=N} & Omitted at 10 \\
-Gap positions & \texttt{-b5=n|h|a} & None is omitted \\
-Similarity matrix & \texttt{-b6=y|n} & Always emitted \\
+Gap positions & \texttt{-b5=n|\allowbreak h|\allowbreak a} & None is omitted \\
+Similarity matrix & \texttt{-b6=y|\allowbreak n} & Always emitted \\
 Output file & \texttt{-e=-gb} & Plugin-managed extension \\
 Batch/report flags & \texttt{-p=n -q=n -r=n} & Always added \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{Flow}
 
 \begin{enumerate}
   \item Import an alignment.
   \item Choose sequence type and block parameters.
-  \item Run; send the \texttt{.gb} alignment to the workspace.
+  \item Run; send the \texttt{.\allowbreak gb} alignment to the workspace.
 \end{enumerate}
 
 \subsection{Pitfalls}
@@ -361,19 +394,19 @@ Turn GB/GBFF/GFF inputs into a workspace dataset of single-copy orthogroups. The
 
 \subsection{Semantic actions}
 
-This plugin is the most complete agent-facing plugin. Use \texttt{workbench.list\_windows} to get its \texttt{window\_id}, then \texttt{workbench.invoke\_plugin} with:
+This plugin is the most complete agent-facing plugin. Use \texttt{workbench.\allowbreak list\_\allowbreak windows} to get its \texttt{window\_\allowbreak id}, then \texttt{workbench.\allowbreak invoke\_\allowbreak plugin} with:
 
 \begin{itemize}
-  \item \texttt{orthofinder.inspect\_options} - current options and constraints.
-  \item \texttt{orthofinder.modify\_options} - atomically update options.
-  \item \texttt{orthofinder.validate} - validate annotations and the OrthoFinder runtime.
-  \item \texttt{orthofinder.run} - start without opening modal dialogs.
-  \item \texttt{orthofinder.stop} - stop the running pipeline.
-  \item \texttt{orthofinder.inspect\_status} - state, progress and capabilities.
-  \item \texttt{orthofinder.inspect\_console} - cursor window of console lines.
-  \item \texttt{orthofinder.inspect\_actions} - native action list and \texttt{next\_import}.
-  \item \texttt{orthofinder.preview\_results} - generated files and single-copy OGs.
-  \item \texttt{orthofinder.export\_to\_workspace} - idempotent import of the completed run.
+  \item \texttt{orthofinder.\allowbreak inspect\_\allowbreak options} - current options and constraints.
+  \item \texttt{orthofinder.\allowbreak modify\_\allowbreak options} - atomically update options.
+  \item \texttt{orthofinder.\allowbreak validate} - validate annotations and the OrthoFinder runtime.
+  \item \texttt{orthofinder.\allowbreak run} - start without opening modal dialogs.
+  \item \texttt{orthofinder.\allowbreak stop} - stop the running pipeline.
+  \item \texttt{orthofinder.\allowbreak inspect\_\allowbreak status} - state, progress and capabilities.
+  \item \texttt{orthofinder.\allowbreak inspect\_\allowbreak console} - cursor window of console lines.
+  \item \texttt{orthofinder.\allowbreak inspect\_\allowbreak actions} - native action list and \texttt{next\_\allowbreak import}.
+  \item \texttt{orthofinder.\allowbreak preview\_\allowbreak results} - generated files and single-copy OGs.
+  \item \texttt{orthofinder.\allowbreak export\_\allowbreak to\_\allowbreak workspace} - idempotent import of the completed run.
 \end{itemize}
 
 \subsection{Typical flow}
@@ -396,7 +429,7 @@ After import, each single-copy orthogroup is a dataset item and can be sent to t
 \subsection{Pitfalls}
 
 \begin{itemize}
-  \item Validation must pass before \texttt{orthofinder.run}; check \texttt{inspect\_status}.
+  \item Validation must pass before \texttt{orthofinder.\allowbreak run}; check \texttt{inspect\_\allowbreak status}.
   \item The export action is idempotent; call it again after a completed run instead of duplicating the dataset manually.
   \item The plugin cannot close while the pipeline is running.
 \end{itemize}
@@ -561,7 +594,7 @@ There is no external command-line tool; concatenation is performed in Python.
 \begin{itemize}
   \item Output FASTA contains one record per unique description, with concatenated sequence.
   \item The NEXUS text contains one \texttt{charset} per input file, with 1-based coordinates covering the concatenated length.
-  \item File names are sanitised into NEXUS labels (punctuation replaced by \texttt{\_}).
+  \item File names are sanitised into NEXUS labels (punctuation replaced by \texttt{\_\allowbreak }).
 \end{itemize}
 
 \subsection{Pitfalls}
@@ -624,6 +657,7 @@ Run IQ-TREE ModelFinder (\texttt{-m TESTONLY}) and import the best substitution 
 
 \subsection{GUI to CLI}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -637,13 +671,14 @@ Model set & \texttt{-mset ALL} & The plugin searches all models \\
 Partition mode & \texttt{-p} / \texttt{-q} / \texttt{-m} scheme & Built by the partition thread \\
 \bottomrule
 \end{longtable}
+}
 
 The core command is \texttt{iqtree3 -s <alignment> -m TESTONLY <options>}.
 
 \subsection{Flow}
 
 \begin{enumerate}
-  \item Select an alignment or open \texttt{MODEL -> Find Best Substitution Model (ML)}.
+  \item Select an alignment or open \texttt{MODEL -> Find Best Substitution Model \allowbreak (ML)}.
   \item Run and inspect the model table.
   \item Import the model item.
   \item Select the model and open IQ-TREE or RAxML-NG; the host applies the best model when the naming is compatible.
@@ -676,8 +711,9 @@ Select a DNA or protein substitution model and import the best model as a worksp
 
 \subsection{GUI to CLI}
 
-The plugin's \texttt{control\_bindings()} is the source of truth. The expected mapping is:
+The plugin's \texttt{control\_\allowbreak bindings\allowbreak ()} is the source of truth. The expected mapping is:
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -693,6 +729,7 @@ Output prefix & \texttt{-o}, \texttt{--output} & Generated by the plugin \\
 (fixed) & \texttt{--force}, \texttt{--disable-checkpoint} & Overwrites results; avoids the Cygwin exit crash \\
 \bottomrule
 \end{longtable}
+}
 
 Verify options with:
 
@@ -703,19 +740,19 @@ modeltest-ng --help
 \subsection{Run and import}
 
 \begin{enumerate}
-  \item Select an alignment in the workspace, then open \texttt{MODEL -> Find Best Substitution Model (ModelTest-NG)}.
+  \item Select an alignment in the workspace, then open \texttt{MODEL -> Find Best Substitution Model \allowbreak (ModelTest-NG)}.
   \item Choose the criterion used for the exported best model (BIC by default).
   \item Run; inspect the criterion tables in Output Preview.
-  \item Click \texttt{Import to Current Platform}. The item data contains \texttt{type=model\_table}, \texttt{best\_model}, \texttt{criterion} and all three criteria tables.
-  \item Select the model item in the workspace and open \texttt{PHYLOGENY -> Maximum Likelihood (ML) -> RAxML-NG}; the model is applied automatically when possible.
+  \item Click \texttt{Import to Current Platform}. The item data contains \texttt{type=model\_\allowbreak table}, \texttt{best\_\allowbreak model}, \texttt{criterion} and all three criteria tables.
+  \item Select the model item in the workspace and open \texttt{PHYLOGENY -> Maximum Likelihood \allowbreak (ML) -> RAxML-NG}; the model is applied automatically when possible.
 \end{enumerate}
 
 \subsection{Pitfalls}
 
 \begin{itemize}
   \item The BIC/AIC/AICc names are not command-line options; they select which block is exported.
-  \item ModelTest-NG can exit non-zero after writing a valid report; the plugin accepts the report when the \texttt{.out} file exists.
-  \item \texttt{Auto} is resolved before the command is built; the preview shows \texttt{<auto: nt|aa>} when it is not yet resolved.
+  \item ModelTest-NG can exit non-zero after writing a valid report; the plugin accepts the report when the \texttt{.\allowbreak out} file exists.
+  \item \texttt{Auto} is resolved before the command is built; the preview shows \texttt{<auto: nt|\allowbreak aa>} when it is not yet resolved.
 \end{itemize}
 
 
@@ -725,12 +762,13 @@ modeltest-ng --help
 
 \subsection{Purpose}
 
-Estimate substitution-model parameters with IQ-TREE and export the fitted model (Q matrix, base frequencies, rate parameters) as a workspace model item. It can also parse existing \texttt{.iqtree} reports without rerunning IQ-TREE.
+Estimate substitution-model parameters with IQ-TREE and export the fitted model (Q matrix, base frequencies, rate parameters) as a workspace model item. It can also parse existing \texttt{.\allowbreak iqtree} reports without rerunning IQ-TREE.
 
 \subsection{GUI to CLI}
 
-\texttt{control\_bindings()} is the source of truth. The plugin builds a single \texttt{-m} string, appending rate suffixes to the base model.
+\texttt{control\_\allowbreak bindings\allowbreak ()} is the source of truth. The plugin builds a single \texttt{-m} string, appending rate suffixes to the base model.
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -743,9 +781,10 @@ Gamma categories & \texttt{+G\{n\}} & Appended only when +G is checked \\
 Invariant sites & \texttt{+I} & Appended inside \texttt{-m} \\
 Empirical frequencies & \texttt{+F} & Appended inside \texttt{-m} \\
 Threads & \texttt{-nt N} & Omitted when 1 \\
-Load existing \texttt{.iqtree} & none & GUI-only parsing path \\
+Load existing \texttt{.\allowbreak iqtree} & none & GUI-only parsing path \\
 \bottomrule
 \end{longtable}
+}
 
 The runner always appends \texttt{-redo}.
 
@@ -764,7 +803,7 @@ The runner always appends \texttt{-redo}.
   \item \texttt{+G}, \texttt{+I} and \texttt{+F} are part of the same \texttt{-m} token, not separate options.
   \item \texttt{auto} is a GUI label; the command uses \texttt{MFP}.
   \item Batch mode runs IQ-TREE once per input file, so a shared model is not fitted across loci.
-  \item Loading an existing \texttt{.iqtree} file skips estimation and does not probe the sequence data.
+  \item Loading an existing \texttt{.\allowbreak iqtree} file skips estimation and does not probe the sequence data.
 \end{itemize}
 
 
@@ -785,13 +824,14 @@ The runner calls:
 iqtree3 -s alignment [-st DNA|AA] [-m MODEL] [-nt N] -redo
 \end{lstlisting}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
 \midrule
 \endhead
 Input alignment & \texttt{-s PATH} & One IQ-TREE run per file in batch mode \\
-Sequence type & \texttt{-st DNA|AA} & AUTO is omitted \\
+Sequence type & \texttt{-st DNA|\allowbreak AA} & AUTO is omitted \\
 Substitution model & \texttt{-m MODEL} & \texttt{auto} omits \texttt{-m} \\
 Discrete Gamma & \texttt{+G\{n\}} & Appended to \texttt{-m} \\
 Invariable sites & \texttt{+I} & Appended to \texttt{-m} \\
@@ -802,8 +842,9 @@ Threads & \texttt{-nt N} & Omitted when 1 \\
 Rerun & \texttt{-redo} & Always added \\
 \bottomrule
 \end{longtable}
+}
 
-IQ-TREE writes \texttt{<alignment>.mldist}; the plugin parses it into a distance matrix item.
+IQ-TREE writes \texttt{<alignment>.\allowbreak mldist}; the plugin parses it into a distance matrix item.
 
 \subsection{Flow}
 
@@ -819,7 +860,7 @@ IQ-TREE writes \texttt{<alignment>.mldist}; the plugin parses it into a distance
   \item \texttt{auto} does not mean ModelFinder here: the plugin simply omits \texttt{-m} and lets IQ-TREE use its distance default.
   \item \texttt{+R} in this plugin does not take a category count; use the IQ-TREE plugin when you need \texttt{+R\{n\}}.
   \item The output is a distance matrix, not a tree.
-  \item Batch mode writes one \texttt{.mldist} per input.
+  \item Batch mode writes one \texttt{.\allowbreak mldist} per input.
   \item Uncorrected p-distances are a separate plugin and do not use IQ-TREE.
 \end{itemize}
 
@@ -834,6 +875,7 @@ Compute an uncorrected p-distance matrix from an alignment without a substitutio
 
 \subsection{GUI controls}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.47\linewidth}>{\raggedright\arraybackslash}p{0.47\linewidth}@{}}
 \toprule
 Control & Effect \\
@@ -845,6 +887,7 @@ Gap treatment & Pairwise deletion or complete deletion \\
 DNA rule & All substitutions, transitions only, transversions only, or advanced rules \\
 \bottomrule
 \end{longtable}
+}
 
 The calculation is implemented in Python; there is no external command-line tool.
 
@@ -884,10 +927,12 @@ The calculation is implemented in Python; there is no external command-line tool
 
 Assess substitution saturation in multiple-sequence alignments with the BaCoCa saturation index C. The plugin replaces the earlier simulated saturation analysis with the BaCoCa C-value.
 
+The C-value is used instead of Xia's Iss because Iss is not a clean saturation decision rule (see Xu 2026 preprints). The C-value was introduced by Struck et al. (2008) and implemented in BaCoCa; it has no intrinsic exclusion threshold. The plugin reports it descriptively, with Ti/Tv versus p-distance scatter plots, which is useful for direct inspection when only a few partitions are available.
+
 \subsection{Method}
 
 \begin{itemize}
-  \item The plugin computes the BaCoCa saturation index \texttt{C = std(Ti/Tv) / std(p)} from pairwise Ti/Tv counts and p-distances.
+  \item The plugin computes the BaCoCa saturation index \texttt{C = std\allowbreak (Ti/\allowbreak Tv) /\allowbreak  std\allowbreak (p)} from pairwise Ti/Tv counts and p-distances.
   \item Gap treatment can be pairwise deletion or complete deletion.
   \item Each alignment gets a saturation plot and summary statistics.
   \item A high C indicates that substitutions are approaching saturation; low C indicates that the alignment still carries phylogenetic signal.
@@ -933,17 +978,19 @@ Build a distance-based tree from an ML distance matrix with DecentTree's scalabl
 
 \subsection{GUI to CLI}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
 \midrule
 \endhead
-Input matrix & \texttt{-in PATH} & \texttt{.mldist} or \texttt{.dist} \\
-Algorithm & \texttt{-t BIONJ-R|BIONJ-V|NJ-R-D|ONJ-R|ONJ-R-V|AUCTION} &  \\
-Output tree & \texttt{-out PATH} & Plugin-managed: \texttt{<input>.nwk} \\
+Input matrix & \texttt{-in PATH} & \texttt{.\allowbreak mldist} or \texttt{.\allowbreak dist} \\
+Algorithm & \texttt{-t BIONJ-R|\allowbreak BIONJ-V|\allowbreak NJ-R-D|\allowbreak ONJ-R|\allowbreak ONJ-R-V|\allowbreak AUCTION} &  \\
+Output tree & \texttt{-out PATH} & Plugin-managed: \texttt{<input>.\allowbreak nwk} \\
 Banner & \texttt{-no-banner} & Always added \\
 \bottomrule
 \end{longtable}
+}
 
 The current Windows build avoids the classic BIONJ/NJ paths, which crash; the exposed algorithms are the verified variants. \texttt{BIONJ-R} is the default.
 
@@ -959,7 +1006,7 @@ The current Windows build avoids the classic BIONJ/NJ paths, which crash; the ex
 
 \begin{itemize}
   \item The input must be a distance matrix, not an alignment.
-  \item DecentTree writes the tree next to the input as \texttt{<input>.nwk}; the GUI does not expose a separate output picker.
+  \item DecentTree writes the tree next to the input as \texttt{<input>.\allowbreak nwk}; the GUI does not expose a separate output picker.
   \item Batch mode runs one command per matrix file.
   \item The algorithm names are case-sensitive CLI tokens; the GUI strips the parenthetical description before passing them.
 \end{itemize}
@@ -976,6 +1023,7 @@ Maximum-likelihood tree inference from an alignment, with optional partition mod
 
 \subsection{GUI to CLI: basic controls}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -990,10 +1038,11 @@ SH-aLRT & \texttt{-alrt N} & Only when the SH-aLRT checkbox is enabled \\
 (fixed) & \texttt{-redo} & Plugin always asks IQ-TREE to overwrite \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{Substitution model}
 
-The GUI model combo contains the following base models. The live \texttt{workbench.help\_doc} returns the same catalog under \texttt{controls[id=model].choices}, mapping each GUI label to the exact \texttt{-m} token.
+The GUI model combo contains the following base models. The live \texttt{workbench.\allowbreak help\_\allowbreak doc} returns the same catalog under \texttt{controls[id=model].\allowbreak choices}, mapping each GUI label to the exact \texttt{-m} token.
 
 \begin{itemize}
   \item \textbf{Automatic:} \texttt{auto} -> \texttt{-m MFP} (ModelFinder plus tree inference).
@@ -1003,6 +1052,7 @@ The GUI model combo contains the following base models. The live \texttt{workben
 
 The base model is extended into one \texttt{-m} string:
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & Model suffix & Notes \\
@@ -1019,6 +1069,7 @@ State Frequencies = ML-optimized (+FO) & \texttt{+FO} & ML-optimized \\
 State Frequencies = Equal (+FQ) & \texttt{+FQ} & Equal \\
 \bottomrule
 \end{longtable}
+}
 
 Example: \texttt{GTR} + Gamma 4 + Invariant + Empirical = \texttt{-m GTR+G4+I+F}. Example: \texttt{GTR} + FreeRate 8 = \texttt{-m GTR+R8}.
 
@@ -1026,20 +1077,22 @@ Example: \texttt{GTR} + Gamma 4 + Invariant + Empirical = \texttt{-m GTR+G4+I+F}
 
 Partition mode is configured in \textbf{Configure Partitions} and uses a partition file generated from the selected dataset:
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI partition option & CLI flag & Notes \\
 \midrule
 \endhead
-Edge-linked Proportional & \texttt{-p partition.nex} & Proportional branch lengths \\
-Edge-linked Equal & \texttt{-q partition.nex} & Equal branch lengths \\
-Edge-unlinked & \texttt{-Q partition.nex} & Unlinked branch lengths \\
-Separate Tree & \texttt{-S partition.nex} & Separate tree per partition \\
+Edge-linked Proportional & \texttt{-p partition.\allowbreak nex} & Proportional branch lengths \\
+Edge-linked Equal & \texttt{-q partition.\allowbreak nex} & Equal branch lengths \\
+Edge-unlinked & \texttt{-Q partition.\allowbreak nex} & Unlinked branch lengths \\
+Separate Tree & \texttt{-S partition.\allowbreak nex} & Separate tree per partition \\
 Enable Bootstrap + replicates & \texttt{-bb N} & Partition thread also adds \texttt{-abayes} \\
 Sampling: SITE / GENE / GENESITE & (reserved) & Current command builder records the choice but does not yet pass a sampling flag \\
 RCluster + percentage & \texttt{--rcluster N} & Accelerated partition merging; passed when the merge path is used \\
 \bottomrule
 \end{longtable}
+}
 
 The partition thread also passes \texttt{-m MFP+MERGE} when no per-partition model is set; if a \texttt{charpartition} model is present, models are read from the partition file instead.
 
@@ -1059,9 +1112,9 @@ This happens inside the partition-merger evaluation, not in the final tree searc
 
 \begin{enumerate}
   \item Select an alignment; optionally select a model item first.
-  \item Open \texttt{PHYLOGENY -> Maximum Likelihood (ML) -> IQ-Tree 3}.
+  \item Open \texttt{PHYLOGENY -> Maximum Likelihood \allowbreak (ML) -> IQ-Tree 3}.
   \item Choose model/rate/state-frequency/support options and run.
-  \item Inspect \texttt{cli.preview} in \texttt{workbench.help\_doc}; it shows the exact command assembled from the current controls.
+  \item Inspect \texttt{cli.\allowbreak preview} in \texttt{workbench.\allowbreak help\_\allowbreak doc}; it shows the exact command assembled from the current controls.
   \item Import the resulting phylogeny or tree set.
 \end{enumerate}
 
@@ -1076,16 +1129,17 @@ Bayesian phylogenetic inference with MrBayes 3.2.7a, including partitioned model
 
 \subsection{How the plugin runs}
 
-The plugin writes a \texttt{begin mrbayes; ... end;} block into a NEXUS file and runs:
+The plugin writes a \texttt{begin mrbayes; .\allowbreak .\allowbreak .\allowbreak  end;} block into a NEXUS file and runs:
 
 \begin{lstlisting}
 mb -i input.nex
 \end{lstlisting}
 
-With MPI enabled it runs \texttt{mpirun -np N mb -i input.nex}. If the input already contains a MRBAYES block and \textbf{Run MrBayes Data Block directly if present} is checked, that block is used instead of generating a new one.
+With MPI enabled it runs \texttt{mpirun -np N mb -i input.\allowbreak nex}. If the input already contains a MRBAYES block and \textbf{Run MrBayes Data Block directly if present} is checked, that block is used instead of generating a new one.
 
 \subsection{GUI to NEXUS}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.47\linewidth}>{\raggedright\arraybackslash}p{0.47\linewidth}@{}}
 \toprule
 GUI control & NEXUS directive \\
@@ -1094,21 +1148,22 @@ GUI control & NEXUS directive \\
 Data type = DNA & \texttt{lset nucmodel=4by4;} \\
 Data type = Protein & \texttt{lset nucmodel=protein;} \\
 DNA substitution number & \texttt{lset nst=N;} \\
-DNA state frequencies & \texttt{prset statefreqpr=dirichlet(1,1,1,1);}, \texttt{fixed(equal)}, or \texttt{fixed(empirical)} \\
-Protein model & \texttt{prset aamodelpr=fixed(model);} or \texttt{prset aamodelpr=mixed;} \\
-Protein state frequencies & \texttt{prset statefreqpr=...;} \\
-Rate heterogeneity & \texttt{lset rates=equal|gamma|invgamma|propinv|lnorm|adgamma;} \\
-Gamma categories & \texttt{ngammacat=N} in the \texttt{lset rates=...} line \\
+DNA state frequencies & \texttt{prset statefreqpr=dirichlet\allowbreak (1,1,1,1);}, \texttt{fixed\allowbreak (equal)}, or \texttt{fixed\allowbreak (empirical)} \\
+Protein model & \texttt{prset aamodelpr=fixed\allowbreak (model);} or \texttt{prset aamodelpr=mixed;} \\
+Protein state frequencies & \texttt{prset statefreqpr=.\allowbreak .\allowbreak .\allowbreak ;} \\
+Rate heterogeneity & \texttt{lset rates=equal|\allowbreak gamma|\allowbreak invgamma|\allowbreak propinv|\allowbreak lnorm|\allowbreak adgamma;} \\
+Gamma categories & \texttt{ngammacat=N} in the \texttt{lset rates=.\allowbreak .\allowbreak .\allowbreak } line \\
 MCMC settings & \texttt{mcmcp ngen=N samplefreq=N nchains=N nruns=N printfreq=N savebrlens=yes checkpoint=yes checkfreq=5000;} then \texttt{mcmc;} \\
-Consensus type & \texttt{sumt contype=majorityrule|halfcompat|allcompat;} \\
-Consensus format & \texttt{conformat=simple|figtree} \\
+Consensus type & \texttt{sumt contype=majorityrule|\allowbreak halfcompat|\allowbreak allcompat;} \\
+Consensus format & \texttt{conformat=simple|\allowbreak figtree} \\
 Burn-in as fraction & \texttt{sump relburnin=yes burninfrac=X;} and \texttt{sumt relburnin=yes burninfrac=X;} \\
 Burn-in as states & \texttt{sump burnin=N;} and \texttt{sumt burnin=N;} \\
-Partition mode & \texttt{charset}/\texttt{partition} definitions in NEXUS, then \texttt{prset applyto=(all)} as appropriate \\
+Partition mode & \texttt{charset}/\texttt{partition} definitions in NEXUS, then \texttt{prset applyto=\allowbreak (all)} as appropriate \\
 Dating & \texttt{prset brlenspr=clock:uniform;} plus clock and calibration priors \\
-BEAGLE & \texttt{set usebeagle=yes beagledevice=... beagleprecision=... beaglescaling=...;} \\
+BEAGLE & \texttt{set usebeagle=yes beagledevice=.\allowbreak .\allowbreak .\allowbreak  beagleprecision=.\allowbreak .\allowbreak .\allowbreak  beaglescaling=.\allowbreak .\allowbreak .\allowbreak ;} \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{Flow}
 
@@ -1116,7 +1171,7 @@ BEAGLE & \texttt{set usebeagle=yes beagledevice=... beagleprecision=... beaglesc
   \item Import a NEXUS/FASTA alignment, or a NEXUS file with an existing MRBAYES block.
   \item Set data type, model, rate heterogeneity, MCMC length and consensus options.
   \item For partitioned data, enable partition mode and configure partitions before running.
-  \item Run; inspect the \texttt{.con.tre}, \texttt{.p} and \texttt{.mcmc} outputs; import the consensus tree.
+  \item Run; inspect the \texttt{.\allowbreak con.\allowbreak tre}, \texttt{.\allowbreak p} and \texttt{.\allowbreak mcmc} outputs; import the consensus tree.
 \end{enumerate}
 
 \subsection{Pitfalls}
@@ -1148,6 +1203,7 @@ The runner builds an \texttt{mpirun} command:
 mpirun -np N pb_mpi -d alignment [model options] chain_name
 \end{lstlisting}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -1164,9 +1220,11 @@ Sampling frequency + generations & \texttt{-x FREQ GEN} & Emitted together \\
 Chain name & positional & Plugin-generated from the input name \\
 \bottomrule
 \end{longtable}
+}
 
 Chain post-processing uses \texttt{bpcomp}:
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.47\linewidth}>{\raggedright\arraybackslash}p{0.47\linewidth}@{}}
 \toprule
 GUI control & bpcomp option \\
@@ -1178,6 +1236,7 @@ Sample every & \texttt{-x BURNIN EVERY} \\
 Stop at & \texttt{-x BURNIN EVERY UNTIL} \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{Flow}
 
@@ -1195,7 +1254,7 @@ Stop at & \texttt{-x BURNIN EVERY UNTIL} \\
   \item Gamma and CAT can be combined; both checkboxes are on by default.
   \item The MCMC generation control is combined with the sampling frequency into a single \texttt{-x} pair, not two separate flags.
   \item \texttt{-1} generations is converted to a large finite value for the CLI.
-  \item Chain analysis uses \texttt{bpcomp}, not \texttt{pb\_mpi}; its cutoff/burn-in options are separate from the MCMC flags.
+  \item Chain analysis uses \texttt{bpcomp}, not \texttt{pb\_\allowbreak mpi}; its cutoff/burn-in options are separate from the MCMC flags.
   \item PhyloBayes requires PHYLIP input; convert FASTA first.
 \end{itemize}
 
@@ -1210,15 +1269,16 @@ Maximum-parsimony tree inference with MPBoot's ultrafast bootstrap and consensus
 
 \subsection{GUI to CLI}
 
-\texttt{control\_bindings()} covers the top-level controls. Advanced Parameters are collected in a dialog; their flags are listed below.
+\texttt{control\_\allowbreak bindings\allowbreak ()} covers the top-level controls. Advanced Parameters are collected in a dialog; their flags are listed below.
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
 \midrule
 \endhead
 Input alignment & \texttt{-s PATH} & One MPBoot run per file in batch mode \\
-Sequence type & \texttt{-st DNA|AA|CODON|BIN|MORPH} & AUTO is omitted \\
+Sequence type & \texttt{-st DNA|\allowbreak AA|\allowbreak CODON|\allowbreak BIN|\allowbreak MORPH} & AUTO is omitted \\
 Threads & \texttt{-nt N} & Omitted when 1 \\
 Ultrafast bootstrap & \texttt{-bb N} & Enabled by the UFBoot checkbox \\
 UFBoot max iterations & \texttt{-nm N} &  \\
@@ -1230,9 +1290,11 @@ Consensus burn-in & \texttt{-bi N} & Omitted at 0 \\
 Consensus tree & \texttt{-con} & Always appended by the plugin \\
 \bottomrule
 \end{longtable}
+}
 
 Advanced Parameters (dialog values are applied when the dialog is accepted):
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.47\linewidth}>{\raggedright\arraybackslash}p{0.47\linewidth}@{}}
 \toprule
 GUI control & CLI option \\
@@ -1245,16 +1307,17 @@ Iterations = fixed & \texttt{-n N} \\
 Perturbation strength & \texttt{-pers X} \\
 Method = IQP & \texttt{-iqp} \\
 Method = IQPNNI (old) & \texttt{-iqpnni} \\
-Ratchet iterations & \texttt{-ratchet\_iter N} \\
-Ratchet weight & \texttt{-ratchet\_wgt N} \\
-Ratchet percent & \texttt{-ratchet\_percent N} \\
-Turn off Ratchet & \texttt{-ratchet\_off} \\
-SPR radius & \texttt{-spr\_rad N} \\
-Candidate cutoff & \texttt{-cand\_cutoff N} \\
-Turn off tree refinement & \texttt{-opt\_btree\_off} \\
-Use NNI instead of SPR & \texttt{-nni\_pars} \\
+Ratchet iterations & \texttt{-ratchet\_\allowbreak iter N} \\
+Ratchet weight & \texttt{-ratchet\_\allowbreak wgt N} \\
+Ratchet percent & \texttt{-ratchet\_\allowbreak percent N} \\
+Turn off Ratchet & \texttt{-ratchet\_\allowbreak off} \\
+SPR radius & \texttt{-spr\_\allowbreak rad N} \\
+Candidate cutoff & \texttt{-cand\_\allowbreak cutoff N} \\
+Turn off tree refinement & \texttt{-opt\_\allowbreak btree\_\allowbreak off} \\
+Use NNI instead of SPR & \texttt{-nni\_\allowbreak pars} \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{Flow}
 
@@ -1263,7 +1326,7 @@ Use NNI instead of SPR & \texttt{-nni\_pars} \\
   \item Choose sequence type and threads.
   \item Enable UFBoot and set the replicate/tuning values if needed.
   \item Set the consensus threshold; run.
-  \item Send the \texttt{.treefile}/\texttt{.contree} result to the workspace.
+  \item Send the \texttt{.\allowbreak treefile}/\texttt{.\allowbreak contree} result to the workspace.
 \end{enumerate}
 
 \subsection{Pitfalls}
@@ -1272,7 +1335,7 @@ Use NNI instead of SPR & \texttt{-nni\_pars} \\
   \item \texttt{-con} is always emitted, so a consensus tree is produced even when the threshold is 0.
   \item \texttt{-bb} should be at least 1000; the GUI exposes the tuning options separately.
   \item Advanced dialog values only take effect after accepting the dialog.
-  \item MPBoot uses the input alignment name for output; batch mode therefore writes one \texttt{.treefile}/\texttt{.contree} per input.
+  \item MPBoot uses the input alignment name for output; batch mode therefore writes one \texttt{.\allowbreak treefile}/\texttt{.\allowbreak contree} per input.
 \end{itemize}
 
 
@@ -1288,13 +1351,21 @@ Infer a species tree from a set of unrooted gene trees. YR-MPE wraps the ASTER e
 \begin{itemize}
   \item \textbf{ASTRAL-IV} (\texttt{astral4}) --- standard quartet-based species-tree inference with CASTLES-II branch lengths.
   \item \textbf{wASTRAL} (\texttt{wastral}) --- weighted ASTRAL; weights quartets by gene-tree support/length and reports coalescent-unit branch lengths.
-  \item \textbf{ASTRAL-Hybrid} (\texttt{astral-hybrid}) --- hybrid support/length weighting.
+  \item \textbf{ASTRAL-Hybrid} (\texttt{astral-hybrid}) --- a synonym/preset of wASTRAL using support values and branch lengths; not a separate method.
+\end{itemize}
+
+\subsection{Citation}
+
+\begin{itemize}
+  \item ASTER package: \texttt{zhang2025aster}.
+  \item wASTRAL weighting: \texttt{zhang2022wastral} (Zhang \& Mirarab, 2022).
 \end{itemize}
 
 \subsection{GUI to CLI}
 
-The first argv token selects the executable; the remaining options are passed to it. \texttt{control\_bindings()} is the source of truth.
+The first argv token selects the executable; the remaining options are passed to it. \texttt{control\_\allowbreak bindings\allowbreak ()} is the source of truth.
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -1303,8 +1374,8 @@ GUI control & CLI option & Notes \\
 Input gene trees & positional & Appended last \\
 ASTRAL version & \texttt{astral4}, \texttt{wastral}, \texttt{astral-hybrid} & First argv token \\
 Threads & \texttt{-t N} &  \\
-Output tree & \texttt{-o PATH} & Optional; a temporary \texttt{.tre} is used if empty \\
-Support option & \texttt{-u 0..3} & 0 no support, 1 length+support, 2 detailed, 3 freqQuad.csv \\
+Output tree & \texttt{-o PATH} & Optional; a temporary \texttt{.\allowbreak tre} is used if empty \\
+Support option & \texttt{-u 0.\allowbreak .\allowbreak 3} & 0 no support, 1 length+support, 2 detailed, 3 freqQuad.csv \\
 Constraint tree & \texttt{-c PATH} & Advanced \\
 Guide trees & \texttt{-g PATH} & Advanced \\
 Rounds & \texttt{-r N} & Advanced; default 4 \\
@@ -1315,17 +1386,18 @@ Subsample proportion & \texttt{--proportion X} & Advanced; default 0.25 \\
 Seed & \texttt{--seed N} & Advanced; default 233 \\
 Yule lambda & \texttt{-l X} & Advanced; default 0.5 \\
 Downweight repeats & \texttt{-w X} & Advanced; default 1.0 \\
-Verbose level & \texttt{-v 1|2} & Advanced; default 1 \\
+Verbose level & \texttt{-v 1|\allowbreak 2} & Advanced; default 1 \\
 Scoring only & \texttt{-C} &  \\
 More rounds & \texttt{-R} &  \\
-Branch lengths (ASTRAL-IV) & \texttt{--length SULength|CULength} & ASTRAL-IV only \\
+Branch lengths (ASTRAL-IV) & \texttt{--length SULength|\allowbreak CULength} & ASTRAL-IV only \\
 Gene length (ASTRAL-IV) & \texttt{--genelength X} & ASTRAL-IV only \\
 Hybrid preset & \texttt{-B}, \texttt{-S}, \texttt{-L} & ASTRAL-Hybrid only \\
 Tree weights & \texttt{--treeweights PATH} & ASTRAL-Hybrid only \\
-Weighting mode & \texttt{--mode 1..4} & ASTRAL-Hybrid only \\
+Weighting mode & \texttt{--mode 1.\allowbreak .\allowbreak 4} & ASTRAL-Hybrid only \\
 Min/max/default support & \texttt{-n}, \texttt{-x}, \texttt{-d} & ASTRAL-Hybrid only \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{Flow}
 
@@ -1338,7 +1410,7 @@ Min/max/default support & \texttt{-n}, \texttt{-x}, \texttt{-d} & ASTRAL-Hybrid 
 
 \subsection{Weighted-mode support labels}
 
-ASTER's weighted parsers (\texttt{wastral}, \texttt{astral-hybrid}) call \texttt{std::stod} on node labels. IQ-TREE can write composite labels such as \texttt{/1/100} (SH-aLRT/aBayes/UFBoot). The leading slash makes \texttt{std::stod} throw \texttt{std::invalid\_argument} and the process aborts.
+ASTER's weighted parsers (\texttt{wastral}, \texttt{astral-hybrid}) call \texttt{std::stod} on node labels. IQ-TREE can write composite labels such as \texttt{/\allowbreak 1/\allowbreak 100} (SH-aLRT/aBayes/UFBoot). The leading slash makes \texttt{std::stod} throw \texttt{std::invalid\_\allowbreak argument} and the process aborts.
 
 YR-MPE normalizes composite labels before weighted runs: it keeps the first numeric field (aBayes when present, otherwise aLRT/UFBoot) and drops the others. A single support type such as aBayes-only also avoids the crash. ASTRAL-IV accepts composite labels directly.
 
@@ -1362,18 +1434,19 @@ Infer a species tree directly from a multiple-sequence alignment by sampling qua
 
 \subsection{GUI to CLI}
 
-\texttt{control\_bindings()} is the source of truth.
+\texttt{control\_\allowbreak bindings\allowbreak ()} is the source of truth.
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
 \midrule
 \endhead
 Input alignment & positional & FASTA, PHYLIP, or a file list \\
-Format & \texttt{--format fasta|list|phylip} & \texttt{auto} is omitted \\
+Format & \texttt{--format fasta|\allowbreak list|\allowbreak phylip} & \texttt{auto} is omitted \\
 Threads & \texttt{--thread N} &  \\
 Output tree & \texttt{--output PATH} & Optional \\
-Support option & \texttt{--support 0..2} & 0 none, 1 length+support, 2 detailed \\
+Support option & \texttt{--support 0.\allowbreak .\allowbreak 2} & 0 none, 1 length+support, 2 detailed \\
 Subsample rounds & \texttt{--subsample N} & Advanced; default 4 \\
 Constraint tree & \texttt{--constraint PATH} & Advanced \\
 Guide trees & \texttt{--guide PATH} & Advanced \\
@@ -1383,12 +1456,13 @@ Root taxon & \texttt{--root NAME} & Advanced \\
 Subsample proportion & \texttt{--proportion X} & Advanced; default 0.25 \\
 Seed & \texttt{--seed N} & Advanced; default 233 \\
 Chunk size & \texttt{--chunk N} & Advanced; default 10000 \\
-Ambiguity handling & \texttt{--ambiguity 0|1} & 0=N, 1=diploid unphased \\
-Branch lengths & \texttt{--length SULength|CULength} & Advanced; default SULength \\
+Ambiguity handling & \texttt{--ambiguity 0|\allowbreak 1} & 0=N, 1=diploid unphased \\
+Branch lengths & \texttt{--length SULength|\allowbreak CULength} & Advanced; default SULength \\
 Scoring only & \texttt{--scoring} &  \\
 More rounds & \texttt{--moreround} &  \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{Flow}
 
@@ -1418,6 +1492,7 @@ Reconcile a gene tree with a species tree, report duplication/loss events and op
 
 \subsection{GUI to CLI}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -1432,11 +1507,12 @@ Loss cost & \texttt{-l N} & Default 1 \\
 Best root by reconciliation & \texttt{-r} & Boolean \\
 Contraction threshold & \texttt{-t X} & Omitted for \texttt{none} \\
 Species prefix mode & \texttt{-p Y} & Only \texttt{Y} is emitted \\
-Species separator & \texttt{-c CHAR} & Omitted for \texttt{\_} \\
+Species separator & \texttt{-c CHAR} & Omitted for \texttt{\_\allowbreak } \\
 Orthology/paralogy events & \texttt{--fevent} &  \\
 Gene-to-species mapping & \texttt{-S PATH} &  \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{Flow}
 
@@ -1450,7 +1526,7 @@ Gene-to-species mapping & \texttt{-S PATH} &  \\
 
 \begin{itemize}
   \item TreeRecs 1.2 aborts with \texttt{std::stod} when given \texttt{-t none}; the plugin leaves the flag out unless a numeric threshold is set.
-  \item Passing \texttt{-p N} or \texttt{-c \_} explicitly switches separator mapping on and breaks leaf names such as \texttt{A/B/C}; both flags are only emitted when changed from their defaults.
+  \item Passing \texttt{-p N} or \texttt{-c \_\allowbreak } explicitly switches separator mapping on and breaks leaf names such as \texttt{A/\allowbreak B/\allowbreak C}; both flags are only emitted when changed from their defaults.
   \item \texttt{-p} uses a species-prefix convention; for a separate mapping file use \texttt{-S} instead.
   \item The output directory is always created by the plugin; \texttt{-f -q} makes the run non-interactive.
 \end{itemize}
@@ -1463,14 +1539,14 @@ Gene-to-species mapping & \texttt{-S PATH} &  \\
 BEST is the full-likelihood multispecies-coalescent analysis implemented by MrBayes. YPhylo Workbench exposes it as a block-oriented agent surface:
 
 \begin{itemize}
-  \item \texttt{best.inspect\_options} returns the current structured options and the canonical MRBAYES block.
-  \item \texttt{best.apply\_block} accepts a complete MRBAYES block. The form is updated from the parsed values and the response returns the canonical block plus any lines that were not parsed.
-  \item \texttt{best.modify\_options} sets individual controls directly.
-  \item \texttt{best.run} starts MrBayes through the task queue. \texttt{best.stop} cancels it.
-  \item \texttt{best.export\_to\_workspace} imports the consensus tree and chain files.
+  \item \texttt{best.\allowbreak inspect\_\allowbreak options} returns the current structured options and the canonical MRBAYES block.
+  \item \texttt{best.\allowbreak apply\_\allowbreak block} accepts a complete MRBAYES block. The form is updated from the parsed values and the response returns the canonical block plus any lines that were not parsed.
+  \item \texttt{best.\allowbreak modify\_\allowbreak options} sets individual controls directly.
+  \item \texttt{best.\allowbreak run} starts MrBayes through the task queue. \texttt{best.\allowbreak stop} cancels it.
+  \item \texttt{best.\allowbreak export\_\allowbreak to\_\allowbreak workspace} imports the consensus tree and chain files.
 \end{itemize}
 
-The input must be a NEXUS data file. Partitions may be loaded from charset definitions; the species partition uses MrBayes \texttt{speciespartition} syntax. A round-trip response should be checked with \texttt{unparsed\_lines} before running.
+The input must be a NEXUS data file. Partitions may be loaded from charset definitions; the species partition uses MrBayes \texttt{speciespartition} syntax. A round-trip response should be checked with \texttt{unparsed\_\allowbreak lines} before running.
 
 
 \chapter{Dating and selection}
@@ -1490,6 +1566,7 @@ The runner calls:
 lsd2 -i tree.nwk -s sequence_length -r l|a [-f 100 -q SD] -d calibrations.txt
 \end{lstlisting}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -1507,6 +1584,7 @@ Tip dates & \texttt{-d FILE} & Merged into the same calibration file \\
 Preferred result & none & GUI-only import choice \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{Calibrations}
 
@@ -1547,6 +1625,7 @@ Set up molecular-dating calibrations and run a first dating analysis. PD-Guide i
 
 \subsection{Method choices}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.47\linewidth}>{\raggedright\arraybackslash}p{0.47\linewidth}@{}}
 \toprule
 Method & Status \\
@@ -1559,6 +1638,7 @@ MrBayes & Not yet implemented \\
 MCMCTree & Not yet implemented \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{GUI workflow}
 
@@ -1566,7 +1646,7 @@ MCMCTree & Not yet implemented \\
   \item Load a tree, or infer one with IQ-TREE from an alignment.
   \item Configure tip dates and node calibrations in the shared dating panel.
   \item Optionally export the calibration table as a text file.
-  \item Select LSD2 and run; the dated tree and \texttt{.result} files are returned.
+  \item Select LSD2 and run; the dated tree and \texttt{.\allowbreak result} files are returned.
   \item Inspect the console and send the dated tree to the workspace.
 \end{enumerate}
 
@@ -1653,6 +1733,7 @@ Estimate dN/dS across many codon alignments in one run, using either fast counti
 
 \subsection{Methods}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI method & Implementation & Output \\
@@ -1664,6 +1745,7 @@ MLE --- IQ-TREE GY & \texttt{iqtree -s ALN --seqtype CODON -m GY} & Global omega
 MLE --- IQ-TREE MG & \texttt{iqtree -s ALN --seqtype CODON -m MG} & Global omega + logL \\
 \bottomrule
 \end{longtable}
+}
 
 \subsection{GUI workflow}
 
@@ -1701,6 +1783,73 @@ The plugin parses omega and log-likelihood from the IQ-TREE report/stdout.
 \end{itemize}
 
 
+\chapter{Workflow execution}
+\section{Workflow Runner}
+\noindent\textit{Menu:} WORKSPACE $\rightarrow$ Record \& Workflow $\rightarrow$ Run Workflow...\\
+\noindent\textit{Skill id:} \texttt{workflow-runner}
+
+\subsection{Purpose}
+
+Execute a compiled \texttt{yrmpe.\allowbreak workflow.\allowbreak v1} plan. Each step is an ordinary YR-MPE plugin opened in headless mode; the runner applies the step parameters, runs the tool, collects the typed result and feeds the produced files to later steps through placeholder bindings.
+
+\subsection{Input}
+
+A JSONL file or an agent transcript. The JSONL form uses one object per line:
+
+\begin{lstlisting}
+{"schema": "yrmpe.workflow.v1", "kind": "workflow", "name": "demo",
+ "inputs": {"raw": "raw.fas"}}
+{"id": "mafft", "op": "mafft.run",
+ "outputs": {"alignment": "aln.fas"},
+ "params": {"input": "%input.raw%", "output": "%mafft.alignment.fas%"}}
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{inputs} maps a role name to an external file. The key becomes \texttt{\%input.\allowbreak <role><ext>\%}.
+  \item A step \texttt{outputs} object names each produced artifact. The key becomes \texttt{\%<step>.\allowbreak <role><ext>\%} and is available to later steps.
+  \item \texttt{params} keys are the plugin control ids from \texttt{control\_\allowbreak bindings\allowbreak ()}.
+  \item Lines without \texttt{op}/\texttt{step} are treated as headers or pruned discovery actions.
+\end{itemize}
+
+\subsection{GUI}
+
+\begin{itemize}
+  \item \textbf{Input \& Parameters}: workflow file, output directory and one path field per declared input role.
+  \item \textbf{Procedures}: the compiled DAG, one square per tool and one circle per artifact.
+  \item \textbf{Output Preview}: one entry per produced file.
+  \item \textbf{Console}: each step's command line and tool output.
+\end{itemize}
+
+\subsection{Agent actions}
+
+\begin{itemize}
+  \item \texttt{workflow.\allowbreak inspect\_\allowbreak plan} --- compiled steps, inputs and current outputs.
+  \item \texttt{workflow.\allowbreak validate} --- checks op mapping, input files and output directory.
+  \item \texttt{workflow.\allowbreak run} --- compile (if needed) and execute.
+  \item \texttt{workflow.\allowbreak stop} --- stop the current step and the run.
+  \item \texttt{workflow.\allowbreak inspect\_\allowbreak status} --- step count, progress and error.
+  \item \texttt{workflow.\allowbreak inspect\_\allowbreak console} --- console tail.
+\end{itemize}
+
+Generic actions (\texttt{plugin.\allowbreak modify\_\allowbreak options}, \texttt{plugin.\allowbreak run}, \texttt{plugin.\allowbreak stop}, \texttt{plugin.\allowbreak inspect\_\allowbreak console}) also work on this window.
+
+\subsection{Contract}
+
+\begin{itemize}
+  \item The runner writes \texttt{<output\_\allowbreak dir>/\allowbreak workflow\_\allowbreak run.\allowbreak json} with the plan, per-step status, command line, produced files and error.
+  \item At the end, all item outputs are merged into one \texttt{ResultSpec} (\texttt{source="workflow-runner"}) and sent to the workspace.
+  \item A step without \texttt{\_\allowbreak build\_\allowbreak result\_\allowbreak spec\allowbreak ()} cannot be executed; the runner reports the step as failed instead of inventing an import.
+\end{itemize}
+
+\subsection{Pitfalls}
+
+\begin{itemize}
+  \item Placeholder paths in \texttt{params} must match an input role or a previous step output; the compiler rejects unknown placeholders.
+  \item The declared output path is a hint. The actual file comes from the step's \texttt{ResultSpec}; later steps are rebound to that actual path.
+  \item A step that opens a modal dialog (missing input, missing binary) cannot be used headlessly. Validate inputs and tool configuration first.
+\end{itemize}
+
+
 \chapter{Visualization and diagnostics}
 \section{IcyTree}
 \noindent\textit{Menu:} PHYLOGENY $\rightarrow$ Tree Viewer (IcyTree)\\
@@ -1713,8 +1862,8 @@ Interactive tree viewing and annotation in an embedded IcyTree web view.
 \subsection{Inputs}
 
 \begin{itemize}
-  \item Newick (\texttt{.nwk}, \texttt{.newick}, \texttt{.tre}, \texttt{.tree})
-  \item NEXUS (\texttt{.nex}, \texttt{.nexus}) with a trees block
+  \item Newick (\texttt{.\allowbreak nwk}, \texttt{.\allowbreak newick}, \texttt{.\allowbreak tre}, \texttt{.\allowbreak tree})
+  \item NEXUS (\texttt{.\allowbreak nex}, \texttt{.\allowbreak nexus}) with a trees block
 \end{itemize}
 
 NEXUS is preferred when the tree carries rich annotations, because IcyTree can display support values, branch lengths and metadata that plain Newick may lose.
@@ -1747,34 +1896,35 @@ There is no command-line interface; IcyTree runs entirely in the embedded web vi
 
 \subsection{Purpose}
 
-Inspect MCMC chain files without an external Tracer installation: trace plots, ESS, 95\% HPD, harmonic means, skyline plots and two-chain comparisons.
+Inspect MCMC chain files without an external Tracer installation: trace plots, ESS, 95\% HPD, harmonic means, skyline plots and two-chain comparisons. MiniTracer is a Python implementation of Tracer with a redesigned interface layout, not a pixel-for-pixel port of the Java application. Cite Tracer as \texttt{rambaut2018posterior} when reporting trace diagnostics.
 
 \subsection{Inputs}
 
 \begin{itemize}
-  \item MrBayes \texttt{.p} files (tab-delimited chain parameters).
-  \item PhyloBayes \texttt{.trace} files.
+  \item MrBayes \texttt{.\allowbreak p} files (tab-delimited chain parameters).
+  \item PhyloBayes \texttt{.\allowbreak trace} files.
   \item Plain tab-delimited trace files with a header row.
 \end{itemize}
 
 \subsection{GUI workflow}
 
 \begin{enumerate}
-  \item Open \texttt{PHYLOGENY -> Bayesian Inference (BI) -> MCMC Diagnostics (MiniTracer)}.
+  \item Open \texttt{PHYLOGENY -> Bayesian Inference \allowbreak (BI) -> MCMC Diagnostics \allowbreak (MiniTracer)}.
   \item Add one or more chain files; set burn-in.
   \item Select parameters in the statistics table (Ctrl/Shift for multiple).
   \item Inspect the summary form, box plot or skyline plot.
-  \item Open \textbf{Compare 2 Chains} to select two traces; the harmonic-mean interval plot sits below the right-hand statistics table.
+  \item Open \textbf{Compare 2 Chains} to select two traces; the scatter panel shows chain 1 against chain 2 with the y = x reference line, and the statistics table reports sample counts, means, the correlation coefficient and the Gelman--Rubin PSRF (R-hat). The harmonic-mean interval plot sits below the right-hand statistics table.
 \end{enumerate}
 
 \subsection{Notes for agents}
 
-MiniTracer is a GUI analysis tool, not a command-line binary. It consumes chain items from the workspace and produces no new file artifact unless the caller exports one. Use \texttt{workbench.workspace} to discover \texttt{chain} items and \texttt{workbench.selection} to see whether a chain can be sent to MiniTracer.
+MiniTracer is a GUI analysis tool, not a command-line binary. It consumes chain items from the workspace and produces no new file artifact unless the caller exports one. Use \texttt{workbench.\allowbreak workspace} to discover \texttt{chain} items and \texttt{workbench.\allowbreak selection} to see whether a chain can be sent to MiniTracer.
 
 \subsection{Interpretation}
 
 \begin{itemize}
-  \item ESS should be checked before trusting posterior summaries.
+  \item ESS should be checked before trusting posterior summaries. The statistics table colours rows green at ESS >= 200, yellow at 100--200 and red below 100.
+  \item The two-chain PSRF is a per-parameter Gelman--Rubin R-hat computed from the two post-burn-in traces after truncating to the shorter length; values close to 1 indicate agreement. It is not a multivariate PSRF over the whole model.
   \item The harmonic-mean panel is descriptive; its approximate delta-method test is not a substitute for a proper marginal-likelihood comparison.
   \item Skyline plots connect the selected parameters across posterior samples; the dashed bounds are 95\% HPD.
 \end{itemize}
@@ -1790,6 +1940,7 @@ Compute pairwise unrooted Robinson-Foulds (RF) distances among trees or tree set
 
 \subsection{GUI to CLI}
 
+{\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}>{\raggedright\arraybackslash}p{0.31\linewidth}@{}}
 \toprule
 GUI control & CLI option & Notes \\
@@ -1798,10 +1949,11 @@ GUI control & CLI option & Notes \\
 Tree file / TreeSet & \texttt{-t PATH} & One Newick tree per line \\
 Threads & \texttt{-T N} & Default: half the CPU count, capped at 4 \\
 Run & \texttt{--tree-dist-all} & Always added by the runner \\
-Output prefix & \texttt{--prefix DIR/rf} & Plugin-managed \\
+Output prefix & \texttt{--prefix DIR/\allowbreak rf} & Plugin-managed \\
 Rerun & \texttt{--redo} & Always added \\
 \bottomrule
 \end{longtable}
+}
 
 Rooted input trees are converted to unrooted topologies in a temporary file before the IQ-TREE call. This normalization is GUI-only and does not appear as a CLI flag.
 
@@ -1814,7 +1966,7 @@ When the input comes from selected TreeSets, the plugin records which trees belo
 \begin{itemize}
   \item Lower-triangular RF matrix (TSV and figure).
   \item Pairwise table: tree 1, tree 2, comparison type, RF, normalized RF.
-  \item Normalized RF uses \texttt{RF / (2(n-3))} for \texttt{n >= 4} taxa.
+  \item Normalized RF uses \texttt{RF /\allowbreak  \allowbreak (2\allowbreak (n-3))} for \texttt{n >= 4} taxa.
   \item RF distribution box plot.
 \end{itemize}
 
@@ -1834,13 +1986,12 @@ When the input comes from selected TreeSets, the plugin records which trees belo
 
 \subsection{Purpose}
 
-Open a shell preconfigured with the bundled phylogenetic tools, or create a PhyloBOT project directory.
+Open a shell preconfigured with the bundled phylogenetic tools.
 
 \subsection{GUI features}
 
 \begin{itemize}
   \item \textbf{Startup a new shell} opens a terminal with the plugin's tool directories added to \texttt{PATH}.
-  \item \textbf{Create new PhyloBOT project} creates a project scaffold for command-line work.
   \item The dialog lists the tool paths and commands that will be available.
 \end{itemize}
 
@@ -1851,7 +2002,7 @@ There is no analysis command line of its own; the console is a launcher.
 \begin{enumerate}
   \item Open the Console plugin.
   \item Review the tool PATH list.
-  \item Start a shell, or create a PhyloBOT project.
+  \item Start a shell.
   \item Run bundled tools by name in the opened shell.
 \end{enumerate}
 
@@ -1861,7 +2012,7 @@ There is no analysis command line of its own; the console is a launcher.
   \item The shell inherits the environment at launch; tools added later require a new shell.
   \item The console does not create workspace items or provenance records; use the plugins for tracked analyses.
   \item Closing the dialog does not necessarily close an already-opened terminal.
-  \item Tool paths come from \texttt{config.json}; a missing path is shown but cannot be fixed from this dialog.
+  \item Tool paths come from \texttt{config.\allowbreak json}; a missing path is shown but cannot be fixed from this dialog.
 \end{itemize}
 
 
@@ -1908,6 +2059,11 @@ Substitution saturation (BaCoCa C-value) & DISTANCE $\rightarrow$ Calculate \& P
 PD-Guide & PHYLOGENY $\rightarrow$ PD-Guide & \texttt{pdguide} \\
 Sequence Viewer & ALIGN $\rightarrow$ Open Sequence Files & \texttt{sequence-viewer} \\
 YR-MPE Console & WORKSPACE & \texttt{console} \\
+Gene Concordance Factors (gCF) & SPECIES TREE $\rightarrow$ Gene Concordance (gCF) & \texttt{gcf} \\
+Site Concordance Factors (sCF) & SPECIES TREE $\rightarrow$ Site Concordance (sCF) & \texttt{scf} \\
+Site Concordance Diagnostics (sCF + CASTER q1-q3) & SPECIES TREE $\rightarrow$ Site Diagnostics (sCF + CASTER) & \texttt{site-diagnostics} \\
+MSC Branch Diagnostics (gCF + ASTER CU) & SPECIES TREE $\rightarrow$ MSC Diagnostics (gCF + ASTER CU) & \texttt{msc-diagnostics} \\
+Workflow Runner & WORKSPACE $\rightarrow$ Record \& Workflow $\rightarrow$ Run Workflow... & \texttt{workflow-runner} \\
 \bottomrule
 \end{longtable}
 \end{document}

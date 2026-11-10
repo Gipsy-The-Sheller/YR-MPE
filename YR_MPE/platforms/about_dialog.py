@@ -115,9 +115,9 @@ class AboutDialog(QDialog):
         title = QLabel("<h2>YPhylo Workbench</h2>")
         layout.addWidget(title)
         subtitle = QLabel(
-            "A workbench for YR-MPE plugins: alignment, model selection, "
-            "distance, phylogeny and species-tree analysis. "
-            "Plugin set version %s." % __version__
+            "YPhylo Workbench %s: a desktop platform for alignment, model "
+            "selection, distance, phylogeny, species-tree analysis and "
+            "compiled workflow execution." % __version__
         )
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
@@ -128,9 +128,10 @@ class AboutDialog(QDialog):
             "1. WORKSPACE → import sequences, a dataset, or run One-Step OrthoFinder.\n"
             "2. ALIGN → align and trim; MODEL → choose a substitution model.\n"
             "3. DISTANCE / PHYLOGENY / SPECIES TREE → build and compare trees.\n"
-            "4. Click a workspace item, or a dataset, to make it the active input; "
+            "4. WORKSPACE → Record & Workflow → Run Workflow runs a compiled JSONL plan.\n"
+            "5. Click a workspace item, or a dataset, to make it the active input; "
             "drag it onto Selected to queue it for a tool.\n"
-            "5. Details shows metadata, workflow provenance and previews."
+            "6. Details shows metadata, workflow provenance and previews."
         )
         help_text.setWordWrap(True)
         help_layout.addWidget(help_text)

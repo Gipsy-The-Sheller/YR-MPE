@@ -32,7 +32,7 @@ chapters are a reference for each analysis menu; the final chapters cover
 troubleshooting and plugin development. Menu paths are written as
 \textbf{MENU $\rightarrow$ Submenu $\rightarrow$ Action}, and names in
 \texttt{monospace} are files, options or object types. This edition describes
-YR-MPE 1.1.0. The integrated workbench is called \textbf{YPhylo Workbench};
+YR-MPE 1.2.0. The integrated workbench is called \textbf{YPhylo Workbench};
 the plugin package remains \textbf{YR-MPE}.
 
 \section{What YR-MPE and YPhylo Workbench are}
@@ -332,7 +332,8 @@ Menu & Actions (submenus in parentheses) \\
 \endhead
 \textbf{WORKSPACE} & Select Workspace; Dataset (New, Import from partitioned
 NEXUS file, Create by SeqMatrix, Create by SeqDBG, One-Step OrthoFinder);
-Import Workflow; Workflow Preview; About YPhylo Workbench. \\
+Record \& Workflow (Import Workflow, Workflow Preview, Run Workflow); About
+YPhylo Workbench. \\
 \textbf{ALIGN} & Open Sequence Files; Align by... (Clustal Omega, MAFFT,
 Muscle 5, MACSE); Trim Alignment by... (Trimal, GBlocks). \\
 \textbf{MODEL} & Find Best Substitution Model (ML); Find Best Substitution
@@ -1811,7 +1812,8 @@ sites.
 
 \textbf{SPECIES TREE $\rightarrow$ Site Diagnostics (sCF + CASTER)} compares
 likelihood sCF with CASTER-site q1/q2/q3 scores on the same fixed tree; its
-Simplex tab uses sCF/sDF1/sDF2 and CASTER q1/q2/q3. \textbf{SPECIES TREE
+two Simplex tabs show sCF/sDF1/sDF2 and CASTER q1/q2/q3 as separate figures,
+and the CASTER panel encodes CULength as colour. \textbf{SPECIES TREE
 $\rightarrow$ MSC Diagnostics (gCF + ASTER CU)} compares gCF with ASTRAL-IV and
 wASTRAL coalescent-unit lengths. These panels are interpretive aids: they align
 the same splits across methods and flag disagreements, but they do not replace
@@ -1832,7 +1834,7 @@ in four tabs:
         the largest gCF versus the largest gDF, so discordant splits stand
         out;
   \item \textbf{Simplex} --- ternary plots of the gCF and ASTRAL-IV qCF
-        triplets, with gDFP encoded by colour;
+        triplets, with gDFP encoded by colour for gCF and CULength for qCF;
   \item \textbf{Bipartition info} --- a taxa $\times$ splits membership
         matrix, with the smaller side of each split shaded blue.
 \end{itemize}
@@ -1844,8 +1846,10 @@ support the species-tree split, and a point near a bottom vertex means that an
 alternative NNI split is more common. \texttt{gDFP} is not a vertex because it
 mixes polyphyly and other outcomes; it is shown as the point colour. The
 ASTRAL-IV panel uses \texttt{qCF}, \texttt{qDF1} and \texttt{qDF2} in the same
-way. The two panels are separate because the order of \texttt{DF1} and
-\texttt{DF2} can differ between the gene-tree and site-based summaries.
+way, and colours each point by its coalescent-unit length (\texttt{CULength}),
+so a split's concordance position and its CU length can be read together. The
+two panels are separate because the order of \texttt{DF1} and \texttt{DF2} can
+differ between the gene-tree and site-based summaries.
 
 Each point is an \emph{internal split}, not a gene tree. A tree with $n$ taxa
 has $n-3$ internal splits in the unrooted case, so a 10-taxon analysis has at
@@ -1862,7 +1866,8 @@ or by a missing-data pattern.
   \centering
   \includegraphics[width=\linewidth]{manual_msc_simplex.pdf}
   \caption{MSC diagnostics. (A) gCF and ASTRAL-IV qCF simplex views; each
-  point is an internal split and gDFP is encoded by colour. (B) Bipartition
+  point is an internal split, gDFP is encoded by colour for gCF and CULength
+  for qCF. (B) Bipartition
   membership matrix; rows are taxa and columns are splits, with the smaller
   side shaded blue.}
   \label{fig:manual-msc-simplex}
@@ -2015,7 +2020,7 @@ acceptable.
 
 \begin{warning}
 MCMCTree is \emph{not yet wrapped by a YPhylo Workbench plugin} in version
-1.1.0. The \textbf{CLOCK} menu reserves the entry, and \textbf{Import to
+1.2.0. The \textbf{CLOCK} menu reserves the entry, and \textbf{Import to
 MCMCTree} reports that the import will be wired through PD-Guide. The workflow
 below is the supported external route with PAML.
 \end{warning}
@@ -2052,7 +2057,7 @@ IQ2MC is the planned converter from an IQ-TREE analysis to MCMCTree input: it
 will write the PHYLIP alignment, rooted tree, \texttt{mcmctree.ctl},
 \texttt{calibration} file and the \texttt{usedata = 2} run that produces
 \texttt{in.BV}, making the approximate workflow a one-click continuation of an
-IQ-TREE analysis. It is not implemented in 1.1.0; until then, follow the
+IQ-TREE analysis. It is not implemented in 1.2.0; until then, follow the
 external workflow above.
 
 \section{PD-Guide}
@@ -2307,6 +2312,30 @@ unknown placeholders and cycles. The preview renders data items as circles,
 tools as squares and artifact flow as orthogonal arrows. Clicking a tool node
 opens its plugin in workflow mode; path inputs are locked to placeholders and
 the Run button becomes \emph{Close \& Apply}.
+
+\section{Running a workflow}
+
+\textbf{WORKSPACE $\rightarrow$ Run Workflow...} opens the workflow runner.
+Load a JSONL specification and map each declared input role to a file; the
+output directory defaults to \texttt{workflow/} below the workspace. The
+runner validates the DAG, the plugin entry for each \texttt{op}, the input
+files and the output directory before starting.
+
+Execution is sequential. For each step the runner creates the ordinary plugin
+window in headless mode, applies the step parameters through
+\texttt{control\_bindings()}, runs the tool, collects the typed result with the
+plugin's \texttt{result\_spec()} hook, and rebinds each output role to the file
+the plugin actually produced. Later placeholders therefore resolve to real
+files rather than to the paths declared in the JSONL. Progress, command lines
+and tool output appear in the Console tab; the Procedures tab shows the
+compiled DAG and Output Preview lists every produced file.
+
+At the end all items are merged into one \texttt{ResultSpec} and sent to the
+workspace, and the runner writes \texttt{workflow\_run.json} with the plan,
+per-step status, command line and outputs. The same surface is available to an
+agent: \texttt{workflow.inspect\_plan}, \texttt{workflow.validate},
+\texttt{workflow.run}, \texttt{workflow.stop},
+\texttt{workflow.inspect\_status} and \texttt{workflow.inspect\_console}.
 
 \section{A practical agent recipe}
 

@@ -21,8 +21,8 @@ MANIFEST = REPO / "YR_MPE" / "skills" / "manifest.json"
 SKILLS = MANIFEST.parent
 
 # Application shells and the template plugin are not analysis skills.
-EXCLUDED_PREFIXES = ("YR-MPEA", "About YR-MPE", "Example Plugin")
-EXCLUDED_NAMES = {"YR-MPEA [Multigene devel]"}
+EXCLUDED_PREFIXES = ("YPhylo Workbench", "About YPhylo Workbench", "Example Plugin")
+EXCLUDED_NAMES = {"YPhylo Workbench"}
 
 
 def is_excluded(name: str) -> bool:

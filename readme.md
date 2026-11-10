@@ -18,6 +18,22 @@ inspect the intermediate result, change a parameter, and keep the whole
 analysis auditable. The same operation is available from the GUI, a JSONL
 workflow and a local agent bridge.
 
+## What's new in v1.2.0
+
+- **Workflow Runner**: `WORKSPACE -> Record & Workflow -> Run Workflow...`
+  compiles a JSONL plan, validates every step and executes the plugins in
+  order. Output placeholders are rebound to the files each tool actually
+  produces; results are merged into one workspace dataset and a
+  `workflow_run.json` record.
+- **Agent-operable execution**: `workflow.inspect_plan`, `workflow.validate`,
+  `workflow.run`, `workflow.stop` and `workflow.inspect_status` are available
+  through the local bridge, together with the generic plugin actions.
+- **Console cleanup**: the legacy PhyloBOT project scaffold and the bundled
+  iFlow runtime were removed; the Console now only opens a shell with the
+  bundled tool paths.
+- **Version 1.2.0**: product metadata, About page and documentation updated;
+  the legacy multigene application shell was removed.
+
 ## What's new in v1.1.0
 
 - **YPhylo Workbench** with typed workspace objects, a provenance Inspector,
@@ -69,8 +85,8 @@ More interface figures are in the [user manual](docs/manual/manual.pdf) and
 
 1. Download the [YRTools](https://github.com/Gipsy-The-Sheller/YRTools)
    release and extract it to a writable folder.
-2. Download the YR-MPE **v1.1.0 source archive** from the
-   [release page](https://github.com/Gipsy-The-Sheller/YR-MPE/releases/tag/v1.1.0)
+2. Download the YR-MPE **v1.2.0 source archive** from the
+   [release page](https://github.com/Gipsy-The-Sheller/YR-MPE/releases/tag/v1.2.0)
    and extract it so that the repository root is
    `<YRTools_root>/plugins/YR-MPE/`.
 3. Either extract `YR-MPE-bins-win64.zip` at the `YR_MPE/` level so its
@@ -114,7 +130,7 @@ The toolbar is grouped by analysis stage:
 | **SELECTION** | codon-based Z-test (NG86/YN00); batch dN/dS; IQ-TREE codon MLE |
 
 `ASTRAL-Hybrid` is a wASTRAL preset (support + branch length weighting), not a
-separate method. `MCMCTree`/`IQ2MC` and CodeML/HyPhy are not wired in v1.1.0;
+separate method. `MCMCTree`/`IQ2MC` and CodeML/HyPhy are not wired in v1.2.0;
 the menu entries are explicit placeholders.
 
 ## Agent and workflow support
@@ -161,7 +177,7 @@ for the AI-readiness requirements.
   dating and selection.
 - [Tool reference](docs/manual/tool-reference.pdf) — plugin-by-plugin GUI/CLI/
   agent reference generated from the skills.
-- [Supplementary information](https://github.com/Gipsy-The-Sheller/YR-MPE/releases/download/v1.1.0/YR-MPE-1.1.0-supplementary-information.pdf)
+- [Supplementary information](https://github.com/Gipsy-The-Sheller/YR-MPE/releases/download/v1.2.0/YR-MPE-1.2.0-supplementary-information.pdf)
   — benchmark notes and implementation details.
 - [Wiki](https://github.com/Gipsy-The-Sheller/YR-MPE/wiki) — older tutorials
   and development notes; the PDF manual is the current reference.
@@ -197,8 +213,8 @@ The manuscript is in preparation. Until a DOI is available, cite the release:
              Cheng, Xinbo and Han, Shuo and Jin, Yang and Lei, Yitong and
              Zhang, Rui and Zhang, Yunlong},
   year    = {2026},
-  version = {1.1.0},
-  url     = {https://github.com/Gipsy-The-Sheller/YR-MPE/releases/tag/v1.1.0}
+  version = {1.2.0},
+  url     = {https://github.com/Gipsy-The-Sheller/YR-MPE/releases/tag/v1.2.0}
 }
 ```
 

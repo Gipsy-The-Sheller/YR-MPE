@@ -662,7 +662,7 @@
     {
       "id": "console",
       "title": "YR-MPE Console",
-      "summary": "Open a shell with the bundled tool paths or create a PhyloBOT project.",
+      "summary": "Open a shell with the bundled tool paths.",
       "plugin_names": [
         "YR-MPE Console"
       ],
@@ -757,6 +757,34 @@
       ],
       "actions": [],
       "file": "msc-diagnostics.md"
+    },
+    {
+      "id": "workflow-runner",
+      "title": "Workflow Runner",
+      "summary": "Compile a JSONL workflow, validate its steps and execute them in order; outputs become workspace items.",
+      "plugin_names": [
+        "Workflow Runner"
+      ],
+      "tool_names": [
+        "YR-MPE workflow engine"
+      ],
+      "class_names": [
+        "WorkflowRunnerPlugin"
+      ],
+      "menu_path": [
+        "WORKSPACE",
+        "Record & Workflow",
+        "Run Workflow..."
+      ],
+      "actions": [
+        "workflow.inspect_plan",
+        "workflow.validate",
+        "workflow.run",
+        "workflow.stop",
+        "workflow.inspect_status",
+        "workflow.inspect_console"
+      ],
+      "file": "workflow-runner.md"
     }
   ]
 }

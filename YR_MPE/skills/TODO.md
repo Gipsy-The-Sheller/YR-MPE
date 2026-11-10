@@ -78,8 +78,8 @@ Contract for every completed skill:
 ## Explicitly out of scope
 
 - `Example Plugin` (`hello_plugin.py`) — template, not a user tool.
-- `About YR-MPE`, `YR-MPEA`, `YR-MPEA [Multigene devel]` — application
-  shells, not analysis plugins.
+- `About YR-MPE`, `YPhylo Workbench` — application shells, not analysis
+  plugins.
 
 ## Batch log
 
