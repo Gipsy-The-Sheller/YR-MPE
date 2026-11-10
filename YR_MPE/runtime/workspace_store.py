@@ -654,12 +654,21 @@ class WorkspaceStore:
         datasets = state.get("datasets", {})
         items = state.get("items", {})
         migrated = 0
+        selection = {
+            "selected": [str(item_id) for item_id in state.get("selected_items", []) or []],
+            "basket": [str(item_id) for item_id in state.get("basket_items", []) or []],
+            "items": {},
+            "datasets": {},
+        }
 
         for dataset_id, dataset_data in datasets.items():
             dataset = DatasetRecord.from_dict(dataset_data)
             dataset.id = dataset_id
             dataset.settings = dataset_data.get("settings", {}) or {}
             dataset.item_ids = []
+            dataset_state = dataset_data.get("selection_state", "none")
+            if dataset_state and dataset_state != "none":
+                selection["datasets"][dataset_id] = dataset_state
             self.index.datasets[dataset_id] = dataset
             self._dataset_dir(dataset_id).mkdir(parents=True, exist_ok=True)
 
@@ -683,6 +692,12 @@ class WorkspaceStore:
                 modified_at=item_data.get("modified_at", _now()),
             )
             record.metadata.setdefault("migrated_from", source.name)
+            item_state = item_data.get("selection_state", "none")
+            if item_state and item_state != "none":
+                selection["items"][item_id] = {
+                    "state": item_state,
+                    "reason": item_data.get("selection_reason", ""),
+                }
             self.index.items[item_id] = record
             if dataset_id in self.index.datasets:
                 self.index.datasets[dataset_id].item_ids.append(item_id)
@@ -699,6 +714,26 @@ class WorkspaceStore:
             for item_data in dataset.settings.get("dataset_items", []):
                 item_id = item_data.get("id") or _short_id("item")
                 _import_item(item_id, item_data, dataset_id)
+
+        selection["selected"] = [
+            item_id for item_id in selection["selected"]
+            if item_id in self.index.items
+        ]
+        selection["basket"] = [
+            item_id for item_id in selection["basket"]
+            if item_id in self.index.items
+        ]
+        selection["items"] = {
+            item_id: entry for item_id, entry in selection["items"].items()
+            if item_id in self.index.items
+        }
+        selection["datasets"] = {
+            dataset_id: entry for dataset_id, entry in selection["datasets"].items()
+            if dataset_id in self.index.datasets
+        }
+        selection = {key: value for key, value in selection.items() if value}
+        if selection:
+            self.index.settings["selection"] = selection
 
         self.save()
         backup = source.with_suffix(source.suffix + ".bak")

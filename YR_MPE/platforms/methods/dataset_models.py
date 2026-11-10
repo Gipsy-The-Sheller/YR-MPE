@@ -185,6 +185,27 @@ class DatasetItem:
         
         return True
     
+    def apply_model_metadata(self, dataset_metadata: Optional[Dict[str, Any]] = None):
+        """Restore model_sub_type/partition_mode from persisted data.
+
+        Partitioned model items carry their identity in ``data`` (``type`` or
+        ``partitioned``). Rebuild the convenience attributes so a reopened
+        model behaves like the one that was saved, including the partition
+        mode that may live in the dataset metadata.
+        """
+        if self.item_type != ITEM_TYPE_MODEL:
+            return
+        data = self.data if isinstance(self.data, dict) else {}
+        if data.get("type") == "partitioned" or data.get("partitioned"):
+            self.model_sub_type = "partitioned"
+            if not self.partition_mode:
+                metadata = dataset_metadata or {}
+                self.partition_mode = str(
+                    data.get("partition_mode")
+                    or metadata.get("partition_mode")
+                    or ""
+                )
+
     def validate(self) -> bool:
         """验证数据项的有效性"""
         self.validation_errors = []

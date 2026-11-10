@@ -150,9 +150,12 @@ class WorkspaceStoreTests(unittest.TestCase):
                             "file_path": str(self.fasta),
                             "length": 4,
                             "sequence_count": 2,
+                            "selection_state": "green",
+                            "selection_reason": "Selected for workflow",
                         }
                     },
-                    "selected_items": [],
+                    "selected_items": ["item1"],
+                    "basket_items": ["item1"],
                 }
             ),
             encoding="utf-8",
@@ -164,9 +167,17 @@ class WorkspaceStoreTests(unittest.TestCase):
         self.assertEqual(store.get_item("item1").dataset_id, "ds1")
         self.assertEqual(store.get_dataset("ds1").item_ids, ["item1"])
         self.assertEqual(store.get_item("item1").metadata["migrated_from"], legacy.name)
+        selection = store.index.settings["selection"]
+        self.assertEqual(selection["basket"], ["item1"])
+        self.assertEqual(selection["selected"], ["item1"])
+        self.assertEqual(selection["items"]["item1"]["state"], "green")
 
         reloaded = store_module.WorkspaceStore(str(self.root))
         self.assertEqual(reloaded.get_item("item1").name, "OG1")
+        self.assertEqual(
+            reloaded.index.settings["selection"]["items"]["item1"]["reason"],
+            "Selected for workflow",
+        )
 
     def test_rename_manifest_and_stream_links(self):
         store = store_module.WorkspaceStore(str(self.root))

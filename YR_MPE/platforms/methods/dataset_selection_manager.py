@@ -538,6 +538,11 @@ class DatasetSelectionManager:
         self.items.clear()
         self.selection_trees.clear()
         self.selected_items.clear()
+        self.basket_items.clear()
+
+        selection = dict(self.store.index.settings.get("selection") or {})
+        item_selection = dict(selection.get("items") or {})
+        dataset_selection = dict(selection.get("datasets") or {})
 
         for record in self.store.index.datasets.values():
             dataset = DatasetInfo()
@@ -547,8 +552,16 @@ class DatasetSelectionManager:
             dataset.settings = dict(record.settings)
             dataset.items = list(record.item_ids)
             dataset.is_multigene = len(dataset.items) > 1
+            dataset.selection_state = dataset_selection.get(
+                record.id, SELECTION_STATE_NONE
+            )
             dataset.created_at = _parse_datetime(record.created_at)
             self.datasets[dataset.id] = dataset
+
+        dataset_metadata = {
+            dataset_id: (dataset.settings.get("metadata") or {})
+            for dataset_id, dataset in self.datasets.items()
+        }
 
         for record in self.store.index.items.values():
             item = DatasetItem(item_type=record.type)
@@ -568,8 +581,22 @@ class DatasetSelectionManager:
             item.run_id = record.run_id
             item.created_at = _parse_datetime(record.created_at)
             item.modified_at = _parse_datetime(record.modified_at)
+            item.apply_model_metadata(dataset_metadata.get(item.dataset_id))
+            saved_state = item_selection.get(item.id) or {}
+            item.selection_state = saved_state.get("state", SELECTION_STATE_NONE)
+            item.selection_reason = saved_state.get("reason", "")
+            item.ownership_uuid = saved_state.get("ownership_uuid", "")
             self.items[item.id] = item
             self._hydrate_item_sequences(item)
+
+        self.selected_items = {
+            item_id for item_id in selection.get("selected", [])
+            if item_id in self.items
+        }
+        self.basket_items = {
+            item_id for item_id in selection.get("basket", [])
+            if item_id in self.items
+        }
 
         for dataset in self.datasets.values():
             dataset.loci_count = sum(
@@ -643,6 +670,41 @@ class DatasetSelectionManager:
                 item.id for item in self.items.values()
                 if getattr(item, "run_id", None) == run_record.id
             ]
+
+        # Selection state is workspace context, not item data. Keep it in the
+        # index settings so a reopened workspace shows the same basket and
+        # highlights without touching DatasetRecord.settings (which belongs to
+        # the importer/plugins).
+        selection = {}
+        selected_ids = sorted(item_id for item_id in self.selected_items if item_id in self.items)
+        basket_ids = sorted(item_id for item_id in self.basket_items if item_id in self.items)
+        if selected_ids:
+            selection["selected"] = selected_ids
+        if basket_ids:
+            selection["basket"] = basket_ids
+        item_states = {}
+        for item in self.items.values():
+            entry = {}
+            if item.selection_state != SELECTION_STATE_NONE:
+                entry["state"] = item.selection_state
+                entry["reason"] = item.selection_reason
+            if item.ownership_uuid:
+                entry["ownership_uuid"] = item.ownership_uuid
+            if entry:
+                item_states[item.id] = entry
+        if item_states:
+            selection["items"] = item_states
+        dataset_states = {
+            dataset.id: dataset.selection_state
+            for dataset in self.datasets.values()
+            if dataset.selection_state != SELECTION_STATE_NONE
+        }
+        if dataset_states:
+            selection["datasets"] = dataset_states
+        if selection:
+            index.settings["selection"] = selection
+        else:
+            index.settings.pop("selection", None)
 
         self.store.refresh_manifests()
 
