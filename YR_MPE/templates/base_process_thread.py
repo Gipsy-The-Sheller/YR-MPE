@@ -112,11 +112,12 @@ class BaseProcessThread(QThread):
             def read_stdout():
                 while True:
                     output = self._process.stdout.readline()
-                    
-                    if output == '' and self._process.poll() is not None:
-                        # 进程结束且没有更多输出
+
+                    if output == '':
+                        # readline() returns '' only at EOF; poll() may still
+                        # be None for a moment after the child exits.
                         break
-                    
+
                     if output:
                         output = output.rstrip()
                         stdout_lines.append(output + '\n')
@@ -126,11 +127,11 @@ class BaseProcessThread(QThread):
             def read_stderr():
                 while True:
                     error = self._process.stderr.readline()
-                    
-                    if error == '' and self._process.poll() is not None:
-                        # 进程结束且没有更多错误输出
+
+                    if error == '':
+                        # EOF; see read_stdout above.
                         break
-                    
+
                     if error:
                         error = error.rstrip()
                         stderr_lines.append(error + '\n')

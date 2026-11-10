@@ -55,6 +55,9 @@ class BasePlugin(QWidget):
 
         # 工作目录支持（用于临时文件）
         self.workdir = kwargs.get('workdir', None)  # 向后兼容：默认为 None
+        # Headless mode is used by the workflow runner: no configuration
+        # dialog, no modal export prompts, results are collected by the caller.
+        self.headless = bool(kwargs.get("headless", False))
 
         # 运行状态
         self.is_running = False
@@ -81,7 +84,7 @@ class BasePlugin(QWidget):
         self.init_plugin_info()
         
         # 检查配置
-        if not self.config():
+        if not self.config() and not self.headless:
             self.show_config_guide()
     
         # 初始化UI
@@ -183,6 +186,19 @@ class BasePlugin(QWidget):
         except Exception:
             return False
 
+    def result_spec(self):
+        """Return the typed result of a completed run, if the plugin has one.
+
+        Workflow execution uses this hook instead of driving the Export
+        button. Plugins that expose ``_build_result_spec()`` need no change;
+        plugins without one return ``None`` and the runner records the run
+        without importing a dataset.
+        """
+        builder = getattr(self, "_build_result_spec", None)
+        if callable(builder):
+            return builder()
+        return None
+
     def _find_plugin_config(self):
         """Return this plugin's entry in config.json, if any."""
         if self.plugin_config is not None:
@@ -223,12 +239,21 @@ class BasePlugin(QWidget):
                 # still valid config.
                 return bool(plugin_config.get("builtin"))
 
-            if os.path.isabs(tool_path):
+            # Config paths are written as "/bin/<tool>/..." and resolved
+            # against the plugin directory.  On Windows os.path.isabs()
+            # treats a leading slash as an absolute drive path, so try the
+            # plugin-relative form first when the literal path is missing.
+            relative = os.path.join(
+                self.plugin_path, tool_path.lstrip("/").lstrip("\\")
+            )
+            if os.path.isabs(tool_path) and os.path.exists(tool_path):
+                self.tool_path = tool_path
+            elif os.path.exists(relative):
+                self.tool_path = relative
+            elif os.path.isabs(tool_path):
                 self.tool_path = tool_path
             else:
-                self.tool_path = os.path.join(
-                    self.plugin_path, tool_path.lstrip("/").lstrip("\\")
-                )
+                self.tool_path = relative
             return os.path.exists(self.tool_path)
 
         except Exception as e:

@@ -171,3 +171,10 @@ class PluginFactory:
             "YR_MPE.plugins.site_diagnostics_plugin",
             "SiteDiagnosticsPluginEntry",
         )
+
+    def get_workflow_runner_plugin(self):
+        """Compiled workflow runner plugin."""
+        return self.load_plugin(
+            "YR_MPE.plugins.workflow_runner_plugin",
+            "WorkflowRunnerPluginEntry",
+        )

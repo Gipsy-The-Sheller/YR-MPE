@@ -51,7 +51,7 @@ def entry_for_op(op: str) -> Optional[Tuple[str, str]]:
     return None
 
 
-def create_plugin(op: str, workdir=None):
+def create_plugin(op: str, workdir=None, headless: bool = False):
     entry = entry_for_op(op)
     if entry is None:
         raise ValueError("no plugin entry for workflow op %r" % op)
@@ -60,5 +60,8 @@ def create_plugin(op: str, workdir=None):
     plugin_class = getattr(module, class_name)
     instance = plugin_class()
     if hasattr(instance, "run"):
-        return instance.run(workdir=workdir)
+        try:
+            return instance.run(workdir=workdir, headless=headless)
+        except TypeError:
+            return instance.run(workdir=workdir)
     return instance

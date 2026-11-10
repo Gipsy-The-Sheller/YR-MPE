@@ -569,15 +569,25 @@ class YR_MPEA_Widget(QWidget):
         workspace_menu.addAction(temporary_action)
 
         workspace_menu.addSeparator()
-        import_workflow_action = QAction("Import Workflow...", workspace_menu)
+        workflow_menu = QMenu("Record && Workflow", workspace_menu)
+        workflow_menu.setIcon(self.resource_factory.get_icon("workspace.svg"))
+
+        import_workflow_action = QAction("Import Workflow...", workflow_menu)
         import_workflow_action.setIcon(self.resource_factory.get_icon("workspace.svg"))
         import_workflow_action.triggered.connect(self.import_workflow_dialog)
-        workspace_menu.addAction(import_workflow_action)
+        workflow_menu.addAction(import_workflow_action)
 
-        workflow_preview_action = QAction("Workflow Preview...", workspace_menu)
+        workflow_preview_action = QAction("Workflow Preview...", workflow_menu)
         workflow_preview_action.setIcon(self.resource_factory.get_icon("workspace.svg"))
         workflow_preview_action.triggered.connect(self.show_workflow_preview)
-        workspace_menu.addAction(workflow_preview_action)
+        workflow_menu.addAction(workflow_preview_action)
+
+        run_workflow_action = QAction("Run Workflow...", workflow_menu)
+        run_workflow_action.setIcon(self.resource_factory.get_icon("workspace.svg"))
+        run_workflow_action.triggered.connect(self.open_workflow_runner_wrapper)
+        workflow_menu.addAction(run_workflow_action)
+
+        workspace_menu.addMenu(workflow_menu)
 
         about_action = QAction("About YPhylo Workbench", workspace_menu)
         about_action.setIcon(self.resource_factory.get_icon("yphylow-about.svg"))
@@ -698,6 +708,33 @@ class YR_MPEA_Widget(QWidget):
             lambda *_: setattr(self, "workflow_preview_dialog", None)
         )
         dialog.show()
+
+    def open_workflow_runner_wrapper(self, workflow_path=None, modal=False):
+        """Open the compiled-workflow runner as a plugin window."""
+        from PyQt5.QtWidgets import QDialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Workflow Runner - YPhylo Workbench")
+        dialog.setWindowIcon(self.resource_factory.get_icon("workspace.svg"))
+        dialog.setMinimumSize(980, 700)
+        dialog.setLayout(QVBoxLayout())
+        entry = self.plugin_factory.get_workflow_runner_plugin()
+        runner = entry.run(
+            workdir=self.get_workdir(),
+            workflow_path=str(workflow_path or ""),
+        )
+        if hasattr(runner, "result_ready"):
+            runner.result_ready.connect(self.receive_plugin_result)
+        dialog.layout().addWidget(runner)
+        if modal:
+            dialog.exec_()
+            return None
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        self.workflow_runner_dialog = dialog
+        dialog.destroyed.connect(
+            lambda *_: setattr(self, "workflow_runner_dialog", None)
+        )
+        dialog.show()
+        return dialog
 
     def show_about(self):
         from .about_dialog import AboutDialog
@@ -1502,7 +1539,7 @@ class YR_MPEA_Widget(QWidget):
         """打开CASTER-site插件"""
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("CASTER-site - YR-MPEA")
+        dialog.setWindowTitle("CASTER-site - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/caster.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -1534,7 +1571,7 @@ class YR_MPEA_Widget(QWidget):
         """
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("Tree Comparison - YR-MPEA")
+        dialog.setWindowTitle("Tree Comparison - YPhylo Workbench")
         dialog.setWindowIcon(
             self.resource_factory.get_icon("software/robinsonfoluds.svg")
         )
@@ -1590,7 +1627,7 @@ class YR_MPEA_Widget(QWidget):
     def _open_concordance_window(self, title, icon, entry_getter, import_data=None):
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("%s - YR-MPEA" % title)
+        dialog.setWindowTitle("%s - YPhylo Workbench" % title)
         dialog.setWindowIcon(self.resource_factory.get_icon(icon))
         dialog.setMinimumSize(900, 680)
         dialog.setLayout(QVBoxLayout())
@@ -1646,11 +1683,11 @@ class YR_MPEA_Widget(QWidget):
         """
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        title = "ASTRAL - YR-MPEA"
+        title = "ASTRAL - YPhylo Workbench"
         if version == "astral4":
-            title = "ASTRAL-IV - YR-MPEA"
+            title = "ASTRAL-IV - YPhylo Workbench"
         elif version == "wastral":
-            title = "wASTRAL - YR-MPEA"
+            title = "wASTRAL - YPhylo Workbench"
         dialog.setWindowTitle(title)
         dialog.setWindowIcon(self.resource_factory.get_icon("software/astral.svg"))
         dialog.setMinimumSize(800, 600)
@@ -1700,7 +1737,7 @@ class YR_MPEA_Widget(QWidget):
     def open_clustal_omega_wrapper(self):
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("Clustal Omega - YR-MPEA")
+        dialog.setWindowTitle("Clustal Omega - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/clustalo.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -1722,7 +1759,7 @@ class YR_MPEA_Widget(QWidget):
     def open_mafft_wrapper(self, modal=True):
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("MAFFT - YR-MPEA")
+        dialog.setWindowTitle("MAFFT - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/mafft.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -1786,7 +1823,7 @@ class YR_MPEA_Widget(QWidget):
         """打开MACSE插件"""
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("MACSE - YR-MPEA")
+        dialog.setWindowTitle("MACSE - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/macse.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -1808,7 +1845,7 @@ class YR_MPEA_Widget(QWidget):
     def open_modelfinder_wrapper(self):
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("ModelFinder - YR-MPEA")
+        dialog.setWindowTitle("ModelFinder - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("find_model.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -1830,7 +1867,7 @@ class YR_MPEA_Widget(QWidget):
         """Open ModelTest-NG model selection."""
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("ModelTest-NG - YR-MPEA")
+        dialog.setWindowTitle("ModelTest-NG - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("find_model.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -1878,7 +1915,7 @@ class YR_MPEA_Widget(QWidget):
         """打开Model Parameter Estimation进行模型参数估计"""
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("Model Parameter Estimation - YR-MPEA")
+        dialog.setWindowTitle("Model Parameter Estimation - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("find_model.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -1905,7 +1942,7 @@ class YR_MPEA_Widget(QWidget):
         from PyQt5.QtWidgets import QDialog
         try:
             dialog = QDialog()
-            dialog.setWindowTitle("MiniTracer - MCMC Diagnostics - YR-MPEA")
+            dialog.setWindowTitle("MiniTracer - MCMC Diagnostics - YPhylo Workbench")
             dialog.setWindowIcon(self.resource_factory.get_icon("software/minitracer.svg"))
             # dialog.setMinimumSize(600, 500)
 
@@ -1986,7 +2023,7 @@ class YR_MPEA_Widget(QWidget):
         from PyQt5.QtWidgets import QDialog
         try:
             dialog = QDialog()
-            dialog.setWindowTitle("IcyTree - YR-MPEA")
+            dialog.setWindowTitle("IcyTree - YPhylo Workbench")
             dialog.setWindowIcon(self.resource_factory.get_icon("software/icytree.svg"))
             dialog.setMinimumSize(800, 600)
             dialog.setLayout(QVBoxLayout())
@@ -2036,7 +2073,7 @@ class YR_MPEA_Widget(QWidget):
     def open_trimal_wrapper(self):
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("TrimAl - YR-MPEA")
+        dialog.setWindowTitle("TrimAl - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/trimal.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -2057,7 +2094,7 @@ class YR_MPEA_Widget(QWidget):
     def open_gblocks_wrapper(self):
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("GBlocks - YR-MPEA")
+        dialog.setWindowTitle("GBlocks - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/gblocks.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -2119,7 +2156,7 @@ class YR_MPEA_Widget(QWidget):
         from PyQt5.QtWidgets import QDialog
         from .methods.dataset_models import ITEM_TYPE_MODEL, SELECTION_STATE_GREEN
         dialog = QDialog()
-        dialog.setWindowTitle(f"Distance Calculator [implemented from IQ-TREE] - YR-MPEA")
+        dialog.setWindowTitle(f"Distance Calculator [implemented from IQ-TREE] - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("dist.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -2205,7 +2242,7 @@ class YR_MPEA_Widget(QWidget):
     def open_uncorrected_distance_wrapper(self):
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle(f"Uncorrected Distance Calculator - YR-MPEA")
+        dialog.setWindowTitle(f"Uncorrected Distance Calculator - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("dist.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -2228,7 +2265,7 @@ class YR_MPEA_Widget(QWidget):
         """打开替代饱和度分析插件"""
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("Substitution Saturation Analysis - YR-MPEA")
+        dialog.setWindowTitle("Substitution Saturation Analysis - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("saturation.svg"))
         dialog.setMinimumSize(900, 700)
         dialog.setLayout(QVBoxLayout())
@@ -2253,7 +2290,7 @@ class YR_MPEA_Widget(QWidget):
             self.codon_ztest_dialog.deleteLater()
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("Codon-based Z-test (NG86 / YN00) - YR-MPEA")
+        dialog.setWindowTitle("Codon-based Z-test (NG86 / YN00) - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("saturation.svg"))
         dialog.setMinimumSize(900, 650)
         dialog.setLayout(QVBoxLayout())
@@ -2283,7 +2320,7 @@ class YR_MPEA_Widget(QWidget):
             self.batch_dnds_dialog.deleteLater()
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("Batch dN/dS (NG86 / YN00 / IQ-TREE) - YR-MPEA")
+        dialog.setWindowTitle("Batch dN/dS (NG86 / YN00 / IQ-TREE) - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("dist.svg"))
         dialog.setMinimumSize(950, 680)
         dialog.setLayout(QVBoxLayout())
@@ -2337,7 +2374,7 @@ class YR_MPEA_Widget(QWidget):
         from PyQt5.QtWidgets import QDialog
         from .methods.dataset_models import ITEM_TYPE_MODEL, SELECTION_STATE_GREEN
         dialog = QDialog()
-        dialog.setWindowTitle(f"IQ-TREE 3 - YR-MPEA")
+        dialog.setWindowTitle(f"IQ-TREE 3 - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/iqtree.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -2445,7 +2482,7 @@ class YR_MPEA_Widget(QWidget):
         """Open RAxML-NG maximum-likelihood inference."""
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("RAxML-NG - YR-MPEA")
+        dialog.setWindowTitle("RAxML-NG - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/raxml.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -2469,7 +2506,7 @@ class YR_MPEA_Widget(QWidget):
         """打开 DecentTree 插件"""
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("DecentTree Distance Methods - YR-MPEA")
+        dialog.setWindowTitle("DecentTree Distance Methods - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("bionj.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -2510,7 +2547,7 @@ class YR_MPEA_Widget(QWidget):
         """打开 MPBoot 插件"""
         from PyQt5.QtWidgets import QDialog
         dialog = QDialog()
-        dialog.setWindowTitle("Maximum Parsimony (MPBoot) - YR-MPEA")
+        dialog.setWindowTitle("Maximum Parsimony (MPBoot) - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("mp.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -2542,7 +2579,7 @@ class YR_MPEA_Widget(QWidget):
         from .methods.dataset_models import ITEM_TYPE_PHYLOGENY
         
         dialog = QDialog()
-        dialog.setWindowTitle(f"LSD2 - YR-MPEA")
+        dialog.setWindowTitle(f"LSD2 - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/lsd2.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -3628,7 +3665,7 @@ class YR_MPEA_Widget(QWidget):
         from ..plugins.partition_mode import MrBayesModelConverter
         
         dialog = QDialog(self)  # 设置父窗口
-        dialog.setWindowTitle("MrBayes3-MPI-BEAGLE - YR-MPEA")
+        dialog.setWindowTitle("MrBayes3-MPI-BEAGLE - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/mrbayes.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -3750,7 +3787,7 @@ class YR_MPEA_Widget(QWidget):
         from PyQt5.QtWidgets import QDialog
         from PyQt5.QtCore import Qt
         dialog = QDialog(self)  # 设置父窗口
-        dialog.setWindowTitle("PhyloBayes-MPI - YR-MPEA")
+        dialog.setWindowTitle("PhyloBayes-MPI - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("software/phylobayes.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -3790,7 +3827,7 @@ class YR_MPEA_Widget(QWidget):
         from PyQt5.QtCore import Qt
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("TreeRecs 1.2 - YR-MPEA")
+        dialog.setWindowTitle("TreeRecs 1.2 - YPhylo Workbench")
         dialog.setWindowIcon(self.resource_factory.get_icon("coalescent.svg"))
         dialog.setMinimumSize(800, 600)
         dialog.setLayout(QVBoxLayout())
@@ -4175,6 +4212,8 @@ class SingleGeneWorkspace(QWidget):
             del self.grid_layout
         for key in self.item_buttons:
             self.item_buttons[key] = []
+        self.items["datasets"] = []
+        self._materialized_item_ids = set()
         self.workspace_hint.setVisible(True)
 
     def rebuild_from_manager(self):
@@ -4193,6 +4232,8 @@ class SingleGeneWorkspace(QWidget):
         items = self.dataset_selection_manager.get_items_by_dataset(dataset_id)
         if not items:
             self._clear_workspace_grid()
+            self._rebuild_dataset_buttons(datasets, dataset_id)
+            self._update_all_button_styles()
             return
 
         self._clear_workspace_grid()
@@ -4221,7 +4262,20 @@ class SingleGeneWorkspace(QWidget):
             col = row_counts.get(row, 0)
             row_counts[row] = col + 1
             self._create_item_button(item, key, row, col, icon)
+            self._materialized_item_ids.add(item.id)
+
+        # Dataset buttons belong to the reassembled canvas as well; reopen
+        # used to restore item icons only, leaving no way to switch datasets.
+        self._rebuild_dataset_buttons(datasets, dataset_id)
         self._update_all_button_styles()
+
+    def _rebuild_dataset_buttons(self, datasets, current_dataset_id):
+        """Restore the dataset row without driving the Inspector."""
+        for dataset in datasets:
+            self._add_dataset_button(dataset, emit_signal=False)
+        current_dataset = self.dataset_selection_manager.get_dataset(current_dataset_id)
+        if current_dataset is not None:
+            self._update_dataset_summary(current_dataset)
 
     def _create_item_button(self, dataset_item: DatasetItem, item_type_key: str, row: int, col: int, icon_name: str):
         """创建数据项按钮的通用方法
@@ -4873,6 +4927,7 @@ class SingleGeneWorkspace(QWidget):
                 item.sequences = list(item_spec.sequences)
                 item.data = dict(item_spec.data)
                 item.metadata = dict(item_spec.metadata)
+                item.apply_model_metadata(dict(spec.metadata or {}))
                 item.import_id = item_spec.import_id or (
                     import_record.id if import_record is not None else None
                 )
@@ -5040,8 +5095,13 @@ class SingleGeneWorkspace(QWidget):
             index += 1
         return "%s (%d)" % (name, index)
 
-    def _add_dataset_button(self, dataset_info):
-        """Create the workspace control for one DatasetInfo."""
+    def _add_dataset_button(self, dataset_info, emit_signal=True):
+        """Create the workspace control for one DatasetInfo.
+
+        ``emit_signal`` is disabled when rebuilding a saved workspace: the
+        canvas must be repopulated without driving the Inspector once per
+        dataset.
+        """
         if not hasattr(self, "grid_layout"):
             self.workspace_hint.setVisible(False)
             self.grid_widget = QWidget()
@@ -5094,7 +5154,8 @@ class SingleGeneWorkspace(QWidget):
         self.grid_layout.addWidget(dataset_button, 6, dataset_col)
         dataset_button.dataset_ref = dataset_info
         self._update_dataset_summary(dataset_info)
-        self.dataset_selected.emit(dataset_info.id)
+        if emit_signal:
+            self.dataset_selected.emit(dataset_info.id)
         return dataset_button
 
     def _dataset_source_label(self, dataset_info):
@@ -5192,6 +5253,10 @@ class SingleGeneWorkspace(QWidget):
         # 更新所有按钮的样式
         self._update_all_button_styles()
         self.dataset_selected.emit(dataset_id)
+
+        # Single click also switches the canvas to this dataset. Defer the
+        # rebuild so the emitting button is not deleted inside its own slot.
+        QTimer.singleShot(0, self.rebuild_from_manager)
 
     def _on_dataset_double_click_by_id(self, dataset_id: str):
         """处理数据集双击事件（通过 dataset_id）"""
@@ -5941,7 +6006,7 @@ class SingleGeneWorkspace(QWidget):
         from PyQt5.QtWidgets import QDialog
         try:
             dialog = QDialog()
-            dialog.setWindowTitle("IcyTree - YR-MPEA")
+            dialog.setWindowTitle("IcyTree - YPhylo Workbench")
             dialog.setWindowIcon(self.parent_window.resource_factory.get_icon("software/icytree.svg"))
             dialog.setMinimumSize(800, 600)
             dialog.setLayout(QVBoxLayout())
