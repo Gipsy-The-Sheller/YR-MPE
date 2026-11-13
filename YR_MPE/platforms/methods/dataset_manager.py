@@ -200,8 +200,30 @@ class DatasetManager(QDialog):
         
         settings_layout.addWidget(self.edge_settings_widget)
         settings_layout.addStretch()
-        
+
         main_layout.addWidget(settings_group)
+
+        # Linkage is a biological assumption, not a display preference.
+        # Keep the unlinked default unless shared topology is independently
+        # supported; edge linkage additionally assumes shared branch lengths.
+        self.topo_linked_radio.setToolTip(
+            "Only use Topo linked when the partitions are expected to share "
+            "one topology, supported by independent evidence such as "
+            "concordance or prior linkage."
+        )
+        self.edge_linked_radio.setToolTip(
+            "Edge linked additionally assumes shared branch lengths across "
+            "partitions. Confirm linkage before enabling it."
+        )
+        linkage_note = QLabel(
+            "Partition linkage is an assumption: keep Topo unlinked unless "
+            "shared topology is supported by independent evidence (for "
+            "example concordance or known linkage). Edge linked also assumes "
+            "shared branch lengths."
+        )
+        linkage_note.setWordWrap(True)
+        linkage_note.setStyleSheet("color: #666666;")
+        main_layout.addWidget(linkage_note)
         
         # 表格区域
         table_layout = QVBoxLayout()

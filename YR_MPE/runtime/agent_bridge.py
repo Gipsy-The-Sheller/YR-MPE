@@ -82,6 +82,11 @@ class AgentBridge:
                 tempfile.mkdtemp(prefix="yrmpe-agent-", dir=tempfile.gettempdir())
             )
         self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_dir = self.session_dir / "tmp"
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        # Plugins and their subprocesses use this as the session workdir, so
+        # agent-opened tools do not scatter intermediates in the app folder.
+        os.environ["YR_MPE_SESSION_TMP"] = str(self.temp_dir)
         self.registry = registry or UIActionRegistry()
         if token is None and not allow_anonymous:
             token = secrets.token_urlsafe(24)

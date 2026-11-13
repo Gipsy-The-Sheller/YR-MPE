@@ -69,6 +69,13 @@ The partition thread also passes `-m MFP+MERGE` when no per-partition model is
 set; if a `charpartition` model is present, models are read from the partition
 file instead.
 
+**Linkage is a biological assumption, not a formatting choice.** Keep the
+dataset default `Topo unlinked` unless shared topology is supported by
+independent evidence (for example concordance or known physical linkage).
+`Edge linked` additionally assumes shared branch lengths. Selecting
+partitions does not establish linkage; confirm it before enabling either
+linked mode.
+
 Taxa for the supermatrix are the **union across all selected partitions**;
 a taxon absent from a locus is padded with `?` for that locus length. Do not
 take the first partition as the taxon list when the dataset has missing data.

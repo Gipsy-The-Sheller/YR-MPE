@@ -92,6 +92,37 @@ def _set_widget_value(widget, value) -> bool:
         return False
 
 
+_PRIMARY_INPUT_TOKENS = (
+    "input", "file_path", "alignment_edit", "msa", "fasta", "sequences",
+    "tree_file",
+)
+_OPTION_PATH_TOKENS = (
+    "output", "out_", "_out", "prefix", "workdir", "existing", "constraint",
+    "guide", "mapping", "root_edit", "weights", "folder",
+)
+
+
+def _is_primary_input_binding(binding: Dict[str, Any]) -> bool:
+    """Return True when a path control supplies the plugin's primary data.
+
+    Path controls are not all data inputs: output trees, constraint trees,
+    mappings and work directories are path-shaped options. Treating every
+    path control as an import (as the first bridge implementation did) lets a
+    later output assignment overwrite the input file list. Bindings can opt in
+    or out explicitly with ``"imports": true/false``.
+    """
+    if binding.get("imports") is not None:
+        return bool(binding.get("imports"))
+    ident = " ".join([
+        str(binding.get("id", "")),
+        str(binding.get("widget", "")),
+        str(binding.get("label", "")),
+    ]).lower()
+    if any(token in ident for token in _OPTION_PATH_TOKENS):
+        return False
+    return any(token in ident for token in _PRIMARY_INPUT_TOKENS)
+
+
 def apply_control(plugin, control_id: str, value: Any) -> bool:
     doc = plugin.help_doc()
     binding = next(
@@ -114,16 +145,22 @@ def apply_control(plugin, control_id: str, value: Any) -> bool:
                 value = gui_value
                 break
     ok = _set_widget_value(widget, value)
-    if ok and binding.get("kind") == "path":
+    if (ok and binding.get("kind") == "path"
+            and _is_primary_input_binding(binding)):
         paths = value if isinstance(value, (list, tuple)) else [value]
         paths = [str(path) for path in paths if str(path).strip()]
         if paths:
             plugin.imported_files = paths
-            if hasattr(plugin, "file_path_edit"):
-                plugin.file_path_edit.setText(
-                    paths[0] if len(paths) == 1
-                    else "%d files selected" % len(paths)
-                )
+            widget_name = str(binding.get("widget", ""))
+            if widget_name in ("file_path_edit", "alignment_edit", "input_edit"):
+                input_widget = getattr(plugin, widget_name, None)
+                if input_widget is not None and callable(
+                    getattr(input_widget, "setText", None)
+                ):
+                    input_widget.setText(
+                        paths[0] if len(paths) == 1
+                        else "%d files selected" % len(paths)
+                    )
     return ok
 
 
@@ -194,7 +231,9 @@ def agent_invoke(plugin, action_id: str, params=None) -> Dict[str, Any]:
             return {"ok": False, "error": "plugin has no run_analysis"}
         starter = getattr(plugin, "_request_run", None)
         job_id = starter() if callable(starter) else plugin.run_analysis()
-        result = {"ok": True, "status": agent_status(plugin)}
+        status = agent_status(plugin)
+        payload = {"job_id": str(job_id) if job_id else "", "status": status}
+        result = {"ok": True, "status": status, "result": payload}
         if job_id:
             result["job_id"] = str(job_id)
         return result

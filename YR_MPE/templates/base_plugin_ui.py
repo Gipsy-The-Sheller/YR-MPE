@@ -53,8 +53,14 @@ class BasePlugin(QWidget):
         self.import_file = None
         self.temp_files = []
 
-        # 工作目录支持（用于临时文件）
-        self.workdir = kwargs.get('workdir', None)  # 向后兼容：默认为 None
+        # 工作目录支持（用于临时文件）。Agent sessions set
+        # YR_MPE_SESSION_TMP so plugins do not write beside the workbench
+        # executable or into the task root.
+        self.workdir = kwargs.get('workdir', None) or os.environ.get(
+            "YR_MPE_SESSION_TMP"
+        )
+        if self.workdir:
+            os.makedirs(self.workdir, exist_ok=True)
         # Headless mode is used by the workflow runner: no configuration
         # dialog, no modal export prompts, results are collected by the caller.
         self.headless = bool(kwargs.get("headless", False))

@@ -50,8 +50,14 @@ class BaseProcessThread(QThread):
         self.is_running = False
         self._process = None
 
-        # 工作目录支持
-        self.workdir = kwargs.get('workdir', None)
+        # 工作目录支持. Agent sessions set YR_MPE_SESSION_TMP so tools
+        # write relative outputs inside the session instead of the workbench
+        # working directory.
+        self.workdir = kwargs.get('workdir', None) or os.environ.get(
+            "YR_MPE_SESSION_TMP"
+        )
+        if self.workdir:
+            os.makedirs(self.workdir, exist_ok=True)
         
     def run(self):
         """
@@ -88,7 +94,11 @@ class BaseProcessThread(QThread):
             subprocess.CompletedProcess: 命令执行结果
         """
         self.console_output.emit(" ".join(cmd), "command")
-        
+        if cwd is None:
+            cwd = self.workdir
+        if cwd:
+            os.makedirs(cwd, exist_ok=True)
+
         try:
             # 使用Popen而非run，允许实时读取输出；popen_hidden 会加上
             # CREATE_NO_WINDOW，避免 pythonw 启动时弹出终端窗口。
