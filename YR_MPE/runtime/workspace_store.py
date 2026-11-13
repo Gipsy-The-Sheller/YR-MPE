@@ -63,6 +63,25 @@ def _sha256(path: Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def _hash_artifacts(paths: Iterable[str]) -> Dict[str, str]:
+    """Hash each existing artifact file; skip directories and unreadable files."""
+    hashes: Dict[str, str] = {}
+    seen = set()
+    for raw_path in paths:
+        path = Path(str(raw_path))
+        key = str(path.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        if not path.is_file():
+            continue
+        try:
+            hashes[str(path)] = _sha256(path)
+        except OSError:
+            continue
+    return hashes
+
+
 def _jsonable(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _jsonable(item) for key, item in value.items()}
@@ -147,11 +166,14 @@ class RunRecord:
     input_ids: List[str] = field(default_factory=list)
     output_ids: List[str] = field(default_factory=list)
     status: str = "running"
+    seed: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=_now)
     completed_at: str = ""
     cwd: str = ""
     log: str = ""
     artifacts: List[str] = field(default_factory=list)
+    artifact_hashes: Dict[str, str] = field(default_factory=dict)
     stream_id: Optional[str] = None
     manifest: str = ""
 
@@ -508,6 +530,8 @@ class WorkspaceStore:
         output_ids: Optional[Iterable[str]] = None,
         stream_id: Optional[str] = None,
         cwd: str = "",
+        seed: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> RunRecord:
         run_id = _short_id("run")
         run_dir = self._run_dir(run_id)
@@ -527,6 +551,8 @@ class WorkspaceStore:
             input_ids=list(input_ids),
             output_ids=list(output_ids or []),
             status="running",
+            seed=str(seed or ""),
+            metadata=dict(metadata or {}),
             cwd=cwd,
             log=self.relative(log_path),
             stream_id=stream_id,
@@ -554,6 +580,7 @@ class WorkspaceStore:
             record.output_ids = list(output_ids)
         if artifacts is not None:
             record.artifacts = [str(item) for item in artifacts]
+            record.artifact_hashes = _hash_artifacts(record.artifacts)
         self._write_run_manifest(record)
         return record
 

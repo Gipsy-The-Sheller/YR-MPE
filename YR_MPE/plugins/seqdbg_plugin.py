@@ -25,8 +25,16 @@ logger = logging.getLogger(__name__)
 
 class SeqDBGWindow(QMainWindow):
     def help_doc(self):
-        from ..runtime.skills import SkillLibrary
-        return SkillLibrary().get_skill("seqdbg") or {}
+        from ..runtime.skills import build_plugin_help_doc
+        return build_plugin_help_doc(self)
+
+    def control_bindings(self):
+        return [
+            {"id": "genome", "widget": "", "label": "Genome graph editor",
+             "kind": "action", "cli": [],
+             "notes": "GUI-only: annotation import, gene-order inspection and "
+                      "dataset export are interactive operations."},
+        ]
 
     """
     SeqDBG主窗口

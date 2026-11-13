@@ -142,6 +142,34 @@ class DatasetSpec:
 
 
 @dataclass
+class RunSpec:
+    """One tool invocation inside a plugin result.
+
+    A plugin that performs several commands (for example a workflow runner)
+    returns one ``RunSpec`` per command. The host turns each into a
+    ``RunRecord`` with the same inputs, parameters, command and artifacts.
+    """
+
+    method: str
+    tool: str = ""
+    tool_version: str = ""
+    command: List[str] = field(default_factory=list)
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    input_paths: List[str] = field(default_factory=list)
+    output_paths: List[str] = field(default_factory=list)
+    status: str = "completed"
+    cwd: str = ""
+    log: str = ""
+    seed: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    started_at: str = ""
+    completed_at: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return _jsonable(self.__dict__)
+
+
+@dataclass
 class ResultSpec:
     """Top-level result emitted by a plugin."""
 
@@ -151,6 +179,13 @@ class ResultSpec:
     summary: Dict[str, Any] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
     schema: str = RESULT_SCHEMA
+    # Provenance metadata filled by ``BasePlugin.export_result`` unless the
+    # plugin already set it. ``runs`` is optional: ordinary plugins report one
+    # implicit run, while multi-command plugins report one RunSpec per command.
+    tool: str = ""
+    tool_version: str = ""
+    seed: str = ""
+    runs: List[RunSpec] = field(default_factory=list)
 
     def validate(self) -> List[str]:
         problems: List[str] = []
@@ -163,6 +198,9 @@ class ResultSpec:
         for index, dataset in enumerate(self.datasets):
             for problem in dataset.validate():
                 problems.append("dataset %d: %s" % (index, problem))
+        for index, run in enumerate(self.runs):
+            if not (run.method or run.tool):
+                problems.append("run %d has no method" % index)
         return problems
 
     def to_settings_dict(self) -> Dict[str, Any]:
@@ -172,4 +210,8 @@ class ResultSpec:
             "summary": _jsonable(self.summary),
             "warnings": _jsonable(self.warnings),
             "artifacts": _jsonable(self.artifacts),
+            "tool": self.tool,
+            "tool_version": self.tool_version,
+            "seed": self.seed,
+            "runs": [run.to_dict() for run in self.runs],
         }

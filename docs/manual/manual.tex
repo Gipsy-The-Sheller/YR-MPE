@@ -66,10 +66,11 @@ YR-MPE was built around four practical constraints.
         does not require rebuilding the workbench. The plugin package is pure
         Python plus bundled executables, so a repository update can be
         released without a compilation step.
-  \item[Reproducibility.] Every run records the command that was executed, the
-        input objects, the output files and the tool version. In a persistent
-        workspace these records survive restarts, so a analysis can be
-        inspected or repeated later.
+  \item[Reproducibility.] Every imported result creates a run record with the
+        tool version, parameters, command preview when the plugin reports one,
+        input objects and output files; retained artifacts are hashed. In a
+        persistent workspace these records survive restarts, so an analysis
+        can be inspected or repeated later.
   \item[Windows-first packaging.] Many phylogenetic programs are developed and
         tested on Unix-like systems. YR-MPE bundles verified x86\_64 Windows
         builds, including MPI and BEAGLE builds of MrBayes and an MPI build of
@@ -360,12 +361,13 @@ model, distance matrix, tree, tree set, chain, table or report. The icon shape
 and colour identify the type. Objects are arranged in rows by type, with
 newest objects at the end of the row.
 
-Each object also carries provenance metadata: the run that produced it, the
-inputs consumed by that run, the tool and version, and the command line. This
-is what makes the \textbf{Details} tree useful. It is a forward view of the
-provenance DAG: a run is anchored once under its first input, and the remaining
-inputs are listed in the run tooltip. Reverse edges are not drawn, so every
-object appears exactly once.
+Each plugin-produced object also carries provenance metadata: the run that
+produced it, the inputs consumed by that run, the tool and version, and the
+command preview when one is available. This is what makes the
+\textbf{Details} tree useful. It is a forward view of the provenance DAG: a
+run is anchored once under its first input, and the remaining inputs are
+listed in the run tooltip. Reverse edges are not drawn, so every object
+appears exactly once.
 
 \section{The common plugin window}
 

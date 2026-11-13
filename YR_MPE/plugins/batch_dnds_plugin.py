@@ -393,6 +393,37 @@ class BatchDnDsPlugin(BasePlugin):
             raw = Path(self.plugin_path) / str(config.get("path", "")).lstrip("/\\")
         return str(raw) if raw.is_file() else ""
 
+    def control_bindings(self):
+        return [
+            {"id": "folder", "widget": "folder_edit",
+             "label": "Codon FASTA folder", "kind": "path", "cli": [],
+             "notes": "GUI-only: the plugin iterates one file per locus."},
+            {"id": "method", "widget": "method_combo",
+             "label": "dN/dS method", "kind": "choice",
+             "choices": {
+                 "Counting — NG86 (fast, pairwise)": [],
+                 "Counting — YN00 (F84 correction)": [],
+                 "MLE — IQ-TREE GY":
+                     ["--seqtype", "CODON", "-m", "GY"],
+                 "MLE — IQ-TREE MG":
+                     ["--seqtype", "CODON", "-m", "MG"],
+             },
+             "cli": ["{value}"],
+             "notes": "Counting modes run in Python; MLE modes call IQ-TREE "
+                      "with a codon model."},
+            {"id": "code", "widget": "code_combo",
+             "label": "Genetic code", "kind": "choice", "cli": [],
+             "notes": "GUI-only: passed to the counting or IQ-TREE path "
+                      "inside the plugin."},
+            {"id": "threads", "widget": "threads_spin",
+             "label": "MLE threads", "kind": "int",
+             "cli": ["-T", "{value}"], "omit_values": [1],
+             "notes": "Used for the IQ-TREE MLE modes."},
+            {"id": "output", "widget": "output_edit",
+             "label": "MLE output folder", "kind": "path", "cli": [],
+             "notes": "GUI-only: the plugin sets IQ-TREE --prefix per file."},
+        ]
+
     def run_analysis(self):
         if not self._scan_folder():
             QMessageBox.warning(self, "Input missing", "Please select a folder of codon FASTA alignments.")

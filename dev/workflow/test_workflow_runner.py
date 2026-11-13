@@ -19,6 +19,10 @@ QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
+from YR_MPE.platforms.methods.dataset_selection_manager import (  # noqa: E402
+    DatasetSelectionManager,
+)
+from YR_MPE.platforms.mpea import SingleGeneWorkspace  # noqa: E402
 from YR_MPE.plugins.workflow_runner_plugin import (  # noqa: E402
     WorkflowRunnerPlugin,
 )
@@ -137,7 +141,67 @@ class WorkflowRunnerTests(unittest.TestCase):
                  for dataset in captured[0].datasets
                  for item in dataset.items]
         self.assertEqual(types.count("alignment"), 2)
+        runs = captured[0].runs
+        self.assertEqual([run.method for run in runs], ["mafft.run", "trimal.run"])
+        self.assertEqual([run.metadata["step_id"] for run in runs],
+                         ["mafft", "trimal"])
+        self.assertTrue(all(run.output_paths for run in runs))
+        self.assertTrue(any(run.command for run in runs))
+        self.assertTrue(runs[0].parameters)
+        self.assertTrue(runs[1].parameters)
         plugin.close()
+
+    @unittest.skipUnless(MAFFT.exists(), "bundled MAFFT is not available")
+    def test_workflow_import_creates_step_runs(self):
+        with open(self.spec, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "id": "trimal", "op": "trimal.run",
+                "outputs": {"trimmed": "trim.fas"},
+                "params": {
+                    "input": "%mafft.alignment.fas%",
+                    "mode": "-gappyout",
+                },
+            }) + "\n")
+        manager = DatasetSelectionManager()
+        manager.set_workspace_path(str(self.root / "workspace"))
+        workspace = SingleGeneWorkspace(dataset_selection_manager=manager)
+        plugin = self._plugin()
+        plugin.result_ready.connect(workspace.add_result_spec)
+        plugin.workflow_path_edit.setText(str(self.spec))
+        plugin.output_dir_edit.setText(str(self.root / "out"))
+        plugin.load_workflow()
+        plugin.agent_invoke("workflow.run")
+
+        def wait():
+            if plugin.is_running:
+                QTimer.singleShot(250, wait)
+            else:
+                APP.quit()
+
+        QTimer.singleShot(400, wait)
+        QTimer.singleShot(120000, APP.quit)
+        APP.exec_()
+
+        runs = sorted(
+            manager.store.index.runs.values(), key=lambda run: run.method
+        )
+        self.assertEqual([run.method for run in runs],
+                         ["mafft.run", "trimal.run"])
+        self.assertEqual([run.metadata["step_id"] for run in runs],
+                         ["mafft", "trimal"])
+        self.assertEqual(len(runs[0].output_ids), 1)
+        self.assertEqual(runs[1].input_ids, runs[0].output_ids)
+        for run in runs:
+            self.assertTrue(run.artifact_hashes)
+            self.assertEqual(run.status, "completed")
+        dataset_id = list(manager.store.index.datasets)[0]
+        items = manager.get_items_by_dataset(dataset_id)
+        self.assertEqual(
+            {item.run_id for item in items},
+            {run.id for run in runs},
+        )
+        plugin.close()
+        workspace.close()
 
 
 if __name__ == "__main__":

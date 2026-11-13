@@ -37,8 +37,16 @@ from .components.methods.mcmc_utils import calculate_ESS
 
 class MiniTracerPlugin(QWidget):
     def help_doc(self):
-        from ..runtime.skills import SkillLibrary
-        return SkillLibrary().get_skill("minitracer") or {}
+        from ..runtime.skills import build_plugin_help_doc
+        return build_plugin_help_doc(self)
+
+    def control_bindings(self):
+        return [
+            {"id": "chains", "widget": "file_table",
+             "label": "MCMC chain table", "kind": "table", "cli": [],
+             "notes": "GUI-only: load chains, set burn-in, inspect ESS, HPD, "
+                      "density and skyline plots."},
+        ]
 
     """
     MiniTracer Plugin for comprehensive MCMC trace diagnostics.

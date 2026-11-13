@@ -41,7 +41,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ..runtime.plugin_agent import apply_control
-from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec, RunSpec
 from ..runtime.workflow_compiler import (
     WorkflowCompileError,
     WorkflowPlan,
@@ -148,7 +148,24 @@ class WorkflowRunController(QObject):
             return
 
         command = _cli_preview(plugin)
-        self.add_step_log(step_id, op, "running", command)
+        step["_command"] = list(command or [])
+        step["_cwd"] = step_dir
+        declared_outputs = {
+            os.path.normcase(os.path.abspath(str(value)))
+            for value in (step.get("outputs") or {}).values()
+            if isinstance(value, str) and value
+        }
+        step["_input_paths"] = [
+            str(value) for value in (step.get("params") or {}).values()
+            if isinstance(value, str) and value and os.path.exists(value)
+            and os.path.normcase(os.path.abspath(value)) not in declared_outputs
+        ]
+        self.add_step_log(
+            step_id, op, "running", command,
+            parameters=step.get("params") or {},
+            input_paths=step["_input_paths"],
+            cwd=step_dir,
+        )
         if command:
             self.host.add_console_message(" ".join(command), "command")
 
@@ -233,7 +250,12 @@ class WorkflowRunController(QObject):
                     item.loci_name = "%s:%s" % (step_id, item.loci_name)
                 self.items.append(item)
 
-        self.add_step_log(step_id, op, "completed", [], files)
+        self.add_step_log(
+            step_id, op, "completed", step.get("_command") or [], files,
+            parameters=step.get("params") or {},
+            input_paths=step.get("_input_paths") or [],
+            cwd=step.get("_cwd") or "",
+        )
         self.host.add_console_message(
             "[%s] completed (%d output file(s))" % (step_id, len(files)),
             "success",
@@ -243,7 +265,14 @@ class WorkflowRunController(QObject):
         QTimer.singleShot(0, self._run_next)
 
     def _fail(self, step_id: str, message: str):
-        self.add_step_log(str(step_id), "", "failed", [], [], message)
+        step = self.current_step or {}
+        self.add_step_log(
+            str(step_id), str(step.get("op") or ""), "failed",
+            step.get("_command") or [], [], message,
+            parameters=step.get("params") or {},
+            input_paths=step.get("_input_paths") or [],
+            cwd=step.get("_cwd") or "",
+        )
         self.host.add_console_message(
             "[%s] failed: %s" % (step_id, message), "error"
         )
@@ -268,15 +297,40 @@ class WorkflowRunController(QObject):
         self.host._workflow_finished(True, "", self.items, outputs, self.step_log)
 
     def add_step_log(self, step_id, op, status, command=None,
-                     outputs=None, error=""):
-        self.step_log.append({
+                     outputs=None, error="", parameters=None,
+                     input_paths=None, cwd=""):
+        entry = {
             "step": step_id,
             "op": op,
             "status": status,
             "command": list(command or []),
             "outputs": list(outputs or []),
             "error": error,
-        })
+            "parameters": dict(parameters or {}),
+            "inputs": list(input_paths or []),
+            "cwd": str(cwd or ""),
+        }
+        # A step first logs "running" and later "completed"/"failed". Keep one
+        # entry per step so the manifest and the RunSpec list do not duplicate
+        # the same invocation.
+        if status != "running":
+            for index in range(len(self.step_log) - 1, -1, -1):
+                existing = self.step_log[index]
+                if (existing.get("step") == step_id
+                        and existing.get("status") == "running"):
+                    entry["command"] = entry["command"] or list(
+                        existing.get("command") or []
+                    )
+                    entry["parameters"] = entry["parameters"] or dict(
+                        existing.get("parameters") or {}
+                    )
+                    entry["inputs"] = entry["inputs"] or list(
+                        existing.get("inputs") or []
+                    )
+                    entry["cwd"] = entry["cwd"] or existing.get("cwd", "")
+                    self.step_log[index] = entry
+                    return
+        self.step_log.append(entry)
 
 
 def _safe_dir(value: str) -> str:
@@ -693,6 +747,23 @@ class WorkflowRunnerPlugin(BasePlugin):
         items = list(getattr(self, "_pending_items", []) or [])
         if not items:
             raise ValueError("No workflow output is available.")
+        workflow_id = getattr(self.plan, "id", "") or ""
+        runs = []
+        for entry in self._step_log:
+            runs.append(RunSpec(
+                method=str(entry.get("op") or "workflow-step"),
+                tool=str(entry.get("op") or ""),
+                command=list(entry.get("command") or []),
+                parameters=dict(entry.get("parameters") or {}),
+                input_paths=list(entry.get("inputs") or []),
+                output_paths=list(entry.get("outputs") or []),
+                status=str(entry.get("status") or "completed"),
+                cwd=str(entry.get("cwd") or ""),
+                metadata={
+                    "step_id": str(entry.get("step") or ""),
+                    "workflow_id": workflow_id,
+                },
+            ))
         return ResultSpec(
             source="workflow-runner",
             datasets=[DatasetSpec(
@@ -701,10 +772,12 @@ class WorkflowRunnerPlugin(BasePlugin):
                 items=items,
                 description="Outputs from a compiled workflow",
                 source="workflow-runner",
-                metadata={"workflow_id": getattr(self.plan, "id", "")},
+                metadata={"workflow_id": workflow_id},
             )],
             artifacts=[entry["path"] for entry in self._outputs],
-            summary={"steps": len(self._step_log)},
+            summary={"steps": len(self._step_log), "workflow_id": workflow_id},
+            tool="workflow-runner",
+            runs=runs,
         )
 
     def _export_workflow_result(self):

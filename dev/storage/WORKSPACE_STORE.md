@@ -129,6 +129,7 @@ lost:
   "method": "iqtree",
   "tool": "IQ-TREE",
   "tool_version": "3.0.1",
+  "seed": "",
   "command": ["iqtree3", "-s", "..."],
   "parameters": {},
   "inputs": ["<item_id>"],
@@ -138,9 +139,15 @@ lost:
   "completed_at": "...",
   "cwd": "...",
   "log": "console.jsonl",
-  "artifacts": ["..."]
+  "artifacts": ["..."],
+  "artifact_hashes": {"...": "sha256:..."},
+  "metadata": {}
 }
 ```
+
+The host creates the run at result import. A `ResultSpec` without `runs`
+produces one run; each `RunSpec` in a workflow result produces one run with
+its own step id, command, parameters, working directory and output files.
 
 ## Import manifest
 

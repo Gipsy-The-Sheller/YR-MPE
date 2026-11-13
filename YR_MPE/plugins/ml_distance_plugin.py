@@ -571,7 +571,32 @@ class MLDistancePlugin(BasePlugin):
             params.extend(["-nt", str(threads)])
         
         return params
-    
+
+    def control_bindings(self):
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input alignment", "kind": "path",
+             "cli": ["-s", "{value}"],
+             "notes": "One IQ-TREE run per input file."},
+            {"id": "seq_type", "widget": "seq_type_combo",
+             "label": "Sequence type", "kind": "choice",
+             "choices": {"AUTO": [], "DNA": ["-st", "DNA"],
+                         "AA": ["-st", "AA"]},
+             "cli": ["{value}"]},
+            {"id": "model", "widget": "model_combo",
+             "label": "Substitution model", "kind": "choice",
+             "cli": [],
+             "notes": "GUI-only composite: the model plus +G/+I/+R/+ASC/+F "
+                      "is assembled into one -m value by get_parameters()."},
+            {"id": "gamma", "widget": "gamma_checkbox",
+             "label": "Gamma categories", "kind": "bool", "cli": [],
+             "notes": "Part of the composite -m value."},
+            {"id": "threads", "widget": "threads_spinbox",
+             "label": "Threads", "kind": "int",
+             "cli": ["-nt", "{value}"], "omit_values": [1],
+             "notes": "1 means serial and is omitted."},
+        ]
+
     def run_analysis(self):
         """运行分析"""
         # 检查输入

@@ -170,6 +170,7 @@ class BasePlugin(QWidget):
         host connects ``result_ready`` once and decides how to display or
         persist the result.
         """
+        self._augment_result_provenance(result)
         problems = result.validate() if hasattr(result, "validate") else ["invalid result object"]
         if problems:
             message = "Export blocked: " + "; ".join(problems)
@@ -178,6 +179,61 @@ class BasePlugin(QWidget):
             return False
         self.result_ready.emit(result)
         return True
+
+    def _augment_result_provenance(self, result):
+        """Fill tool identity, version, seed and command before export.
+
+        These fields are optional on the plugin side; the host uses them to
+        create a RunRecord for every imported result. Plugins stay free to set
+        stronger values (for example a command actually executed per batch).
+        """
+        if not hasattr(result, "source"):
+            return
+        if not getattr(result, "tool", ""):
+            result.tool = getattr(self, "tool_name", "") or getattr(
+                self, "plugin_name", ""
+            ) or result.source
+        if not getattr(result, "tool_version", ""):
+            version = ""
+            config = self.plugin_config
+            if not isinstance(config, dict):
+                try:
+                    config = self._find_plugin_config()
+                except Exception:
+                    config = None
+            if isinstance(config, dict):
+                version = str(config.get("version", "") or "")
+            if not version:
+                version = str(getattr(self, "tool_version", "") or "")
+            result.tool_version = version
+        if not getattr(result, "seed", ""):
+            result.seed = self._seed_from_controls()
+        if isinstance(getattr(result, "summary", None), dict):
+            if not result.summary.get("command"):
+                try:
+                    preview = self.cli_preview()
+                except Exception:
+                    preview = []
+                if preview:
+                    result.summary["command"] = [str(part) for part in preview]
+
+    def _seed_from_controls(self) -> str:
+        """Return the value of the first seed-like control, when present."""
+        accepted = (QSpinBox, QDoubleSpinBox, QLineEdit, QComboBox)
+        for name, widget in vars(self).items():
+            if "seed" not in name.lower() or not isinstance(widget, accepted):
+                continue
+            for getter in ("value", "text", "currentText"):
+                method = getattr(widget, getter, None)
+                if not callable(method):
+                    continue
+                try:
+                    value = method()
+                except Exception:
+                    continue
+                if value not in (None, ""):
+                    return str(value)
+        return ""
 
     def result_has_consumer(self):
         """True when the host has connected to ``result_ready``."""

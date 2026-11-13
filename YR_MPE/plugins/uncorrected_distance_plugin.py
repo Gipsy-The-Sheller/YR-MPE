@@ -565,7 +565,24 @@ class UncorrectedDistancePlugin(BasePlugin):
             params['substitution_filter'] = get_substitution_filter(rule_type.lower())
         
         return params
-    
+
+    def control_bindings(self):
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input alignment", "kind": "path", "cli": [],
+             "notes": "GUI-only: p-distance is computed in Python from the "
+                      "selected alignment; there is no external command."},
+            {"id": "seq_type", "widget": "seq_type_combo",
+             "label": "Sequence type", "kind": "choice", "cli": [],
+             "notes": "GUI-only: selects DNA or protein p-distance rules."},
+            {"id": "gap_treatment", "widget": "gap_treatment_combo",
+             "label": "Gap treatment", "kind": "choice", "cli": [],
+             "notes": "GUI-only: pairwise or complete deletion."},
+            {"id": "dna_rule", "widget": "dna_rule_combo",
+             "label": "Substitution rule", "kind": "choice", "cli": [],
+             "notes": "GUI-only: all, transition, transversion or advanced."},
+        ]
+
     def run_analysis(self):
         """运行距离分析"""
         if not self.imported_files and not self.sequence_text.toPlainText().strip():

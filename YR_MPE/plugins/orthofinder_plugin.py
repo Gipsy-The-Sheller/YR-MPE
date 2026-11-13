@@ -1138,6 +1138,32 @@ class OrthoFinderPlugin(BasePlugin):
     # ------------------------------------------------------------------
     # run lifecycle
     # ------------------------------------------------------------------
+    def control_bindings(self):
+        return [
+            {"id": "input", "widget": "input_edit",
+             "label": "GenBank input", "kind": "path", "cli": [],
+             "notes": "GUI-only: the pipeline scans a folder or multi-record "
+                      "file and parses CDS features before OrthoFinder."},
+            {"id": "source", "widget": "source_combo",
+             "label": "Source type", "kind": "choice", "cli": [],
+             "notes": "GUI-only: GenBank folder, multi-record GenBank or "
+                      "proteome FASTA."},
+            {"id": "genetic_code", "widget": "genetic_code_combo",
+             "label": "Genetic code", "kind": "choice", "cli": [],
+             "notes": "GUI-only: CDS translation setting."},
+            {"id": "threads", "widget": "threads_spin",
+             "label": "OrthoFinder threads", "kind": "int",
+             "cli": ["-t", "{value}"],
+             "notes": "Passed to the OrthoFinder step."},
+            {"id": "mode", "widget": "run_mode_combo",
+             "label": "Pipeline mode", "kind": "choice", "cli": [],
+             "notes": "GUI-only: full pipeline, parse only, or reuse existing "
+                      "OrthoFinder results."},
+            {"id": "existing", "widget": "existing_edit",
+             "label": "Existing OrthoFinder folder", "kind": "path", "cli": [],
+             "notes": "GUI-only: used only in existing-results mode."},
+        ]
+
     def run_analysis(self):
         return self.start_pipeline(show_dialogs=True)
 

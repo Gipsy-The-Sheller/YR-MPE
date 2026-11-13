@@ -348,10 +348,18 @@ class SeqMatrixUI(QMainWindow):
 
 class Lg_SeqMatrix(SeqMatrixUI):
     def help_doc(self):
-        from ..runtime.skills import SkillLibrary
-        return SkillLibrary().get_skill("seqmatrix") or {}
+        from ..runtime.skills import build_plugin_help_doc
+        return build_plugin_help_doc(self)
 
-    
+    def control_bindings(self):
+        return [
+            {"id": "dataset", "widget": "import_dataset_button",
+             "label": "Import as a dataset", "kind": "action", "cli": [],
+             "notes": "GUI-only matrix editor: taxa, loci and partitions are "
+                      "assembled interactively and exported as a dataset."},
+        ]
+
+
     # 信号定义
     import_dataset_signal = pyqtSignal(list, list)  # 发送序列数据和分区定义
     # 格式: (sequences_list, partition_definitions_list)

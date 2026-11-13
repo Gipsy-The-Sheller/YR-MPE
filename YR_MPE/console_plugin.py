@@ -28,7 +28,16 @@ import json
 
 class YRMPEConsolePlugin(QWidget):
     """YR-MPE Console插件：启动一个新终端窗口并配置工具路径"""
-    
+
+    def control_bindings(self):
+        return [
+            {"id": "console", "widget": "", "label": "Embedded console",
+             "kind": "action", "cli": [],
+             "notes": "GUI-only: agents use the local bridge rather than the "
+                      "console widget; the terminal environment is configured "
+                      "from the GUI."},
+        ]
+
     def __init__(self):
         super().__init__()
         self.plugin_path = os.path.dirname(os.path.abspath(__file__))

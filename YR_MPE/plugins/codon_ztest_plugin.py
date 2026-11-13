@@ -328,6 +328,23 @@ class CodonZTestPlugin(BasePlugin):
             self.alignment_edit.setText(path)
             self._scan_alignment()
 
+    def control_bindings(self):
+        return [
+            {"id": "alignment", "widget": "alignment_edit",
+             "label": "Codon alignment", "kind": "path", "cli": [],
+             "notes": "GUI-only: NG86/YN00 Z-test is computed in Python."},
+            {"id": "method", "widget": "method_combo",
+             "label": "dN/dS method", "kind": "choice", "cli": [],
+             "notes": "GUI-only: NG86 counting or YN00 F84 correction."},
+            {"id": "code", "widget": "code_combo",
+             "label": "Genetic code", "kind": "choice", "cli": [],
+             "notes": "GUI-only: genetic-code table used by the counting "
+                      "method."},
+            {"id": "view", "widget": "view_combo",
+             "label": "Result view", "kind": "choice", "cli": [],
+             "notes": "GUI-only display choice."},
+        ]
+
     def run_analysis(self):
         if not self._scan_alignment():
             QMessageBox.warning(self, "Input missing", "Please select a valid in-frame codon alignment.")

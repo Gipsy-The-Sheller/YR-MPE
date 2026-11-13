@@ -4774,11 +4774,30 @@ class SingleGeneWorkspace(QWidget):
 
         Accepts ``ResultSpec``, ``DatasetSpec``, a legacy ``DatasetObject`` or
         a list of legacy items. Returns the created dataset IDs.
+
+        Every import is also recorded as one or more RunRecords. An ordinary
+        ResultSpec becomes one run for the plugin invocation; a ResultSpec with
+        ``runs`` (the workflow runner) becomes one run per step. Run recording
+        is best-effort: a missing workspace store never blocks data import.
         """
         if isinstance(result, ResultSpec):
             specs = list(result.datasets)
+            result_source = result.source
+            result_summary = dict(result.summary or {})
+            result_artifacts = list(result.artifacts or [])
+            result_runs = list(getattr(result, "runs", []) or [])
+            result_tool = getattr(result, "tool", "") or result_source
+            result_version = getattr(result, "tool_version", "") or ""
+            result_seed = getattr(result, "seed", "") or ""
         elif isinstance(result, DatasetSpec):
             specs = [result]
+            result_source = result.source
+            result_summary = dict(result.summary or {})
+            result_artifacts = []
+            result_runs = []
+            result_tool = result_source
+            result_version = ""
+            result_seed = ""
         elif isinstance(result, (list, tuple)):
             items = [self._legacy_item_to_spec(item) for item in result]
             specs = [DatasetSpec(
@@ -4786,15 +4805,315 @@ class SingleGeneWorkspace(QWidget):
                 items=[item for item in items if item],
                 source="plugin",
             )]
+            result_source = "plugin"
+            result_summary = {}
+            result_artifacts = []
+            result_runs = []
+            result_tool = "plugin"
+            result_version = ""
+            result_seed = ""
         else:
             specs = [self._legacy_dataset_to_spec(result)]
+            result_source = getattr(specs[0], "source", "") or "plugin"
+            result_summary = dict(getattr(specs[0], "summary", {}) or {})
+            result_artifacts = []
+            result_runs = []
+            result_tool = result_source
+            result_version = ""
+            result_seed = ""
+
+        manager = self.dataset_selection_manager
+        store = getattr(manager, "store", None) if manager is not None else None
+        run_records = []
+        workflow_runs = bool(result_runs) and store is not None
+        single_run = None
+        if store is not None and not workflow_runs:
+            single_run = self._start_result_run(
+                specs,
+                result_source,
+                result_tool,
+                result_version,
+                result_seed,
+                result_summary,
+            )
+            if single_run is not None:
+                run_records.append(single_run)
+                # Pre-assign the run to every imported item; _sync_to_store
+                # rebuilds the run's output_ids from this back-reference.
+                for spec in specs:
+                    for item_spec in spec.items:
+                        if not item_spec.run_id:
+                            item_spec.run_id = single_run.id
+        elif workflow_runs:
+            for run_spec in result_runs:
+                try:
+                    run_records.append(self._start_workflow_run(
+                        run_spec, result_source, result_tool, result_version,
+                    ))
+                except Exception:
+                    run_records.append(None)
 
         dataset_ids = []
-        for spec in specs:
-            dataset_id = self.add_dataset_spec(spec)
-            if dataset_id:
-                dataset_ids.append(dataset_id)
+        try:
+            for spec in specs:
+                dataset_id = self.add_dataset_spec(spec)
+                if dataset_id:
+                    dataset_ids.append(dataset_id)
+            if workflow_runs:
+                self._link_workflow_runs(run_records, result_runs)
+            elif single_run is not None:
+                self._finish_result_run(single_run, result_artifacts)
+        except Exception:
+            if workflow_runs:
+                for run_record in run_records:
+                    if run_record is not None:
+                        try:
+                            store.finish_run(run_record.id, "failed")
+                        except Exception:
+                            pass
+            elif single_run is not None:
+                try:
+                    store.finish_run(single_run.id, "failed")
+                except Exception:
+                    pass
+            raise
+        finally:
+            if run_records and manager is not None:
+                try:
+                    manager._save_state()
+                except Exception:
+                    pass
         return dataset_ids
+
+    # -- provenance helpers ------------------------------------------------
+    @staticmethod
+    def _coerce_parameters(value):
+        if isinstance(value, dict):
+            return dict(value)
+        if isinstance(value, (list, tuple)):
+            return {"arguments": [str(item) for item in value]}
+        if value not in (None, ""):
+            return {"value": value}
+        return {}
+
+    @staticmethod
+    def _coerce_command(value):
+        if isinstance(value, str):
+            return [value] if value.strip() else []
+        if isinstance(value, (list, tuple)):
+            return [str(part) for part in value]
+        return []
+
+    @staticmethod
+    def _result_input_paths(spec):
+        paths = []
+
+        def add(value):
+            if isinstance(value, (list, tuple)):
+                for entry in value:
+                    add(entry)
+                return
+            if value:
+                paths.append(str(value))
+
+        metadata = dict(getattr(spec, "metadata", {}) or {}) if spec is not None else {}
+        add(metadata.get("input"))
+        add(metadata.get("input_files"))
+        if spec is not None:
+            for item_spec in getattr(spec, "items", []) or []:
+                add((getattr(item_spec, "metadata", {}) or {}).get("input"))
+        return [path for index, path in enumerate(paths) if path and path not in paths[:index]]
+
+    def _item_path_index(self):
+        """Map absolute paths and unique basenames to current item IDs."""
+        manager = self.dataset_selection_manager
+        exact = {}
+        basenames = {}
+        if manager is None:
+            return exact, basenames
+
+        store = getattr(manager, "store", None)
+
+        def add(path, item_id, root=""):
+            if not path:
+                return
+            path = os.path.expanduser(str(path))
+            if root and not os.path.isabs(path):
+                path = os.path.join(str(root), path)
+            key = os.path.normcase(os.path.abspath(path))
+            exact.setdefault(key, set()).add(item_id)
+            base = os.path.basename(key)
+            if base:
+                basenames.setdefault(base, set()).add(item_id)
+
+        root = getattr(store, "root", "") if store is not None else ""
+        for item in manager.items.values():
+            add(getattr(item, "file_path", ""), item.id)
+            add((getattr(item, "metadata", {}) or {}).get("source_path"), item.id)
+        if store is not None:
+            for record in store.index.items.values():
+                add(record.file, record.id, root)
+                add((record.metadata or {}).get("source_path"), record.id)
+        return exact, basenames
+
+    def _resolve_item_ids(self, paths):
+        exact, basenames = self._item_path_index()
+        resolved = []
+        for path in paths or []:
+            if not path:
+                continue
+            key = os.path.normcase(os.path.abspath(os.path.expanduser(str(path))))
+            candidates = exact.get(key)
+            if not candidates:
+                candidates = basenames.get(os.path.basename(key))
+            if candidates and len(candidates) == 1:
+                item_id = next(iter(candidates))
+                if item_id not in resolved:
+                    resolved.append(item_id)
+        return resolved
+
+    def _start_result_run(self, specs, result_source, result_tool,
+                          result_version, result_seed, result_summary):
+        manager = self.dataset_selection_manager
+        store = getattr(manager, "store", None) if manager is not None else None
+        if store is None:
+            return None
+        specs = [spec for spec in (specs or []) if spec is not None]
+        first = specs[0] if specs else None
+        source = (getattr(first, "source", "") if first is not None else "") or result_source or "plugin"
+        metadata = dict(getattr(first, "metadata", {}) or {}) if first is not None else {}
+        parameters = self._coerce_parameters(metadata.get("parameters"))
+        for key in ("mode", "batch", "input_files"):
+            if key in metadata and key not in parameters:
+                parameters[key] = metadata[key]
+        if not parameters and result_summary:
+            parameters = dict(result_summary)
+        command = self._coerce_command(
+            metadata.get("command")
+            or (getattr(first, "summary", {}) or {}).get("command")
+            or result_summary.get("command")
+        )
+        input_paths = []
+        for spec in specs:
+            for path in self._result_input_paths(spec):
+                if path not in input_paths:
+                    input_paths.append(path)
+        try:
+            return store.new_run(
+                method=source,
+                tool=(getattr(first, "source", "") if first is not None else "") or result_tool or source,
+                input_ids=self._resolve_item_ids(input_paths),
+                tool_version=result_version,
+                parameters=parameters,
+                command=command,
+                seed=result_seed,
+                metadata={
+                    "datasets": [
+                        getattr(spec, "name", "") for spec in specs
+                    ],
+                    "source": result_source,
+                    "input_paths": input_paths,
+                },
+            )
+        except Exception:
+            return None
+
+    def _finish_result_run(self, run_record, result_artifacts):
+        manager = self.dataset_selection_manager
+        store = getattr(manager, "store", None) if manager is not None else None
+        if store is None or run_record is None:
+            return
+        output_ids = [
+            item.id for item in manager.items.values()
+            if getattr(item, "run_id", None) == run_record.id
+        ]
+        artifacts = list(result_artifacts or [])
+        for item_id in output_ids:
+            item = manager.items.get(item_id)
+            path = getattr(item, "file_path", "") if item is not None else ""
+            if path and path not in artifacts:
+                artifacts.append(path)
+        try:
+            store.finish_run(
+                run_record.id, "completed", output_ids=output_ids,
+                artifacts=artifacts,
+            )
+        except Exception:
+            pass
+
+    def _start_workflow_run(self, run_spec, result_source, result_tool,
+                            result_version):
+        manager = self.dataset_selection_manager
+        store = getattr(manager, "store", None) if manager is not None else None
+        if store is None:
+            return None
+        metadata = dict(getattr(run_spec, "metadata", {}) or {})
+        metadata.setdefault("source", result_source)
+        method = getattr(run_spec, "method", "") or getattr(run_spec, "tool", "") or "workflow-step"
+        return store.new_run(
+            method=method,
+            tool=getattr(run_spec, "tool", "") or result_tool or method,
+            input_ids=[],
+            tool_version=getattr(run_spec, "tool_version", "") or result_version,
+            parameters=dict(getattr(run_spec, "parameters", {}) or {}),
+            command=list(getattr(run_spec, "command", []) or []),
+            seed=getattr(run_spec, "seed", "") or "",
+            cwd=getattr(run_spec, "cwd", "") or "",
+            metadata=metadata,
+        )
+
+    def _link_workflow_runs(self, run_records, run_specs):
+        manager = self.dataset_selection_manager
+        store = getattr(manager, "store", None) if manager is not None else None
+        if store is None:
+            return
+        for run_record, run_spec in zip(run_records, run_specs):
+            if run_record is None:
+                continue
+            metadata = dict(getattr(run_spec, "metadata", {}) or {})
+            step_id = str(metadata.get("step_id", "") or "")
+            output_paths = [str(path) for path in (getattr(run_spec, "output_paths", []) or []) if path]
+            normalized_outputs = {
+                os.path.normcase(os.path.abspath(os.path.expanduser(path)))
+                for path in output_paths
+            }
+            outputs = []
+            for item in manager.items.values():
+                item_metadata = getattr(item, "metadata", {}) or {}
+                match = bool(step_id) and str(item_metadata.get("workflow_step", "")) == step_id
+                if not match:
+                    path = getattr(item, "file_path", "") or ""
+                    match = bool(path) and os.path.normcase(
+                        os.path.abspath(os.path.expanduser(path))
+                    ) in normalized_outputs
+                if not match:
+                    continue
+                if not getattr(item, "run_id", None):
+                    item.run_id = run_record.id
+                outputs.append(item.id)
+
+            inputs = [
+                item_id for item_id in self._resolve_item_ids(
+                    getattr(run_spec, "input_paths", []) or []
+                )
+                if item_id not in outputs
+            ]
+            run_record.input_ids = inputs
+            artifacts = list(output_paths)
+            for item_id in outputs:
+                item = manager.items.get(item_id)
+                path = getattr(item, "file_path", "") if item is not None else ""
+                if path and path not in artifacts:
+                    artifacts.append(path)
+            try:
+                store.finish_run(
+                    run_record.id,
+                    getattr(run_spec, "status", "completed") or "completed",
+                    output_ids=outputs,
+                    artifacts=artifacts,
+                )
+            except Exception:
+                pass
 
     def add_dataset_spec(self, spec):
         """Convert a DatasetSpec into DatasetInfo/DatasetItem and show it."""

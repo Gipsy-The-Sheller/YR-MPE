@@ -110,7 +110,15 @@ class SequenceAlignmentViewer(QMainWindow):
     sequences_saved = pyqtSignal(list, str)  # sequences, file_path
     # 定义信号，用于将比对结果导入到主平台
     import_alignment_signal = pyqtSignal(list)
-    
+
+    def control_bindings(self):
+        return [
+            {"id": "sequence", "widget": "sequence_combo",
+             "label": "Sequence selector", "kind": "choice", "cli": [],
+             "notes": "GUI-only: colouring, navigation and editing are "
+                      "display operations with no command-line equivalent."},
+        ]
+
     def __init__(self, sequences = []):
         self.plugin_path = os.path.dirname(os.path.abspath(__file__))
         super().__init__()

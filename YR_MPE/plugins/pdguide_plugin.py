@@ -271,6 +271,24 @@ class PdGuidePlugin(BasePlugin):
         
         return parameters
     
+    def control_bindings(self):
+        return [
+            {"id": "tree", "widget": "control_panel.tree_file_path",
+             "label": "Input tree", "kind": "path", "cli": [],
+             "notes": "GUI-only: the tree is loaded into the dating panel."},
+            {"id": "method", "widget": "control_panel.methods_combo",
+             "label": "Dating method", "kind": "choice", "cli": [],
+             "notes": "GUI-only: selects LSD2, PhyloBayes, MrBayes or "
+                      "MCMCTree inside the panel."},
+            {"id": "seq_length", "widget": "control_panel.sequence_length_spin",
+             "label": "Sequence length", "kind": "int",
+             "cli": ["-s", "{value}"], "omit_values": [0],
+             "notes": "LSD2 -s; active only in Manual mode."},
+            {"id": "estimate_root", "widget": "control_panel.estimate_root_radio",
+             "label": "Estimate root", "kind": "bool", "cli": ["-r"],
+             "notes": "LSD2 root estimation."},
+        ]
+
     def run_analysis(self):
         """运行分析"""
         # 根据当前选择的方法决定运行哪个分析

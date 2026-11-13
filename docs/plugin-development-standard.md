@@ -483,24 +483,33 @@ add a preview/export action instead of a fake dataset.
 ## 7. Run/provenance instrumentation
 
 The workspace model is `item -> run -> output item`; a run is an analysis
-edge with `input_ids`, `output_ids`, `method`, `tool`, `parameters`, and
-`parameter_schema`. See `dev/storage/WORKSPACE_STORE.md`.
+edge with `input_ids`, `output_ids`, `method`, `tool`, `tool_version`,
+`seed`, `command`, `parameters`, and hashed artifacts. See
+`dev/storage/WORKSPACE_STORE.md`.
 
-**Implemented today:** `WorkspaceStore.new_run()` / `finish_run()` and
-`DatasetSelectionManager.create_run()` / `finish_run()` exist, but the
-generic plugin wrapper does not call them for every plugin yet.
+**Implemented:** the host creates the run when a plugin result enters the
+workspace. `BasePlugin.export_result()` fills the tool identity, the tool
+version from the plugin config entry, the seed control value when present,
+and the `cli_preview()` command when available. `add_result_spec()` creates
+one RunRecord for an ordinary ResultSpec and links all imported output items
+to it. A ResultSpec that carries `runs=[RunSpec(...)]` (the Workflow Runner)
+creates one RunRecord per step, with per-step inputs, parameters, command,
+working directory and artifacts. Plugins do not need to create runs
+themselves.
 
 **Standard for new plugins:**
 
-- If the host passes a run context (`run_id`, `input_ids`, `dataset_id`),
-  fill `DatasetItemSpec.run_id` on all outputs and do not create a second
-  run.
-- If the plugin starts its own analysis inside YR-MPEA, the host wrapper
-  **SHOULD** create the run before opening the plugin and finish it after a
-  successful export. Do not fabricate provenance.
-- Until the host wrapper is migrated, record method/tool/parameters in
-  `DatasetSpec.metadata` and `RunRecord.parameters` when available; a missing
-  run edge is a migration item, not a reason to block the plugin.
+- Put declared parameters in `DatasetSpec.metadata["parameters"]` and input
+  paths in `metadata["input"]` / `metadata["input_files"]`; these become the
+  run's parameters and input edges.
+- Implement `cli_preview()` when the tool has a command line. The host stores
+  the preview in the run record; it is not reconstructed later.
+- Leave `DatasetItemSpec.run_id` empty for ordinary imports; the host assigns
+  the run. Fill it only when the host passes an explicit run context.
+- A multi-command plugin returns one `RunSpec` per command instead of relying
+  on the implicit single run.
+- Do not fabricate provenance. If a value is unavailable, leave the field
+  empty rather than guessing it.
 
 The target parameter schema for `/inspector.rerun_run` and agents is:
 

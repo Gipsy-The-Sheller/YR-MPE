@@ -739,7 +739,18 @@ class SubstitutionSaturationPlugin(BasePlugin):
         params['gap_treatment'] = 'pairwise' if 'Pairwise' in gap_treatment else 'complete'
         
         return params
-    
+
+    def control_bindings(self):
+        return [
+            {"id": "input", "widget": "file_path_edit",
+             "label": "Input alignment", "kind": "path", "cli": [],
+             "notes": "GUI-only: BaCoCa-style C-value and Ti/Tv "
+                      "calculations run in Python; no external command."},
+            {"id": "gap_treatment", "widget": "gap_treatment_combo",
+             "label": "Gap treatment", "kind": "choice", "cli": [],
+             "notes": "GUI-only: pairwise or complete deletion."},
+        ]
+
     def run_analysis(self):
         """运行饱和度分析"""
         if not self.imported_files and not self.sequence_text.toPlainText().strip():
