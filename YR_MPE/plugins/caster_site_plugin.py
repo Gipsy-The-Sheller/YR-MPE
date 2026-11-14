@@ -67,10 +67,17 @@ class CasterSiteThread(BaseProcessThread):
                         "CASTER-site failed%s" % (": " + detail if detail else "")
                     )
 
-                # ASTER writes the tree to stdout.
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    f.write(result.stdout or "")
-                if not (os.path.exists(output_file) and os.path.getsize(output_file) > 0):
+                # ASTER writes the tree either to --output or to stdout.
+                # Never truncate an output file the tool just wrote: opening it
+                # with "w" here was the bug that discarded a valid tree.
+                if not (os.path.exists(output_file)
+                        and os.path.getsize(output_file) > 0):
+                    text = (result.stdout or "").strip()
+                    if text:
+                        with open(output_file, "w", encoding="utf-8") as handle:
+                            handle.write(text + "\n")
+                if not (os.path.exists(output_file)
+                        and os.path.getsize(output_file) > 0):
                     raise RuntimeError("CASTER-site produced no tree output.")
 
                 output_files.append(output_file)

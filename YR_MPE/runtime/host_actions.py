@@ -545,6 +545,12 @@ def build_workbench_registry(host) -> UIActionRegistry:
     )
 
     def skills_list(params):
+        if os.environ.get("YR_MPE_DISABLE_SKILLS", "").lower() in (
+            "1", "true", "yes", "on"
+        ):
+            return {"ok": True, "result": {
+                "skills": [], "count": 0, "disabled": True,
+            }}
         library = SkillLibrary()
         query = str(params.get("query", "")).strip()
         if query:
@@ -590,6 +596,15 @@ def build_workbench_registry(host) -> UIActionRegistry:
             }
         if not callable(getattr(widget, "help_doc", None)) and not doc:
             return {"ok": False, "error": "help document unavailable"}
+        if os.environ.get("YR_MPE_DISABLE_SKILLS", "").lower() in (
+            "1", "true", "yes", "on"
+        ):
+            # Keep the live control map (the semantic API) but remove the
+            # narrative skill document for the no-skill condition.
+            doc = dict(doc or {})
+            doc.pop("markdown", None)
+            doc.pop("summary", None)
+            doc["skills_disabled"] = True
         return {"ok": True, "result": doc}
 
     registry.register(

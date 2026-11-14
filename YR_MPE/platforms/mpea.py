@@ -1585,7 +1585,25 @@ class YR_MPEA_Widget(QWidget):
             workdir=self.get_workdir(),
         )
         dialog.layout().addWidget(wrapper)
-        dialog.exec_()
+        self._connect_plugin_result(wrapper)
+        # Keep the dialog non-modal so the agent bridge and the task queue can
+        # observe the RF job. exec_() blocked the event loop and left the RF
+        # plugin outside queue tracking.
+        dialogs = getattr(self, "rf_dialogs", None)
+        if dialogs is None:
+            dialogs = []
+            self.rf_dialogs = dialogs
+        dialogs.append(dialog)
+
+        def _forget_rf_dialog(*_args):
+            try:
+                dialogs.remove(dialog)
+            except ValueError:
+                pass
+
+        dialog.finished.connect(_forget_rf_dialog)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        dialog.show()
 
     def _concordance_selected_payload(self, gene_trees=False, alignment=False):
         """Build a best-effort import payload from the current green selection."""

@@ -7,6 +7,7 @@ the window id through ``workbench.invoke_plugin``.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List
 
 
@@ -123,6 +124,18 @@ def _is_primary_input_binding(binding: Dict[str, Any]) -> bool:
     return any(token in ident for token in _PRIMARY_INPUT_TOKENS)
 
 
+def _resolve_control_widget(plugin, name: str):
+    """Resolve ``widget`` or ``dialog.widget`` paths used by control maps."""
+    obj = plugin
+    for part in str(name or "").split("."):
+        if not part:
+            return None
+        obj = getattr(obj, part, None)
+        if obj is None:
+            return None
+    return obj
+
+
 def apply_control(plugin, control_id: str, value: Any) -> bool:
     doc = plugin.help_doc()
     binding = next(
@@ -131,11 +144,21 @@ def apply_control(plugin, control_id: str, value: Any) -> bool:
         None,
     )
     if binding is None:
-        widget = getattr(plugin, control_id, None)
+        widget = _resolve_control_widget(plugin, control_id)
         if widget is None:
             return False
         binding = {"widget": control_id, "choices": {}}
-    widget = getattr(plugin, binding.get("widget", ""), None)
+    widget_name = str(binding.get("widget", ""))
+    widget = _resolve_control_widget(plugin, widget_name)
+    if widget is None and "." in widget_name:
+        root = widget_name.split(".", 1)[0]
+        ensure = getattr(plugin, "_ensure_%s" % root, None)
+        if callable(ensure):
+            try:
+                ensure()
+            except Exception:
+                pass
+            widget = _resolve_control_widget(plugin, widget_name)
     if widget is None:
         return False
     choices = binding.get("choices") or {}
@@ -168,7 +191,15 @@ def agent_invoke(plugin, action_id: str, params=None) -> Dict[str, Any]:
     params = params or {}
     name = str(action_id or "").rsplit(".", 1)[-1]
     if name == "help_doc":
-        return {"ok": True, "result": plugin.help_doc()}
+        doc = plugin.help_doc()
+        if os.environ.get("YR_MPE_DISABLE_SKILLS", "").lower() in (
+            "1", "true", "yes", "on"
+        ):
+            doc = dict(doc or {})
+            doc.pop("markdown", None)
+            doc.pop("summary", None)
+            doc["skills_disabled"] = True
+        return {"ok": True, "result": doc}
     if name == "inspect_status":
         return {"ok": True, "result": agent_status(plugin)}
     if name == "inspect_actions":

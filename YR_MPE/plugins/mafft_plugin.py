@@ -182,6 +182,7 @@ class MAFFTPlugin(BasePlugin):
         # alignments back into that dataset instead of creating a detached
         # "MAFFT alignment" dataset.
         self._source_dataset_id = None
+        self.advanced_dialog = None
         super().__init__(import_from, import_data, **kwargs)
         # BasePlugin handles a plain list only when import_from == "YR_MPEA".
         # Structured payloads (dataset items, paths, batched lists) need the
@@ -408,9 +409,14 @@ class MAFFTPlugin(BasePlugin):
         # 确保布局存在并添加按钮
         self.control_layout.addWidget(self.import_to_platform_btn)
     
+    def _ensure_advanced_dialog(self):
+        if self.advanced_dialog is None:
+            self.advanced_dialog = MAFFTAdvancedDialog(self)
+        return self.advanced_dialog
+
     def show_advanced_dialog(self):
         """显示高级参数对话框"""
-        dialog = MAFFTAdvancedDialog(self)
+        dialog = self._ensure_advanced_dialog()
         if dialog.exec_() == QDialog.Accepted:
             # 存储高级参数
             self.advanced_params = dialog.get_parameters()
@@ -449,6 +455,19 @@ class MAFFTPlugin(BasePlugin):
              "cli": ["--thread", "{value}"],
              "omit_values": [-1],
              "notes": "-1 means automatic and is omitted."},
+            {"id": "direction",
+             "widget": "advanced_dialog.adjust_direction_combo",
+             "label": "Direction adjustment", "kind": "choice",
+             "choices": {
+                 "No adjustment": [],
+                 "Adjust direction (--adjustdirection)":
+                     ["--adjustdirection"],
+                 "Adjust direction accurately (--adjustdirectionaccurately)":
+                     ["--adjustdirectionaccurately"],
+             },
+             "cli": ["{value}"],
+             "notes": "Detect and reverse-complement reversed input records; "
+                      "the accurate mode is slower than the basic mode."},
             {"id": "output_suffix", "widget": "output_suffix_edit",
              "label": "Output suffix", "kind": "text",
              "cli": [],
@@ -485,10 +504,13 @@ class MAFFTPlugin(BasePlugin):
         if thread_count != -1:
             params.extend(["--thread", str(thread_count)])
         
-        # 高级参数
-        if hasattr(self, 'advanced_params'):
+        # 高级参数. The agent may set advanced controls without opening the
+        # modal dialog, so prefer the live dialog values when one exists.
+        if self.advanced_dialog is not None:
+            params.extend(self.advanced_dialog.get_parameters())
+        elif hasattr(self, 'advanced_params'):
             params.extend(self.advanced_params)
-        
+
         return params
     
     def run_analysis(self):

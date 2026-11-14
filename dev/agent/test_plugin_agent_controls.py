@@ -69,6 +69,28 @@ class PluginAgentControlTests(unittest.TestCase):
         self.assertTrue(apply_control(plugin, "input", "/data/new.fna"))
         self.assertEqual(plugin.imported_files, ["/data/new.fna"])
 
+    def test_dotted_advanced_dialog_widgets_resolve(self):
+        from PyQt5.QtWidgets import QSpinBox
+
+        class Dialog:
+            def __init__(self):
+                self.seed_spin = QSpinBox()
+
+        class Plugin(DummyPlugin):
+            def __init__(self):
+                super().__init__()
+                self.advanced_dialog = Dialog()
+
+            def help_doc(self):
+                return {"controls": [
+                    {"id": "seed", "widget": "advanced_dialog.seed_spin",
+                     "label": "Seed", "kind": "int", "cli": ["--seed", "{value}"]},
+                ]}
+
+        plugin = Plugin()
+        self.assertTrue(apply_control(plugin, "seed", 42))
+        self.assertEqual(plugin.advanced_dialog.seed_spin.value(), 42)
+
     def test_run_returns_result_payload(self):
         plugin = DummyPlugin()
         response = agent_invoke(plugin, "plugin.run")
@@ -76,6 +98,27 @@ class PluginAgentControlTests(unittest.TestCase):
         self.assertEqual(response["job_id"], "job-123")
         self.assertEqual(response["result"]["job_id"], "job-123")
         self.assertIn("status", response["result"])
+
+    def test_no_skill_mode_strips_markdown(self):
+        plugin = DummyPlugin()
+        plugin.help_doc = lambda: {
+            "markdown": "secret skill text", "summary": "summary",
+            "controls": plugin.control_bindings() if hasattr(
+                plugin, "control_bindings"
+            ) else [],
+        }
+        previous = os.environ.get("YR_MPE_DISABLE_SKILLS")
+        try:
+            os.environ["YR_MPE_DISABLE_SKILLS"] = "1"
+            response = agent_invoke(plugin, "plugin.help_doc")
+            self.assertTrue(response["result"]["skills_disabled"])
+            self.assertNotIn("markdown", response["result"])
+            self.assertNotIn("summary", response["result"])
+        finally:
+            if previous is None:
+                os.environ.pop("YR_MPE_DISABLE_SKILLS", None)
+            else:
+                os.environ["YR_MPE_DISABLE_SKILLS"] = previous
 
     def test_session_temp_dir_is_used_by_process_threads(self):
         import tempfile
