@@ -42,6 +42,9 @@ def build_agent_prompt(bridge) -> str:
         action_lines.append(line)
     if not action_lines:
         action_lines = ["- (read control.json for the current action list)"]
+    action_lines.append(
+        "- bridge.stop: stop the bridge and exit the headless Workbench"
+    )
 
     command = {
         "schema": "yrmpe.bridge.command.v1",
@@ -71,6 +74,8 @@ def build_agent_prompt(bridge) -> str:
         "- plugin.run returns a job_id; poll workbench.jobs or "
         "workbench.job_status instead of sleeping on a window. Use "
         "workbench.cancel_job to stop queued or running work.\n"
+        "- When the task is complete, send `bridge.stop` so the headless "
+        "Workbench exits; do not leave the session running.\n"
         "- A changed token means the Workbench restarted: copy the prompt again.\n\n"
         "Available actions:\n%s"
         % (
