@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -83,6 +84,57 @@ class GuiCliAgentParityTests(unittest.TestCase):
         self.assertEqual(
             plugin.advanced_dialog.length_combo.currentText(), "CULength"
         )
+        preview = plugin.cli_preview()
+        self.assertIn("astral4", preview)
+        self.assertIn("--seed", preview)
+        self.assertIn("--length", preview)
+
+    def test_iqtree_partition_action(self):
+        import tempfile
+        from pathlib import Path
+        from YR_MPE.plugins.iqtree_plugin import IQTreePlugin
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alignment = Path(tmp) / "super.fas"
+            alignment.write_text(
+                ">a\nATGCATGCATGCATGCATGC\n>b\nATGCATGCATGCATGCATGC\n",
+                encoding="utf-8",
+            )
+            plugin = IQTreePlugin(headless=True)
+            response = plugin.agent_invoke(
+                "plugin.apply_partitions",
+                {
+                    "mode": "TUL",
+                    "alignment_file": str(alignment),
+                    "partitions": [
+                        {"name": "p1", "range": "1-10", "seq_type": "DNA"},
+                        {"name": "p2", "range": "11-20", "seq_type": "DNA"},
+                    ],
+                },
+            )
+            self.assertTrue(response["ok"])
+            inspect = plugin.agent_invoke("plugin.inspect_partitions")
+            self.assertEqual(inspect["result"]["mode"], "TUL")
+            self.assertEqual(len(inspect["result"]["partitions"]), 2)
+
+    def test_rf_result_spec_exports_matrix(self):
+        import tempfile
+        from YR_MPE.plugins.rf_plugin import RFComparisonPlugin
+
+        plugin = RFComparisonPlugin(headless=True)
+        plugin._out_dir = tempfile.mkdtemp()
+        plugin._payload = {
+            "labels": ["a", "b", "c"],
+            "matrix": [[0, 1, 2], [1, 0, 3], [2, 3, 0]],
+            "ntaxa": 10,
+            "groups": [],
+            "rfdist": "",
+        }
+        result = plugin._build_result_spec()
+        self.assertEqual(result.validate(), [])
+        item = result.datasets[0].items[0]
+        self.assertEqual(item.item_type, "table")
+        self.assertTrue(Path(item.file_path).is_file())
 
 
 if __name__ == "__main__":

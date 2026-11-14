@@ -29,6 +29,8 @@ import numpy as np
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PyQt5.QtCore import Qt, pyqtSignal
+
+from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -912,21 +914,16 @@ class RFComparisonPlugin(BasePlugin):
     # ------------------------------------------------------------------
     # export
     # ------------------------------------------------------------------
-    def _export_tables(self):
-        if not self._payload:
-            return
-        start = self._out_dir or str(Path.home())
-        directory = QFileDialog.getExistingDirectory(
-            self, "Export RF tables", start
-        )
-        if not directory:
-            return
+    def _write_tables(self, directory):
+        """Write the RF matrix and pairwise table, returning their paths."""
         labels = self._payload["labels"]
         matrix = self._payload["matrix"]
         ntaxa = int(self._payload.get("ntaxa") or 0)
         clean = [label.replace("\t", " ").replace("\n", " ") for label in labels]
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
 
-        matrix_path = Path(directory) / "rf_matrix.tsv"
+        matrix_path = directory / "rf_matrix.tsv"
         with open(matrix_path, "w", encoding="utf-8", newline="") as handle:
             handle.write("Tree\t" + "\t".join(clean) + "\n")
             for index, label in enumerate(clean):
@@ -937,7 +934,7 @@ class RFComparisonPlugin(BasePlugin):
         if len(groups) != len(clean):
             groups = [None] * len(clean)
         categories = classify_pairs(groups)
-        pairs_path = Path(directory) / "rf_pairs.tsv"
+        pairs_path = directory / "rf_pairs.tsv"
         with open(pairs_path, "w", encoding="utf-8", newline="") as handle:
             handle.write("Tree 1\tTree 2\tComparison\tRF\tNormalised RF\n")
             for (first, second, rf), category in zip(
@@ -949,9 +946,69 @@ class RFComparisonPlugin(BasePlugin):
                     % (first, second, category, rf,
                        "" if normalised is None else "%.6f" % normalised)
                 )
+        return matrix_path, pairs_path
+
+    def _export_tables(self):
+        if not self._payload:
+            return
+        start = self._out_dir or str(Path.home())
+        directory = QFileDialog.getExistingDirectory(
+            self, "Export RF tables", start
+        )
+        if not directory:
+            return
+        matrix_path, pairs_path = self._write_tables(directory)
         self.add_console_message(
             "RF tables exported to %s and %s" % (matrix_path, pairs_path),
             "info",
+        )
+
+    def _build_result_spec(self):
+        """Expose the RF matrix and pairwise table as a typed table item."""
+        if not self._payload:
+            return None
+        directory = Path(self._out_dir or tempfile.mkdtemp(
+            prefix="yr_mpe_rf_result_"
+        ))
+        matrix_path, pairs_path = self._write_tables(directory)
+        labels = list(self._payload["labels"])
+        matrix = self._payload["matrix"]
+        item = DatasetItemSpec(
+            loci_name="RF matrix",
+            item_type="table",
+            file_path=str(matrix_path),
+            format="tsv",
+            data={
+                "labels": labels,
+                "matrix": matrix,
+                "pairs": str(pairs_path),
+            },
+            metadata={
+                "source": "rf",
+                "rfdist": self._payload.get("rfdist", ""),
+                "pairs": str(pairs_path),
+            },
+        )
+        dataset = DatasetSpec(
+            name="Robinson-Foulds comparison",
+            items=[item],
+            description="Pairwise RF distances for %d trees" % len(labels),
+            source="rf",
+            summary={
+                "trees": len(labels),
+                "pairs": len(labels) * (len(labels) - 1) // 2,
+                "taxa": int(self._payload.get("ntaxa") or 0),
+            },
+            metadata={"input": self.tree_edit.text().strip()},
+        )
+        artifacts = [matrix_path, pairs_path]
+        rfdist = self._payload.get("rfdist")
+        if rfdist:
+            artifacts.append(Path(rfdist))
+        return ResultSpec(
+            source="rf",
+            datasets=[dataset],
+            artifacts=[str(path) for path in artifacts],
         )
 
     def _save_figures(self):

@@ -531,6 +531,37 @@ class AstralPlugin(BasePlugin):
         }
         self.plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'..')
 
+    def cli_preview(self):
+        """Return the ASTER command line for provenance/run records.
+
+        The executed path may additionally normalize weighted support labels
+        into a temporary tree file; this preview shows the primary command.
+        """
+        try:
+            version = self.ASTRAL_VERSIONS[self.version_combo.currentIndex()]
+        except Exception:
+            version = "astral4"
+        input_file = (self.file_path_edit.text().strip()
+                      or (self.imported_files[0] if self.imported_files
+                          else "<input>"))
+        params = [version, "-t", str(self.thread_spin.value())]
+        output_file = self.output_path_edit.text().strip()
+        if output_file:
+            params.extend(["-o", output_file])
+        support = self.support_combo.currentText().split(" ")[0]
+        params.extend(["-u", support])
+        try:
+            if self.advanced_dialog.seed_spin.value() != 233:
+                params.extend(["--seed", str(self.advanced_dialog.seed_spin.value())])
+            if (version == "astral4"
+                    and self.advanced_dialog.length_combo.currentIndex() != 0):
+                params.extend(["--length",
+                               self.advanced_dialog.length_combo.currentText()])
+        except Exception:
+            pass
+        params.append(input_file)
+        return [self.tool_path or "astral"] + params
+
     def control_bindings(self):
         """GUI controls mapped to the ASTER command line."""
         bindings = [

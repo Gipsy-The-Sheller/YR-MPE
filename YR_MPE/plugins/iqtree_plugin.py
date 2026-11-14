@@ -688,8 +688,10 @@ class IQTreePlugin(BasePlugin):
                  "Separate Tree (-S)": "-S",
              },
              "cli": [],
-             "notes": "Set in Configure Partitions; the flag consumes the "
-                      "partition file."},
+             "notes": "Use plugin.apply_partitions with an alignment_file and "
+                      "partition ranges; the flag consumes the partition file. "
+                      "Linked modes assume shared topology; set "
+                      "linkage_confirmed only with independent evidence."},
             {"id": "partition_bootstrap", "widget": "",
              "label": "Partition bootstrap", "kind": "composite",
              "step": 100,
@@ -1398,6 +1400,61 @@ class IQTreePlugin(BasePlugin):
             model += {"Estimated": "", "Empirical (+F)": "+F", "ML-optimized (+FO)": "+FO", "Equal (+FQ)": "+FQ"}[stfreq]
 
             return model
+
+    def agent_contract(self):
+        contract = super().agent_contract()
+        contract["actions"]["actions"].append({
+            "id": "plugin.apply_partitions",
+            "description": (
+                "Set a supermatrix and partition ranges for partitioned "
+                "IQ-TREE. Params: mode, partitions[{name,range,model,seq_type}], "
+                "alignment_file, linkage_confirmed."
+            ),
+        })
+        return contract
+
+    def agent_invoke(self, action_id, params=None):
+        name = str(action_id or "").rsplit(".", 1)[-1]
+        if name == "apply_partitions":
+            params = params or {}
+            mode = str(params.get("mode", "TUL")).upper()
+            partitions = params.get("partitions") or []
+            alignment_file = str(params.get("alignment_file", "")).strip()
+            if mode not in ("EL", "TL", "EUL", "TUL"):
+                return {"ok": False, "error": "mode must be EL, TL, EUL or TUL"}
+            if not partitions:
+                return {"ok": False, "error": "partitions is required"}
+            if not alignment_file or not os.path.exists(alignment_file):
+                return {"ok": False, "error": "alignment_file not found"}
+            try:
+                self.set_partition_config(mode, partitions, alignment_file)
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+            warning = ""
+            if mode in ("EL", "TL") and not params.get("linkage_confirmed"):
+                warning = (
+                    "Linked partitions assume a shared topology and branch "
+                    "lengths. Set linkage_confirmed=true only after independent "
+                    "linkage evidence; otherwise use EUL or TUL."
+                )
+                self.add_console_message(warning, "warning")
+            return {"ok": True, "result": {
+                "mode": mode,
+                "partitions": len(partitions),
+                "alignment_file": alignment_file,
+                "warning": warning,
+            }}
+        if name == "inspect_partitions":
+            return {"ok": True, "result": {
+                "enabled": bool(self.partition_mode_enabled),
+                "mode": getattr(self.partition_mode, "value", ""),
+                "partitions": [
+                    {"name": part.name, "range": part.model_range,
+                     "seq_type": part.seq_type, "model": part.selected_model}
+                    for part in self.partition_definitions
+                ],
+            }}
+        return super().agent_invoke(action_id, params)
 
     def set_partition_config(self, mode: str, partitions: list, alignment_file: str):
         """
