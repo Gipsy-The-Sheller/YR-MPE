@@ -231,28 +231,18 @@ class IQTreePartitionThread(BaseProcessThread):
             # 如果没有指定模型，使用 MFP+MERGE 进行模型选择和合并
             return "MFP+MERGE"
     
+    def _output_path(self, suffix: str) -> str:
+        """Resolve an IQ-TREE output beside the process working directory."""
+        prefix = str(self.output_prefix)
+        if self.workdir and not os.path.isabs(prefix):
+            prefix = os.path.join(str(self.workdir), prefix)
+        return prefix + suffix
+
     def collect_output_files(self) -> List[str]:
         """收集输出文件"""
         output_files = []
-        
-        # 查找.treefile文件
-        treefile = f"{self.output_prefix}.treefile"
-        if os.path.exists(treefile):
-            output_files.append(treefile)
-        
-        # 查找.iqtree文件
-        iqtree_file = f"{self.output_prefix}.iqtree"
-        if os.path.exists(iqtree_file):
-            output_files.append(iqtree_file)
-        
-        # 查找.log文件
-        log_file = f"{self.output_prefix}.log"
-        if os.path.exists(log_file):
-            output_files.append(log_file)
-        
-        # 查找.partition文件（如果有）
-        partition_file = f"{self.output_prefix}.partition"
-        if os.path.exists(partition_file):
-            output_files.append(partition_file)
-        
+        for suffix in (".treefile", ".iqtree", ".log", ".partition"):
+            path = self._output_path(suffix)
+            if os.path.exists(path):
+                output_files.append(path)
         return output_files

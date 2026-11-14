@@ -117,6 +117,29 @@ class GuiCliAgentParityTests(unittest.TestCase):
             self.assertEqual(inspect["result"]["mode"], "TUL")
             self.assertEqual(len(inspect["result"]["partitions"]), 2)
 
+    def test_iqtree_partition_outputs_resolve_in_session_workdir(self):
+        import tempfile
+        from YR_MPE.plugins.iqtree_partition_thread import IQTreePartitionThread
+        from YR_MPE.plugins.partition_mode import PartitionMode
+
+        previous = os.environ.get("YR_MPE_SESSION_TMP")
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                os.environ["YR_MPE_SESSION_TMP"] = tmp
+                thread = IQTreePartitionThread(
+                    "iqtree3", "/tmp/input.fas", [], PartitionMode.EL, {}
+                )
+                thread.output_prefix = "supermatrix"
+                self.assertEqual(
+                    Path(thread._output_path(".treefile")),
+                    Path(tmp) / "supermatrix.treefile",
+                )
+        finally:
+            if previous is None:
+                os.environ.pop("YR_MPE_SESSION_TMP", None)
+            else:
+                os.environ["YR_MPE_SESSION_TMP"] = previous
+
     def test_rf_result_spec_exports_matrix(self):
         import tempfile
         from YR_MPE.plugins.rf_plugin import RFComparisonPlugin
