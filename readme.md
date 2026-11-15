@@ -203,7 +203,7 @@ programs. Current boundaries:
 
 ## Citation
 
-The manuscript is in preparation. Until a DOI is available, cite the release:
+Cite the release:
 
 ```bibtex
 @software{yrmpe2026,
