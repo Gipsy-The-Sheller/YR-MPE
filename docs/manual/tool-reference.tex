@@ -1096,6 +1096,8 @@ RCluster + percentage & \texttt{--rcluster N} & Accelerated partition merging; p
 
 The partition thread also passes \texttt{-m MFP+MERGE} when no per-partition model is set; if a \texttt{charpartition} model is present, models are read from the partition file instead.
 
+\textbf{Linkage is a biological assumption, not a formatting choice.} Keep the dataset default \texttt{Topo unlinked} unless shared topology is supported by independent evidence (for example concordance or known physical linkage). \texttt{Edge linked} additionally assumes shared branch lengths. Selecting partitions does not establish linkage; confirm it before enabling either linked mode.
+
 Taxa for the supermatrix are the \textbf{union across all selected partitions}; a taxon absent from a locus is padded with \texttt{?} for that locus length. Do not take the first partition as the taxon list when the dataset has missing data.
 
 \subsubsection{Partition-merger workaround}
