@@ -1803,12 +1803,12 @@ A JSONL file or an agent transcript. The JSONL form uses one object per line:
  "inputs": {"raw": "raw.fas"}}
 {"id": "mafft", "op": "mafft.run",
  "outputs": {"alignment": "aln.fas"},
- "params": {"input": "%input.raw%", "output": "%mafft.alignment.fas%"}}
+ "params": {"input": "%input.raw.fas%", "output": "%mafft.alignment.fas%"}}
 \end{lstlisting}
 
 \begin{itemize}
-  \item \texttt{inputs} maps a role name to an external file. The key becomes \texttt{\%input.\allowbreak <role><ext>\%}.
-  \item A step \texttt{outputs} object names each produced artifact. The key becomes \texttt{\%<step>.\allowbreak <role><ext>\%} and is available to later steps.
+  \item \texttt{inputs} maps a role name to an external file. The key becomes \texttt{\%input.\allowbreak <role>.\allowbreak <extension>\%}.
+  \item A step \texttt{outputs} object names each produced artifact. The key becomes \texttt{\%<step>.\allowbreak <role>.\allowbreak <extension>\%} and is available to later steps.
   \item \texttt{params} keys are the plugin control ids from \texttt{control\_\allowbreak bindings\allowbreak ()}.
   \item Lines without \texttt{op}/\texttt{step} are treated as headers or pruned discovery actions.
 \end{itemize}

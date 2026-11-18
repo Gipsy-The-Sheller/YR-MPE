@@ -1,6 +1,7 @@
 # YR-MPE — a modular, agent-operable phylogenetics workbench
 
 [![Release](https://img.shields.io/github/v/release/Gipsy-The-Sheller/YR-MPE)](https://github.com/Gipsy-The-Sheller/YR-MPE/releases)
+[![Preprint](https://img.shields.io/badge/preprint-Research%20Square-blue.svg)](https://doi.org/10.21203/rs.3.rs-11771753/v1)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
@@ -17,6 +18,9 @@ The project targets a practical desktop workflow: import data, run a tool,
 inspect the intermediate result, change a parameter, and keep the whole
 analysis auditable. The same operation is available from the GUI, a JSONL
 workflow and a local agent bridge.
+
+A preprint is available on Research Square:
+[https://doi.org/10.21203/rs.3.rs-11771753/v1](https://doi.org/10.21203/rs.3.rs-11771753/v1).
 
 ## What's new in v1.2.0
 
@@ -197,11 +201,15 @@ programs. Current boundaries:
 - The workflow compiler and preview are implemented; a general executor that
   replays every step without review is still being completed.
 - CodeML/HyPhy, MCMCTree and IQ2MC are not wired.
+- ~~TreeMix~~ is deliberately not integrated: it is inconsistent under the
+  MSNC model and conflicts with the authors' methodological position.
 - Some bundled Windows builds (notably DecentTree) can fail on particular
   matrices; the manual documents the fallback.
 - The controlled agent/CLI benchmark and workflow timing study are ongoing.
 
 ## Citation
+
+Preprint: [Research Square](https://doi.org/10.21203/rs.3.rs-11771753/v1).
 
 Cite the release:
 

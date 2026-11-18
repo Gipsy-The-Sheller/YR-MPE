@@ -16,13 +16,13 @@ A JSONL file or an agent transcript. The JSONL form uses one object per line:
  "inputs": {"raw": "raw.fas"}}
 {"id": "mafft", "op": "mafft.run",
  "outputs": {"alignment": "aln.fas"},
- "params": {"input": "%input.raw%", "output": "%mafft.alignment.fas%"}}
+ "params": {"input": "%input.raw.fas%", "output": "%mafft.alignment.fas%"}}
 ```
 
 - `inputs` maps a role name to an external file. The key becomes
-  `%input.<role><ext>%`.
+  `%input.<role>.<extension>%`.
 - A step `outputs` object names each produced artifact. The key becomes
-  `%<step>.<role><ext>%` and is available to later steps.
+  `%<step>.<role>.<extension>%` and is available to later steps.
 - `params` keys are the plugin control ids from `control_bindings()`.
 - Lines without `op`/`step` are treated as headers or pruned discovery
   actions.

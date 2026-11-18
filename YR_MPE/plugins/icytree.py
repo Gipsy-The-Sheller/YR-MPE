@@ -236,13 +236,17 @@ class IcyTreePlugin(QWidget, BasePlugin):
     def init_icytree(self):
         """Initialize IcyTree"""
         try:
-            # Get icytree HTML file path
-            if self.plugin_path:
-                icytree_html = os.path.join(self.plugin_path, "src", "icytree", "index.html")
-            else:
-                # Default path
-                icytree_html = os.path.join(os.path.dirname(__file__), "src", "icytree", "index.html")
-            
+            # Get icytree HTML file path. The bundle lives in YR_MPE/src/icytree,
+            # one level above the plugins directory.
+            base = self.plugin_path or os.path.dirname(os.path.abspath(__file__))
+            candidates = [
+                os.path.join(base, "src", "icytree", "index.html"),
+                os.path.join(os.path.dirname(base), "src", "icytree", "index.html"),
+            ]
+            icytree_html = next(
+                (path for path in candidates if os.path.exists(path)), candidates[0]
+            )
+
             if os.path.exists(icytree_html):
                 self.icytree_path = icytree_html
                 # Load icytree page

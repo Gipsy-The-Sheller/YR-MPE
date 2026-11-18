@@ -906,7 +906,7 @@ class YR_MPEA_Widget(QWidget):
 
 
         open_action = QAction("Open Sequence Files", align_button)
-        open_action.setIcon(self.resource_factory.get_icon("open.svg"))
+        open_action.setIcon(self.resource_factory.get_icon("file/sequence.svg"))
         open_action.triggered.connect(self.open_sequence_files)
         # build_action = QAction("New Alignment", align_button)
         # build_action.setIcon(self.resource_factory.get_icon("new.svg"))

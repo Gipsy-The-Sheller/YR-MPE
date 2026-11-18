@@ -2214,16 +2214,18 @@ line. \\
 \texttt{id}. \\
 \texttt{events.jsonl} & Asynchronous progress, log lines, status changes and
 result-ready events. \\
-\texttt{control.json} & Session metadata and the random token; read-only for
-the agent. \\
+\texttt{control.json} & Session metadata, the token-required flag and the
+action catalog; never the token. \\
 \texttt{READY} & Written by the workbench when the session is accepting
-commands. \\
+commands; contains the session ID, not the token. \\
 \bottomrule
 \end{longtable}
 
 The bridge is local-only. It opens no network port, exposes no arbitrary shell
-execution and requires the random token from \texttt{control.json}. The token
-must not be copied into a world-readable file or committed to a repository.
+execution and requires the random session token. The token is delivered to the
+agent with the session prompt and is never written to \texttt{control.json} or
+\texttt{READY}; do not copy it into a world-readable file or commit it to a
+repository.
 The agent may append to \texttt{commands.jsonl}; the workbench polls the file
 on the Qt main thread, so widget state is never touched from a worker thread.
 
