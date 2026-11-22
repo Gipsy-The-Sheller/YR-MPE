@@ -22,6 +22,24 @@ workflow and a local agent bridge.
 A preprint is available on Research Square:
 [https://doi.org/10.21203/rs.3.rs-11771753/v1](https://doi.org/10.21203/rs.3.rs-11771753/v1).
 
+## Development after v1.2.0
+
+- **MrBayes 3.2.8 + BEAGLE 4**: the clock panel now exposes WN (the model
+  called IGR before 3.2.8), IGR, ILN, the mixed IGR+ILN model, CPP and TK02,
+  with fixed/exponential/uniform priors. BEAGLE 4 CPU threading is available
+  from **MPI & BEAGLE Settings**.
+- **OrthoFinder 3** with DIAMOND instead of BLAST+; the plugin accepts the
+  `diamond`/`mcl` layout used by the CYAN package and still falls back to
+  `PATH`.
+- **YGBlocks**: the bundled GBlocks-compatible trimmer is now the MIT-licensed
+  C++14 reimplementation, and the Output tab renders its masked-alignment
+  report again.
+- **Platform bundles**: a release-tagged workflow downloads the pinned CYAN
+  release and publishes `YR-MPE-bins-Windows-x64.zip`,
+  `YR-MPE-bins-Linux-x64.tar.gz`, `YR-MPE-bins-Linux-arm64.tar.gz` and
+  `YR-MPE-bins-macOS-arm64.tar.gz`. `CYAN_RELEASE` records the exact binary
+  set, and the Initializer can also fetch a single tool from that release.
+
 ## What's new in v1.2.0
 
 - **Workflow Runner**: `WORKSPACE -> Record & Workflow -> Run Workflow...`
@@ -85,20 +103,28 @@ More interface figures are in the [user manual](docs/manual/manual.pdf) and
 
 ## Installation
 
-### Windows: pre-built release
+### Pre-built release (Windows, Linux, macOS)
 
 1. Download the [YRTools](https://github.com/Gipsy-The-Sheller/YRTools)
    release and extract it to a writable folder.
-2. Download the YR-MPE **v1.2.0 source archive** from the
-   [release page](https://github.com/Gipsy-The-Sheller/YR-MPE/releases/tag/v1.2.0)
+2. Download the YR-MPE **v1.2.1 source archive** from the
+   [release page](https://github.com/Gipsy-The-Sheller/YR-MPE/releases/tag/v1.2.1)
    and extract it so that the repository root is
    `<YRTools_root>/plugins/YR-MPE/`.
-3. Either extract `YR-MPE-bins-win64.zip` at the `YR_MPE/` level so its
-   `bin/` directory merges into `YR_MPE/bin`, or let the **Initializer**
-   download it from GitHub or Gitee.
-4. Run `launcher.vbs` in the YRTools root. If VBScript is blocked, run
-   `python main.py` instead.
+3. Download the binary bundle for your target —
+   `YR-MPE-bins-Windows-x64.zip`, `YR-MPE-bins-Linux-x64.tar.gz`,
+   `YR-MPE-bins-Linux-arm64.tar.gz` or `YR-MPE-bins-macOS-arm64.tar.gz` —
+   and extract it at the `YR_MPE/` level so its `bin/` directory merges into
+   `YR_MPE/bin`. The **Initializer** can also download the bundle for the
+   current platform, or a single tool from the pinned CYAN release.
+   Windows on ARM uses the x64 bundle under emulation.
+4. Run `launcher.vbs` in the YRTools root on Windows, or `python main.py`
+   (or `python3 main.py`) on Linux/macOS.
 5. Open **YPhylo Workbench** from the YR-MPE sidebar.
+
+The platform bundles are assembled from the CYAN release recorded in
+[`CYAN_RELEASE`](CYAN_RELEASE), so a YR-MPE release always names the exact
+binary set it was tested with.
 
 The Initializer writes `settings.json` and `YR_MPE/config.json`. A persistent
 workspace is required for MrBayes, PhyloBayes and other long-running analyses;
@@ -194,8 +220,12 @@ Example datasets used by the case studies are in
 YR-MPE is a research workbench, not a replacement for the individual analysis
 programs. Current boundaries:
 
-- Windows is the primary packaged platform; Linux/macOS can run the Python
-  plugins but not the bundled Windows executables.
+- The workbench runs on Windows, Linux and macOS. Native binary coverage is
+  complete on Windows x64; the Linux and macOS bundles omit tools that CYAN
+  cannot build there (MAFFT on both, MPBoot and OrthoFinder on macOS/arm64),
+  and the Initializer falls back to executables found on `PATH`.
+- Windows on ARM is supported through x64 emulation; PyQt5 has no native
+  Windows-arm64 wheel.
 - The bundled ASTER reports **v1.24**; the ASTER2 migration is planned but not
   part of this release.
 - The workflow compiler and preview are implemented; a general executor that
@@ -221,8 +251,8 @@ Cite the release:
              Cheng, Xinbo and Han, Shuo and Jin, Yang and Lei, Yitong and
              Zhang, Rui and Zhang, Yunlong},
   year    = {2026},
-  version = {1.2.0},
-  url     = {https://github.com/Gipsy-The-Sheller/YR-MPE/releases/tag/v1.2.0}
+  version = {1.2.1},
+  url     = {https://github.com/Gipsy-The-Sheller/YR-MPE/releases/tag/v1.2.1}
 }
 ```
 

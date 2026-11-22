@@ -3,8 +3,9 @@
 ## Purpose
 
 Turn GB/GBFF/GFF inputs into a workspace dataset of single-copy orthogroups.
-The plugin runs OrthoFinder, extracts CDS for each single-copy orthogroup and
-imports the resulting alignments/sequences into YPhylo Workbench.
+The plugin runs OrthoFinder 3 with DIAMOND and MCL, extracts CDS for each
+single-copy orthogroup and imports the resulting alignments/sequences into
+YPhylo Workbench.
 
 ## When to use it
 
@@ -47,6 +48,13 @@ workbench.workspace
 
 After import, each single-copy orthogroup is a dataset item and can be sent to
 the alignment tools.
+
+## Runtime
+
+- The CYAN OrthoFinder 3 package keeps `diamond` and `mcl` in
+  `orthofinder/bin/`; the plugin checks that directory, `orthofinder/`, the
+  configured DIAMOND/MCL directory and `PATH`.
+- Orthology search uses `-S diamond`; BLAST+ is no longer required.
 
 ## Pitfalls
 

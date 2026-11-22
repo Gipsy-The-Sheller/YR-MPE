@@ -141,7 +141,7 @@
     "path": "E:/YR-MPE_tutorial/YR-MPE_dev/dev/bin/orthofinder/orthofinder.exe",
     "citations": [
       "emms2019orthofinder",
-      "camacho2009blast",
+      "buchfink2021diamond",
       "vandongen2000mcl",
       "cock2009biopython"
     ]

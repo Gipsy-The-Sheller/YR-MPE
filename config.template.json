@@ -65,7 +65,7 @@
     {
         "name": "MPIRun",
         "cmd": ["mpiexec", "mpirun"],
-        "bundled": "msmpi/mpiexec.exe",
+        "bundled": "mb/mpiexec.exe",
         "website": "https://learn.microsoft.com/en-us/message-passing-interface/microsoft-mpi",
         "path": ""
     },
@@ -93,7 +93,7 @@
     {
         "name": "astral",
         "cmd": ["astral", "astral4"],
-        "bundled": "aster/astral.bat",
+        "bundled": "aster/astral.exe",
         "website": "https://github.com/chaoszhang/ASTER",
         "path": ""
     },
@@ -135,7 +135,7 @@
     {
         "name": "OrthoFinder",
         "cmd": ["orthofinder"],
-        "bundled": "",
+        "bundled": "orthofinder/orthofinder.exe",
         "website": "https://github.com/davidemms/OrthoFinder",
         "path": ""
     }

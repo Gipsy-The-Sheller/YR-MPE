@@ -1,8 +1,11 @@
-# GBlocks
+# GBlocks (YGBlocks)
 
 ## Purpose
 
-Select conserved alignment blocks with GBlocks 0.91b.
+Select conserved alignment blocks with **YGBlocks**, an independent C++14
+reimplementation of GBlocks 0.91b. The command line and block-selection
+behaviour are compatible with the original, while the runtime is MIT-licensed
+and carries no unclear upstream licence.
 
 ## GUI to CLI
 
@@ -25,7 +28,9 @@ The runner calls `GBlocks <input> [options] -p=n -q=n -r=n -e=-gb`.
 
 1. Import an alignment.
 2. Choose sequence type and block parameters.
-3. Run; send the `.gb` alignment to the workspace.
+3. Run; the Output tab renders the masked-alignment report (kept positions
+   green, removed positions grey, gaps red), and the `.gb` alignment can be
+   sent to the workspace.
 
 ## Pitfalls
 
@@ -35,4 +40,6 @@ The runner calls `GBlocks <input> [options] -p=n -q=n -r=n -e=-gb`.
   emitted.
 - `-b6` is always emitted, including `-b6=n` when similarity matrices are off.
 - The plugin suppresses interactive prompts with `-p=n -q=n -r=n`.
-- GBlocks output is a block-selected alignment, not a tree.
+- YGBlocks output is a block-selected alignment, not a tree.
+- The binary is named `Gblocks` for command-line compatibility; its About
+  entry and this skill identify the implementation as YGBlocks.

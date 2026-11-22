@@ -121,6 +121,91 @@ class MrBayesPluginTests(unittest.TestCase):
         self.assertFalse(self.plugin.is_running)
 
 
+class MrBayesClockCommandTests(unittest.TestCase):
+    """MrBayes 3.2.8 relaxed-clock names and prior syntax."""
+
+    def commands(self, model, clock_params):
+        return MrBayesThread._get_clock_commands(None, [{
+            'enable_dating': True,
+            'clock_model': model,
+            'clock_params': clock_params,
+        }])
+
+    def test_white_noise_is_the_old_igr(self):
+        self.assertEqual(
+            self.commands('wn', {
+                'wnvarpr': 'exponential', 'wnvarpr_rate': 10.0,
+                'clock_model_version': 2,
+            }),
+            ['prset brlenspr=clock:uniform;',
+             'prset clockvarpr=wn wnvarpr=exponential(10.0);'],
+        )
+
+    def test_legacy_igr_record_replays_as_white_noise(self):
+        self.assertIn(
+            'prset clockvarpr=wn wnvarpr=exponential(10.0);',
+            self.commands('igr', {
+                'igrvarpr': 'exponential', 'igrvarpr_mean': 10.0,
+            }),
+        )
+
+    def test_new_independent_gamma_rates(self):
+        self.assertIn(
+            'prset clockvarpr=igr igrvarpr=exponential(1.0);',
+            self.commands('igr', {
+                'igrvarpr': 'exponential', 'igrvarpr_rate': 1.0,
+                'clock_model_version': 2,
+            }),
+        )
+
+    def test_independent_lognormal(self):
+        self.assertIn(
+            'prset clockvarpr=iln ilnvarpr=fixed(0.5);',
+            self.commands('iln', {
+                'ilnvarpr': 'fixed', 'ilnvarpr_value': 0.5,
+                'clock_model_version': 2,
+            }),
+        )
+
+    def test_mixed_uniform_has_two_bounds(self):
+        self.assertIn(
+            'prset clockvarpr=mixed mixedvarpr=uniform(0.0,10.0);',
+            self.commands('mixed', {
+                'mixedvarpr': 'uniform', 'mixedvarpr_min': 0.0,
+                'mixedvarpr_max': 10.0, 'clock_model_version': 2,
+            }),
+        )
+
+    def test_beagle_threading_command(self):
+        from YR_MPE.plugins.mrbayes_plugin import _beagle_command
+        off = _beagle_command({
+            'beagle_device': 'cpu', 'beagle_precision': 'double',
+            'beagle_scaling': 'dynamic', 'beagle_threads': False,
+        })
+        self.assertIn('beaglethreads=no', off)
+        on = _beagle_command({
+            'beagle_device': 'cpu', 'beagle_precision': 'double',
+            'beagle_scaling': 'dynamic', 'beagle_threads': True,
+            'beagle_thread_count': 8,
+        })
+        self.assertIn('beaglethreads=yes', on)
+        self.assertIn('beaglethreadcount=8', on)
+        auto = _beagle_command({
+            'beagle_threads': True, 'beagle_thread_count': 0,
+        })
+        self.assertIn('beaglethreads=yes', auto)
+        self.assertNotIn('beaglethreadcount=', auto)
+
+        mcmc = MrBayesThread._get_mcmc_commands(None, [{
+            'use_beagle': True, 'beagle_threads': True,
+            'beagle_thread_count': 4, 'ngen': 1000, 'samplefreq': 100,
+            'nchains': 4, 'nruns': 2,
+        }])
+        self.assertTrue(mcmc[0].startswith('set usebeagle=yes'))
+        self.assertIn('beaglethreadcount=4', mcmc[0])
+        self.assertTrue(mcmc[1].startswith('mcmcp'))
+
+
 @unittest.skipUnless(MB.is_file(), "MrBayes runtime not available")
 class MrBayesThreadTests(unittest.TestCase):
     def test_consensus_tree_and_chains_written(self):

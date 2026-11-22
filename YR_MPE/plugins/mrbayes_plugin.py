@@ -26,9 +26,10 @@ import re
 class MPIBeagleSettingsDialog(QDialog):
     """MPI & BEAGLE Settings Dialog"""
     
-    def __init__(self, parent=None, use_mpi=True, 
-                 use_beagle=True, beagle_device='CPU', 
-                 beagle_precision='Double', beagle_scaling='Dynamic'):
+    def __init__(self, parent=None, use_mpi=True,
+                 use_beagle=True, beagle_device='CPU',
+                 beagle_precision='Double', beagle_scaling='Dynamic',
+                 beagle_threads=False, beagle_thread_count=0):
         super().__init__(parent)
         self.setWindowTitle("MPI & BEAGLE Settings")
         self.setMinimumSize(400, 300)
@@ -78,6 +79,22 @@ class MPIBeagleSettingsDialog(QDialog):
         self.beagle_scaling_combo.addItems(["Dynamic", "Always"])
         self.beagle_scaling_combo.setCurrentText(beagle_scaling)
         beagle_form_layout.addRow("Scaling:", self.beagle_scaling_combo)
+
+        threading_row = QHBoxLayout()
+        self.beagle_threads_checkbox = QCheckBox("CPU threading")
+        self.beagle_threads_checkbox.setChecked(bool(beagle_threads))
+        self.beagle_threads_checkbox.stateChanged.connect(self.on_beagle_toggled)
+        threading_row.addWidget(self.beagle_threads_checkbox)
+        self.beagle_thread_count_spinbox = QSpinBox()
+        self.beagle_thread_count_spinbox.setRange(0, 128)
+        self.beagle_thread_count_spinbox.setValue(int(beagle_thread_count))
+        self.beagle_thread_count_spinbox.setSpecialValueText("auto")
+        self.beagle_thread_count_spinbox.setToolTip(
+            "0 = let MrBayes use the physical core count; otherwise set the "
+            "number of BEAGLE CPU threads per process.")
+        threading_row.addWidget(self.beagle_thread_count_spinbox)
+        threading_row.addStretch()
+        beagle_form_layout.addRow("Threads:", threading_row)
         
         beagle_layout.addLayout(beagle_form_layout)
         
@@ -106,7 +123,10 @@ class MPIBeagleSettingsDialog(QDialog):
         self.beagle_device_combo.setEnabled(enabled)
         self.beagle_precision_combo.setEnabled(enabled)
         self.beagle_scaling_combo.setEnabled(enabled)
-    
+        self.beagle_threads_checkbox.setEnabled(enabled)
+        self.beagle_thread_count_spinbox.setEnabled(
+            enabled and self.beagle_threads_checkbox.isChecked())
+
     def get_settings(self):
         """获取设置值"""
         return {
@@ -114,7 +134,9 @@ class MPIBeagleSettingsDialog(QDialog):
             'use_beagle': self.use_beagle.isChecked(),
             'beagle_device': self.beagle_device_combo.currentText(),
             'beagle_precision': self.beagle_precision_combo.currentText(),
-            'beagle_scaling': self.beagle_scaling_combo.currentText()
+            'beagle_scaling': self.beagle_scaling_combo.currentText(),
+            'beagle_threads': self.beagle_threads_checkbox.isChecked(),
+            'beagle_thread_count': self.beagle_thread_count_spinbox.value(),
         }
 
 class MrBayesThread(BaseProcessThread):
@@ -489,42 +511,30 @@ class MrBayesThread(BaseProcessThread):
         # 设置松弛分子钟类型
         clock_model = param_dict.get('clock_model', 'strict')
         clock_params = param_dict.get('clock_params', {})
-        
-        if clock_model == 'tk02':
-            # TK02参数
-            tk02varpr = clock_params.get('tk02varpr', 'exponential')
-            tk02varpr_mean = clock_params.get('tk02varpr_mean', 1.00)
-            if tk02varpr == 'fixed':
-                commands.append(f"prset clockvarpr=tk02 tk02varpr=fixed({tk02varpr_mean});")
-            elif tk02varpr == 'exponential':
-                commands.append(f"prset clockvarpr=tk02 tk02varpr=exponential({tk02varpr_mean});")
-            else:  # uniform
-                commands.append(f"prset clockvarpr=tk02 tk02varpr=uniform({tk02varpr_mean});")
-        
-        elif clock_model == 'igr':
-            # IGR参数
-            igrvarpr = clock_params.get('igrvarpr', 'exponential')
-            igrvarpr_mean = clock_params.get('igrvarpr_mean', 10.00)
-            if igrvarpr == 'fixed':
-                commands.append(f"prset clockvarpr=igr igrvarpr=fixed({igrvarpr_mean});")
-            elif igrvarpr == 'exponential':
-                commands.append(f"prset clockvarpr=igr igrvarpr=exponential({igrvarpr_mean});")
-            else:  # uniform
-                commands.append(f"prset clockvarpr=igr igrvarpr=uniform({igrvarpr_mean});")
-        
+
+        if clock_model == 'igr' and _is_legacy_igr(clock_params):
+            # MrBayes <= 3.2.7 called the white-noise model "IGR".
+            clock_model = 'wn'
+
+        if clock_model in ('wn', 'igr', 'iln', 'mixed', 'tk02'):
+            prior = _format_clock_prior(
+                clock_params, clock_model, _CLOCK_PRIOR_DEFAULTS[clock_model])
+            commands.append(
+                f"prset clockvarpr={clock_model} {clock_model}varpr={prior};")
+
         elif clock_model == 'cpp':
             # CPP参数
             cppratepr = clock_params.get('cppratepr', 'exponential')
             cppratepr_mean = clock_params.get('cppratepr_mean', 0.10)
             cppmultdevpr_value = clock_params.get('cppmultdevpr_value', 0.40)
-            
+
             if cppratepr == 'fixed':
                 commands.append(f"prset clockvarpr=cpp cppratepr=fixed({cppratepr_mean});")
             else:  # exponential
                 commands.append(f"prset clockvarpr=cpp cppratepr=exponential({cppratepr_mean});")
-            
+
             commands.append(f"prset cppmultdevpr=fixed({cppmultdevpr_value});")
-        
+
         # strict 不需要额外参数
         
         # 设置校准节点
@@ -670,15 +680,6 @@ class MrBayesThread(BaseProcessThread):
         elif rates == 'adgamma':
             commands.append(f"lset rates=adgamma ngammacat={ngammacat};")
         
-        # BEAGLE设置
-        use_beagle = param_dict.get('use_beagle', True)
-        if use_beagle:
-            beagle_device = param_dict.get('beagle_device', 'cpu')
-            beagle_precision = param_dict.get('beagle_precision', 'double')
-            beagle_scaling = param_dict.get('beagle_scaling', 'dynamic')
-            
-            commands.append(f"set usebeagle=yes beagledevice={beagle_device} beagleprecision={beagle_precision} beaglescaling={beagle_scaling};")
-        
         return commands
     
     def _get_mcmc_commands(self, params):
@@ -697,7 +698,11 @@ class MrBayesThread(BaseProcessThread):
         samplefreq = param_dict.get('samplefreq', 1000)
         nchains = param_dict.get('nchains', 4)
         nruns = param_dict.get('nruns', 2)
-        
+
+        # BEAGLE is a runtime setting, so it belongs with the MCMC block.
+        if param_dict.get('use_beagle', True):
+            commands.append(_beagle_command(param_dict))
+
         # 设置MCMC参数
         commands.append(f"mcmcp ngen={ngen} samplefreq={samplefreq} nchains={nchains} nruns={nruns} printfreq={samplefreq} savebrlens=yes checkpoint=yes checkfreq=5000;")
         
@@ -1012,6 +1017,8 @@ class MrBayesPlugin(BasePlugin):
         self.beagle_device = 'CPU'
         self.beagle_precision = 'Double'
         self.beagle_scaling = 'Dynamic'
+        self.beagle_threads = False
+        self.beagle_thread_count = 0
 
         # Partition mode settings
         partition_layout = QHBoxLayout()
@@ -1582,7 +1589,9 @@ class MrBayesPlugin(BasePlugin):
             use_beagle=self.use_beagle,
             beagle_device=self.beagle_device,
             beagle_precision=self.beagle_precision,
-            beagle_scaling=self.beagle_scaling
+            beagle_scaling=self.beagle_scaling,
+            beagle_threads=self.beagle_threads,
+            beagle_thread_count=self.beagle_thread_count,
         )
         
         if dialog.exec_() == QDialog.Accepted:
@@ -1592,6 +1601,8 @@ class MrBayesPlugin(BasePlugin):
             self.beagle_device = settings['beagle_device']
             self.beagle_precision = settings['beagle_precision']
             self.beagle_scaling = settings['beagle_scaling']
+            self.beagle_threads = settings['beagle_threads']
+            self.beagle_thread_count = settings['beagle_thread_count']
     
     def on_partition_mode_toggled(self):
         """分区模式复选框状态改变时处理"""
@@ -1954,7 +1965,9 @@ class MrBayesPlugin(BasePlugin):
             'use_beagle': self.use_beagle,
             'beagle_device': self.beagle_device.lower(),
             'beagle_precision': self.beagle_precision.lower(),
-            'beagle_scaling': self.beagle_scaling.lower()
+            'beagle_scaling': self.beagle_scaling.lower(),
+            'beagle_threads': self.beagle_threads,
+            'beagle_thread_count': self.beagle_thread_count,
         })
         
         # MCMC参数
@@ -2278,7 +2291,7 @@ class MrBayesPlugin(BasePlugin):
         
         # BEAGLE设置
         if params.get('use_beagle', True):
-            commands.append(f"set usebeagle=yes beagledevice={params.get('beagle_device', 'cpu')} beagleprecision={params.get('beagle_precision', 'double')} beaglescaling={params.get('beagle_scaling', 'dynamic')};")
+            commands.append(_beagle_command(params))
         
         # MCMC设置
         commands.append(f"mcmcp ngen={params.get('ngen', 1000000)} samplefreq={params.get('samplefreq', 1000)} nchains={params.get('nchains', 4)} nruns={params.get('nruns', 2)} printfreq={params.get('samplefreq', 1000)} savebrlens=yes checkpoint=yes checkfreq=5000;")
@@ -2507,6 +2520,194 @@ class MrBayesPlugin(BasePlugin):
                 self, "Success", "MrBayes result sent to the current workspace."
             )
 
+_RELAXED_CLOCK_CHOICES = [
+    ("strict", "Strict Clock"),
+    ("wn", "White Noise (WN)"),
+    ("igr", "Independent Gamma Rates (IGR)"),
+    ("iln", "Independent Lognormal (ILN)"),
+    ("mixed", "Mixed IGR + ILN"),
+    ("cpp", "Compound Poisson Process (CPP)"),
+    ("tk02", "Thorne-Kishino 2002 (TK02)"),
+]
+
+# MrBayes 3.2.8 defaults for the exponential prior on each variance
+# parameter (bayes.c).  WN keeps the value that the old "IGR" model used.
+_CLOCK_PRIOR_DEFAULTS = {
+    "wn": 10.00,
+    "igr": 1.00,
+    "iln": 1.00,
+    "mixed": 1.00,
+    "tk02": 1.00,
+}
+
+
+class RelaxedClockPriorWidget(QWidget):
+    """Prior controls for one relaxed-clock variance parameter.
+
+    MrBayes 3.2.8 accepts ``fixed(x)``, ``exponential(rate)`` and
+    ``uniform(min,max)`` for ``wnvarpr``, ``igrvarpr``, ``ilnvarpr``,
+    ``mixedvarpr`` and ``tk02varpr``.  The three numeric fields are kept as
+    separate rows so a uniform prior cannot be emitted with a single bound.
+    """
+
+    def __init__(self, default_value=1.0, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.dist_combo = QComboBox()
+        self.dist_combo.addItems(["Fixed", "Exponential", "Uniform"])
+        self.dist_combo.setMinimumWidth(100)
+        layout.addWidget(QLabel("Distribution:"))
+        layout.addWidget(self.dist_combo)
+
+        self.value_spin = QDoubleSpinBox()
+        self.value_spin.setRange(0.0, 1000.0)
+        self.value_spin.setValue(default_value)
+        self.value_spin.setSingleStep(0.1)
+        self.value_spin.setDecimals(2)
+
+        self.rate_spin = QDoubleSpinBox()
+        self.rate_spin.setRange(0.001, 1000.0)
+        self.rate_spin.setValue(default_value)
+        self.rate_spin.setSingleStep(0.1)
+        self.rate_spin.setDecimals(2)
+
+        self.min_spin = QDoubleSpinBox()
+        self.min_spin.setRange(0.0, 1000.0)
+        self.min_spin.setValue(0.0)
+        self.min_spin.setSingleStep(0.1)
+        self.min_spin.setDecimals(2)
+
+        self.max_spin = QDoubleSpinBox()
+        self.max_spin.setRange(0.001, 1000.0)
+        self.max_spin.setValue(10.0)
+        self.max_spin.setSingleStep(0.1)
+        self.max_spin.setDecimals(2)
+
+        self.fixed_row = self._row("Value:", self.value_spin)
+        self.exp_row = self._row("Rate:", self.rate_spin)
+        self.uniform_row = QWidget()
+        uniform_layout = QHBoxLayout(self.uniform_row)
+        uniform_layout.setContentsMargins(0, 0, 0, 0)
+        uniform_layout.addWidget(QLabel("Min:"))
+        uniform_layout.addWidget(self.min_spin)
+        uniform_layout.addWidget(QLabel("Max:"))
+        uniform_layout.addWidget(self.max_spin)
+        uniform_layout.addStretch()
+        layout.addWidget(self.fixed_row)
+        layout.addWidget(self.exp_row)
+        layout.addWidget(self.uniform_row)
+        layout.addStretch()
+
+        self.dist_combo.currentIndexChanged.connect(self._update_visibility)
+        self._update_visibility()
+
+    @staticmethod
+    def _row(label, spin):
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.addWidget(QLabel(label))
+        row_layout.addWidget(spin)
+        row_layout.addStretch()
+        return row
+
+    def _update_visibility(self):
+        dist = self.dist_combo.currentText().lower()
+        self.fixed_row.setVisible(dist == "fixed")
+        self.exp_row.setVisible(dist == "exponential")
+        self.uniform_row.setVisible(dist == "uniform")
+
+    def distribution(self):
+        return self.dist_combo.currentText().lower()
+
+    def active_value(self):
+        dist = self.distribution()
+        if dist == "fixed":
+            return self.value_spin.value()
+        if dist == "uniform":
+            return self.max_spin.value()
+        return self.rate_spin.value()
+
+    def params(self, prefix):
+        """Return the parameter keys consumed by ``_get_clock_commands``."""
+        return {
+            f"{prefix}varpr": self.distribution(),
+            f"{prefix}varpr_value": self.value_spin.value(),
+            f"{prefix}varpr_rate": self.rate_spin.value(),
+            f"{prefix}varpr_min": self.min_spin.value(),
+            f"{prefix}varpr_max": self.max_spin.value(),
+            # Kept for older callers that only understand a single number.
+            f"{prefix}varpr_mean": self.active_value(),
+        }
+
+    def set_params(self, params, prefix, default=1.0):
+        """Load a saved state, accepting the pre-3.2.8 single-value form."""
+        dist = str(params.get(f"{prefix}varpr", "exponential")).lower()
+        if dist not in ("fixed", "exponential", "uniform"):
+            dist = "exponential"
+        self.dist_combo.setCurrentText(dist.capitalize())
+        legacy = params.get(f"{prefix}varpr_mean")
+        self.value_spin.setValue(float(params.get(f"{prefix}varpr_value", legacy if legacy is not None else default)))
+        self.rate_spin.setValue(float(params.get(f"{prefix}varpr_rate", legacy if legacy is not None else default)))
+        self.min_spin.setValue(float(params.get(f"{prefix}varpr_min", 0.0)))
+        self.max_spin.setValue(float(params.get(f"{prefix}varpr_max", legacy if legacy is not None else 10.0)))
+        self._update_visibility()
+
+
+def _is_legacy_igr(clock_params):
+    """True for runs saved before MrBayes 3.2.8 renamed old IGR to WN.
+
+    Old records carry ``igrvarpr`` plus a single ``igrvarpr_mean``; the new
+    panel always writes the explicit value/rate/min/max keys.
+    """
+    if not clock_params or "igrvarpr" not in clock_params:
+        return False
+    return not any(key in clock_params for key in (
+        "igrvarpr_value", "igrvarpr_rate", "igrvarpr_min", "igrvarpr_max"
+    ))
+
+
+def _beagle_command(values):
+    """Build the ``set usebeagle=...`` line, including BEAGLE 4 threading."""
+    parts = [
+        "usebeagle=yes",
+        "beagledevice=%s" % values.get('beagle_device', 'cpu'),
+        "beagleprecision=%s" % values.get('beagle_precision', 'double'),
+        "beaglescaling=%s" % values.get('beagle_scaling', 'dynamic'),
+    ]
+    if values.get('beagle_threads'):
+        parts.append("beaglethreads=yes")
+        count = int(values.get('beagle_thread_count', 0) or 0)
+        if count > 0:
+            parts.append("beaglethreadcount=%d" % count)
+    else:
+        parts.append("beaglethreads=no")
+    return "set %s;" % " ".join(parts)
+
+
+def _format_clock_prior(clock_params, prefix, default):
+    """Format one MrBayes 3.2.8 variance prior.
+
+    ``uniform`` needs both bounds; older records stored one number, which is
+    treated as the upper bound with a lower bound of zero.
+    """
+    dist = str(clock_params.get(f"{prefix}varpr", "exponential")).lower()
+    if dist == "fixed":
+        value = clock_params.get(
+            f"{prefix}varpr_value", clock_params.get(f"{prefix}varpr_mean", default))
+        return f"fixed({value})"
+    if dist == "uniform":
+        low = clock_params.get(f"{prefix}varpr_min", 0.0)
+        high = clock_params.get(
+            f"{prefix}varpr_max", clock_params.get(f"{prefix}varpr_mean", default))
+        return f"uniform({low},{high})"
+    rate = clock_params.get(
+        f"{prefix}varpr_rate", clock_params.get(f"{prefix}varpr_mean", default))
+    return f"exponential({rate})"
+
+
 class MolecularDatingSettingsDialog(QDialog):
     """分子钟定年设置对话框"""
     
@@ -2535,61 +2736,19 @@ class MolecularDatingSettingsDialog(QDialog):
         clock_group.setLayout(clock_layout)
         
         self.clock_model_combo = QComboBox()
-        self.clock_model_combo.addItems([
-            "Strict Clock",
-            "Independent Gamma Rates (IGR)",
-            "Compound Poisson Process (CPP)",
-            "Thorne-Kishino 2002 (TK02)"
-        ])
+        for key, label in _RELAXED_CLOCK_CHOICES:
+            self.clock_model_combo.addItem(label, key)
         self.clock_model_combo.currentIndexChanged.connect(self.on_clock_model_changed)
         clock_layout.addRow("Clock Model:", self.clock_model_combo)
-        
-        # IGR参数 - 默认隐藏
-        self.igr_widget = QWidget()
-        self.igr_layout = QHBoxLayout()
-        self.igr_layout.setContentsMargins(0, 0, 0, 0)
-        self.igr_widget.setLayout(self.igr_layout)
-        
-        self.igrvarpr_combo = QComboBox()
-        self.igrvarpr_combo.addItems(["Fixed", "Exponential", "Uniform"])
-        self.igrvarpr_combo.setMinimumWidth(100)
-        self.igr_layout.addWidget(QLabel("Distribution:"))
-        self.igr_layout.addWidget(self.igrvarpr_combo)
-        
-        self.igrvarpr_mean_spinbox = QDoubleSpinBox()
-        self.igrvarpr_mean_spinbox.setRange(0.001, 1000.0)
-        self.igrvarpr_mean_spinbox.setValue(10.00)
-        self.igrvarpr_mean_spinbox.setSingleStep(0.1)
-        self.igrvarpr_mean_spinbox.setDecimals(2)
-        self.igr_layout.addWidget(QLabel("Mean:"))
-        self.igr_layout.addWidget(self.igrvarpr_mean_spinbox)
-        
-        self.igr_layout.addStretch()
-        clock_layout.addRow("", self.igr_widget)
-        
-        # TK02参数 - 默认隐藏
-        self.tk02_widget = QWidget()
-        self.tk02_layout = QHBoxLayout()
-        self.tk02_layout.setContentsMargins(0, 0, 0, 0)
-        self.tk02_widget.setLayout(self.tk02_layout)
-        
-        self.tk02varpr_combo = QComboBox()
-        self.tk02varpr_combo.addItems(["Fixed", "Exponential", "Uniform"])
-        self.tk02varpr_combo.setMinimumWidth(100)
-        self.tk02_layout.addWidget(QLabel("Distribution:"))
-        self.tk02_layout.addWidget(self.tk02varpr_combo)
-        
-        self.tk02varpr_mean_spinbox = QDoubleSpinBox()
-        self.tk02varpr_mean_spinbox.setRange(0.001, 1000.0)
-        self.tk02varpr_mean_spinbox.setValue(1.00)
-        self.tk02varpr_mean_spinbox.setSingleStep(0.1)
-        self.tk02varpr_mean_spinbox.setDecimals(2)
-        self.tk02_layout.addWidget(QLabel("Mean:"))
-        self.tk02_layout.addWidget(self.tk02varpr_mean_spinbox)
-        
-        self.tk02_layout.addStretch()
-        clock_layout.addRow("", self.tk02_widget)
-        
+
+        # One prior row per relaxed model; only the selected row is visible.
+        self.clock_prior_widgets = {}
+        for key in ("wn", "igr", "iln", "mixed", "tk02"):
+            widget = RelaxedClockPriorWidget(_CLOCK_PRIOR_DEFAULTS[key])
+            widget.setVisible(False)
+            clock_layout.addRow("", widget)
+            self.clock_prior_widgets[key] = widget
+
         # CPP参数 - 默认隐藏
         self.cpp_widget = QWidget()
         self.cpp_layout = QVBoxLayout()
@@ -2746,45 +2905,39 @@ class MolecularDatingSettingsDialog(QDialog):
     
     def on_clock_model_changed(self):
         """分子钟模型改变时更新UI"""
-        model = self.clock_model_combo.currentText()
-        
-        # 隐藏所有参数
-        self.igr_widget.setVisible(False)
-        self.tk02_widget.setVisible(False)
-        self.cpp_widget.setVisible(False)
-        
-        # 根据选择的模型显示相应的参数
-        if "IGR" in model:
-            self.igr_widget.setVisible(True)
-        elif "TK02" in model:
-            self.tk02_widget.setVisible(True)
-        elif "CPP" in model:
-            self.cpp_widget.setVisible(True)
-        # Strict Clock不需要额外参数
+        model = self.clock_model_combo.currentData()
+
+        for key, widget in self.clock_prior_widgets.items():
+            widget.setVisible(key == model)
+        self.cpp_widget.setVisible(model == "cpp")
+        # Strict Clock needs no further parameters.
     
     def load_data(self):
         """加载数据"""
-        # 设置分子钟模型
-        model_map = {
-            "strict": "Strict Clock",
-            "igr": "Independent Gamma Rates (IGR)",
-            "cpp": "Compound Poisson Process (CPP)",
-            "tk02": "Thorne-Kishino 2002 (TK02)"
-        }
-        self.clock_model_combo.setCurrentText(model_map.get(self.clock_model, "Strict Clock"))
-        
+        model = self.clock_model
+        params = self.clock_params
+        if model == "igr" and _is_legacy_igr(self.clock_params):
+            # Before MrBayes 3.2.8 the white-noise model was called IGR.
+            model = "wn"
+            params = {
+                "wnvarpr": self.clock_params.get("igrvarpr"),
+                "wnvarpr_mean": self.clock_params.get("igrvarpr_mean"),
+            }
+        index = self.clock_model_combo.findData(model)
+        if index < 0:
+            index = self.clock_model_combo.findData("strict")
+        self.clock_model_combo.setCurrentIndex(index)
+
         # 加载参数
-        if self.clock_model == "igr":
-            self.igrvarpr_combo.setCurrentText(self.clock_params.get('igrvarpr', 'Exponential'))
-            self.igrvarpr_mean_spinbox.setValue(self.clock_params.get('igrvarpr_mean', 10.00))
-        elif self.clock_model == "tk02":
-            self.tk02varpr_combo.setCurrentText(self.clock_params.get('tk02varpr', 'Exponential'))
-            self.tk02varpr_mean_spinbox.setValue(self.clock_params.get('tk02varpr_mean', 1.00))
-        elif self.clock_model == "cpp":
+        for key, widget in self.clock_prior_widgets.items():
+            widget.set_params(params, key, _CLOCK_PRIOR_DEFAULTS[key])
+
+        if model == "cpp":
             self.cppratepr_combo.setCurrentText(self.clock_params.get('cppratepr', 'Exponential'))
             self.cppratepr_mean_spinbox.setValue(self.clock_params.get('cppratepr_mean', 0.10))
             self.cppmultdevpr_value_spinbox.setValue(self.clock_params.get('cppmultdevpr_value', 0.40))
-        
+
+        self.on_clock_model_changed()
         # 更新校准节点表格
         self.update_calibration_table()
     
@@ -2878,37 +3031,25 @@ class MolecularDatingSettingsDialog(QDialog):
     
     def get_clock_model(self) -> str:
         """获取分子钟模型"""
-        model_text = self.clock_model_combo.currentText()
-        model_map = {
-            "Strict Clock": "strict",
-            "Independent Gamma Rates (IGR)": "igr",
-            "Compound Poisson Process (CPP)": "cpp",
-            "Thorne-Kishino 2002 (TK02)": "tk02"
-        }
-        return model_map.get(model_text, "strict")
-    
+        return self.clock_model_combo.currentData() or "strict"
+
     def get_clock_params(self) -> dict:
         """获取分子钟参数"""
         model = self.get_clock_model()
-        params = {}
-        
-        if model == "igr":
-            params = {
-                'igrvarpr': self.igrvarpr_combo.currentText().lower(),
-                'igrvarpr_mean': self.igrvarpr_mean_spinbox.value()
-            }
-        elif model == "tk02":
-            params = {
-                'tk02varpr': self.tk02varpr_combo.currentText().lower(),
-                'tk02varpr_mean': self.tk02varpr_mean_spinbox.value()
-            }
+        # The marker lets a replayed run distinguish the new i.i.d. IGR from
+        # the model that MrBayes <= 3.2.7 also called "IGR" (now WN).
+        params = {'clock_model_version': 2}
+
+        widget = self.clock_prior_widgets.get(model)
+        if widget is not None:
+            params.update(widget.params(model))
         elif model == "cpp":
-            params = {
+            params.update({
                 'cppratepr': self.cppratepr_combo.currentText().lower(),
                 'cppratepr_mean': self.cppratepr_mean_spinbox.value(),
                 'cppmultdevpr_value': self.cppmultdevpr_value_spinbox.value()
-            }
-        
+            })
+
         return params
     
     def get_calibrations(self) -> list:

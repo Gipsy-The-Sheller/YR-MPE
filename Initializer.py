@@ -2,8 +2,8 @@
 
 The initializer has three jobs:
 
-1. install the bundled Windows binaries from a GitHub or Gitee mirror (or a
-   user-supplied URL);
+1. install the bundled platform binaries from a GitHub or Gitee mirror (or a
+   user-supplied URL), or a single tool from the pinned CYAN release;
 2. detect bundled and PATH executables and write ``YR_MPE/config.json``;
 3. write ``settings.json`` for the YRTools host.
 
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -51,6 +52,105 @@ try:
     import requests
 except ImportError:  # pragma: no cover - requests is a declared dependency
     requests = None
+
+CYAN_REPO = "Gipsy-The-Sheller/CYAN"
+
+# CYAN asset prefix -> menu label.  The archive root is copied as-is, so the
+# layout under YR_MPE/bin matches config.template.json.
+CYAN_TOOLS = [
+    ("mafft", "MAFFT"),
+    ("iqtree3", "IQ-TREE 3"),
+    ("modeltest-ng", "ModelTest-NG"),
+    ("raxml-ng", "RAxML-NG"),
+    ("mrbayes", "MrBayes"),
+    ("pbmpi", "PhyloBayes-MPI"),
+    ("aster", "ASTER v1"),
+    ("aster2", "ASTER2"),
+    ("lsd2", "LSD2"),
+    ("trimal", "TrimAl"),
+    ("ygblocks", "YGBlocks"),
+    ("clustalo", "Clustal Omega"),
+    ("muscle5", "MUSCLE 5"),
+    ("mpboot", "MPBoot"),
+    ("decenttree", "DecentTree"),
+    ("fasttree", "FastTree"),
+    ("fastme", "FastME"),
+    ("paml", "PAML"),
+    ("hyphy", "HyPhy"),
+    ("diamond", "DIAMOND"),
+    ("mcl", "MCL"),
+    ("famsa", "FAMSA"),
+    ("orthofinder3", "OrthoFinder 3"),
+    ("treerecs", "TreeRecs"),
+    ("bmge", "BMGE"),
+    ("icytree", "IcyTree"),
+]
+
+CYAN_SRC_TOOLS = {"icytree"}
+
+
+def cyan_target():
+    """Return the CYAN ``(platform, arch)`` label for this machine."""
+    system = platform.system()
+    platform_name = {"Windows": "Windows", "Linux": "Linux",
+                     "Darwin": "macOS"}.get(system, system)
+    machine = platform.machine().lower()
+    arch = "arm64" if machine in ("arm64", "aarch64") else "x64"
+    if platform_name == "Windows" and arch == "arm64":
+        # PyQt5 has no Windows-arm64 wheel; the x64 build runs under emulation.
+        arch = "x64"
+    return platform_name, arch
+
+
+def cyan_release_tag():
+    """Read the release pinned in CYAN_RELEASE, else ask GitHub."""
+    pin = Path(__file__).resolve().parent / "CYAN_RELEASE"
+    if pin.is_file():
+        tag = pin.read_text(encoding="utf-8").strip()
+        if tag:
+            return tag
+    if requests is None:
+        raise RuntimeError("requests is required to resolve the CYAN release")
+    response = requests.get(
+        "https://api.github.com/repos/%s/releases/latest" % CYAN_REPO,
+        timeout=30,
+        headers={"Accept": "application/vnd.github+json"},
+    )
+    response.raise_for_status()
+    return response.json()["tag_name"]
+
+
+def load_cyan_manifest():
+    path = Path(__file__).resolve().parent / "cyan_tools.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def resolve_cyan_asset(tool, platform_name, arch, tag=None):
+    """Return ``(asset_name, download_url)`` from the pinned CYAN manifest.
+
+    The manifest records the tool versions published in the CYAN release, so
+    the Initializer does not need the GitHub API (which is often unreachable
+    from mainland China).  IcyTree is one platform-neutral package built in
+    the Windows job.
+    """
+    manifest = load_cyan_manifest()
+    release = tag or manifest.get("release") or cyan_release_tag()
+    entry = manifest.get("tools", {}).get(tool)
+    if not entry:
+        raise RuntimeError("CYAN manifest has no entry for %s" % tool)
+    target = "Windows-x64" if tool in CYAN_SRC_TOOLS else "%s-%s" % (
+        platform_name, arch)
+    if target not in entry.get("targets", []):
+        raise RuntimeError(
+            "CYAN %s has no package for %s on %s"
+            % (release, tool, target)
+        )
+    extension = "zip" if target.startswith("Windows") else "tar.gz"
+    name = "%s-%s-%s-%s.%s" % (
+        tool, entry["version"], target, release, extension)
+    url = "https://github.com/%s/releases/download/%s/%s" % (
+        CYAN_REPO, release, name)
+    return name, url
 
 
 class LicenseDialog(QDialog):
@@ -260,9 +360,13 @@ class Initializer(QWidget):
         self.tools_data = []
         self.configured_tools = []
         self.binary_sources = []
-        self.binary_archive = "YR-MPE-bins-win64.zip"
+        platform_name, arch = cyan_target()
+        self.binary_archive = "YR-MPE-bins-%s-%s.%s" % (
+            platform_name, arch, "zip" if platform_name == "Windows" else "tar.gz")
         self.download_thread = None
         self._download_path = None
+        self._cyan_mode = False
+        self._cyan_tool = ""
         self.init_ui()
         self.load_manifest()
         self.load_templates()
@@ -270,7 +374,7 @@ class Initializer(QWidget):
     # ------------------------------------------------------------------ UI
     def init_ui(self):
         self.setWindowTitle("YR-MPE Initializer")
-        self.setMinimumSize(720, 620)
+        self.setMinimumSize(720, 720)
 
         layout = QVBoxLayout()
         title = QLabel("Welcome to the YR-MPE Initializer")
@@ -300,7 +404,7 @@ class Initializer(QWidget):
         path_group.setLayout(path_layout)
         layout.addWidget(path_group)
 
-        binary_group = QGroupBox("Bundled Windows binaries")
+        binary_group = QGroupBox("Bundled platform binaries")
         binary_layout = QVBoxLayout()
 
         source_row = QHBoxLayout()
@@ -328,12 +432,41 @@ class Initializer(QWidget):
         self.progress_bar.setVisible(False)
         binary_layout.addWidget(self.progress_bar)
         self.status_label = QLabel(
-            "Choose a mirror, or paste a custom URL for the Windows binary archive."
+            "Choose a mirror, or paste a custom URL for the platform binary archive."
         )
         self.status_label.setWordWrap(True)
         binary_layout.addWidget(self.status_label)
         binary_group.setLayout(binary_layout)
         layout.addWidget(binary_group)
+
+        cyan_group = QGroupBox("Single tool from CYAN")
+        cyan_layout = QVBoxLayout()
+        cyan_row = QHBoxLayout()
+        cyan_row.addWidget(QLabel("Tool:"))
+        self.cyan_tool_combo = QComboBox()
+        for key, label in CYAN_TOOLS:
+            self.cyan_tool_combo.addItem(label, key)
+        cyan_row.addWidget(self.cyan_tool_combo, 1)
+        self.cyan_download_button = QPushButton("Download tool")
+        self.cyan_download_button.clicked.connect(self.start_cyan_download)
+        cyan_row.addWidget(self.cyan_download_button)
+        cyan_layout.addLayout(cyan_row)
+        try:
+            cyan_target_label = "%s-%s" % cyan_target()
+            cyan_release_label = cyan_release_tag()
+        except Exception as exc:
+            cyan_target_label = "unknown"
+            cyan_release_label = "unresolved (%s)" % exc
+        cyan_note = QLabel(
+            "Target %s · release %s. A single tool can be installed without "
+            "the full platform bundle."
+            % (cyan_target_label, cyan_release_label)
+        )
+        cyan_note.setWordWrap(True)
+        cyan_note.setStyleSheet("color: palette(mid);")
+        cyan_layout.addWidget(cyan_note)
+        cyan_group.setLayout(cyan_layout)
+        layout.addWidget(cyan_group)
 
         config_group = QGroupBox("Tool Configuration")
         config_layout = QVBoxLayout()
@@ -366,7 +499,12 @@ class Initializer(QWidget):
         if manifest_path.exists():
             try:
                 data = json.loads(manifest_path.read_text(encoding="utf-8"))
-                archive = data.get("archive", archive)
+                archives = data.get("archives") or {}
+                if archives:
+                    archive = archives.get(
+                        "%s-%s" % cyan_target(), archive)
+                else:
+                    archive = data.get("archive", archive)
                 sources = data.get("sources", [])
             except Exception as exc:
                 QMessageBox.warning(
@@ -377,12 +515,12 @@ class Initializer(QWidget):
                 {
                     "name": "GitHub",
                     "url": "https://github.com/Gipsy-The-Sheller/YR-MPE/"
-                    "releases/download/v{version}/YR-MPE-bins-win64.zip",
+                    "releases/download/v{version}/{archive}",
                 },
                 {
                     "name": "Gitee",
                     "url": "https://gitee.com/ZJXMolls/YR-MPE/"
-                    "releases/download/v{version}/YR-MPE-bins-win64.zip",
+                    "releases/download/v{version}/{archive}",
                 },
             ]
         self.binary_archive = archive
@@ -423,7 +561,9 @@ class Initializer(QWidget):
             return "1.2.0"
 
     def _resolved_url(self, template):
-        return template.replace("{version}", self._version())
+        return (template
+                .replace("{version}", self._version())
+                .replace("{archive}", self.binary_archive))
 
     # ------------------------------------------------------------- events
     def show_license(self):
@@ -449,6 +589,44 @@ class Initializer(QWidget):
         self.url_edit.setCursorPosition(0)
 
     # ----------------------------------------------------------- download
+    def start_cyan_download(self):
+        if self.download_thread is not None and self.download_thread.isRunning():
+            return
+        tool = self.cyan_tool_combo.currentData()
+        platform_name, arch = cyan_target()
+        try:
+            tag = cyan_release_tag()
+            name, url = resolve_cyan_asset(tool, platform_name, arch, tag)
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "CYAN download",
+                "Cannot resolve the CYAN package:\n%s" % exc,
+            )
+            return
+
+        suffix = ".zip" if name.endswith(".zip") else ".tar.gz"
+        handle = tempfile.NamedTemporaryFile(
+            prefix="yrmpe_cyan_", suffix=suffix, delete=False
+        )
+        self._download_path = handle.name
+        handle.close()
+
+        self._cyan_mode = True
+        self._cyan_tool = tool
+        self.download_button.setEnabled(False)
+        self.cyan_download_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.status_label.setText("Downloading %s (%s)" % (name, tag))
+        self.download_thread = BinaryDownloadThread(url, self._download_path, self)
+        self.download_thread.progress.connect(self.on_download_progress)
+        self.download_thread.status.connect(self.status_label.setText)
+        self.download_thread.finished.connect(self.on_download_finished)
+        self.download_thread.error.connect(self.on_download_error)
+        self.download_thread.cancelled.connect(self.on_download_cancelled)
+        self.download_thread.start()
+
     def start_download(self):
         if self.download_thread is not None and self.download_thread.isRunning():
             return
@@ -506,14 +684,27 @@ class Initializer(QWidget):
         self.status_label.setText("Extracting binaries...")
         QApplication.processEvents()
         try:
-            self.install_bundle(archive_path)
-            self.status_label.setText("Binaries installed. Detecting tools...")
-            self.auto_config()
-            QMessageBox.information(
-                self,
-                "Binaries installed",
-                "The Windows binaries were installed into YR_MPE/bin.",
-            )
+            if self._cyan_mode:
+                self.install_cyan_tool(archive_path, self._cyan_tool)
+                self.status_label.setText(
+                    "CYAN package installed. Detecting tools..."
+                )
+                self.auto_config()
+                QMessageBox.information(
+                    self,
+                    "Tool installed",
+                    "The CYAN package for %s was installed into YR_MPE."
+                    % self._cyan_tool,
+                )
+            else:
+                self.install_bundle(archive_path)
+                self.status_label.setText("Binaries installed. Detecting tools...")
+                self.auto_config()
+                QMessageBox.information(
+                    self,
+                    "Binaries installed",
+                    "The platform binaries were installed into YR_MPE/bin.",
+                )
         except Exception as exc:
             QMessageBox.critical(
                 self,
@@ -523,6 +714,8 @@ class Initializer(QWidget):
             self.status_label.setText("Extraction failed: %s" % exc)
         finally:
             self.progress_bar.setVisible(False)
+            self._cyan_mode = False
+            self.cyan_download_button.setEnabled(True)
             if archive_path and os.path.exists(archive_path):
                 try:
                     os.remove(archive_path)
@@ -532,6 +725,8 @@ class Initializer(QWidget):
 
     def on_download_cancelled(self):
         self.download_button.setEnabled(True)
+        self.cyan_download_button.setEnabled(True)
+        self._cyan_mode = False
         self.cancel_button.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.status_label.setText("Download cancelled.")
@@ -544,6 +739,8 @@ class Initializer(QWidget):
 
     def on_download_error(self, message):
         self.download_button.setEnabled(True)
+        self.cyan_download_button.setEnabled(True)
+        self._cyan_mode = False
         self.cancel_button.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.status_label.setText("Download failed.")
@@ -581,6 +778,36 @@ class Initializer(QWidget):
                     % ", ".join(names[:12])
                 )
             shutil.copytree(binary_root, target, dirs_exist_ok=True)
+            # Platform bundles also carry the IcyTree static site under src/.
+            for src_root in (binary_root / "src", binary_root.parent / "src"):
+                if not src_root.is_dir():
+                    continue
+                src_target = self.plugin_path / "YR_MPE" / "src"
+                src_target.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src_root, src_target, dirs_exist_ok=True)
+                break
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def install_cyan_tool(self, archive_path, tool):
+        """Install one CYAN package under YR_MPE/bin (or YR_MPE/src)."""
+        target = self.plugin_path / "YR_MPE" / (
+            "src" if tool in CYAN_SRC_TOOLS else "bin")
+        target.mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix="yrmpe_cyan_extract_"))
+        try:
+            if zipfile.is_zipfile(archive_path):
+                _safe_extract_zip(archive_path, work)
+            elif tarfile.is_tarfile(archive_path):
+                _safe_extract_tar(archive_path, work)
+            else:
+                raise RuntimeError("Unsupported archive format; use .zip or .tar.gz.")
+            roots = [path for path in work.iterdir() if path.is_dir()]
+            if not roots:
+                shutil.copytree(work, target, dirs_exist_ok=True)
+                return
+            for root in roots:
+                shutil.copytree(root, target / root.name, dirs_exist_ok=True)
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
@@ -590,7 +817,15 @@ class Initializer(QWidget):
         if not bundled:
             return None
         candidate = self.plugin_path / "YR_MPE" / "bin" / bundled
-        return candidate if candidate.exists() else None
+        candidates = [candidate]
+        if bundled.lower().endswith(".exe"):
+            candidates.append(candidate.with_suffix(""))
+        else:
+            candidates.append(candidate.with_name(candidate.name + ".exe"))
+        for path in candidates:
+            if path.exists():
+                return path
+        return None
 
     def auto_config(self):
         if not self.tools_data:
@@ -603,7 +838,9 @@ class Initializer(QWidget):
             path = ""
             bundled = self._bundled_path(tool)
             if bundled is not None:
-                path = "/" + tool["bundled"].replace("\\", "/")
+                relative = bundled.relative_to(
+                    self.plugin_path / "YR_MPE" / "bin")
+                path = "/" + relative.as_posix()
             else:
                 for command in tool.get("cmd", []):
                     found = shutil.which(command)

@@ -1,13 +1,18 @@
 {
-    "archive": "YR-MPE-bins-win64.zip",
+    "archives": {
+        "Windows-x64": "YR-MPE-bins-Windows-x64.zip",
+        "Linux-x64": "YR-MPE-bins-Linux-x64.tar.gz",
+        "Linux-arm64": "YR-MPE-bins-Linux-arm64.tar.gz",
+        "macOS-arm64": "YR-MPE-bins-macOS-arm64.tar.gz"
+    },
     "sources": [
         {
             "name": "GitHub",
-            "url": "https://github.com/Gipsy-The-Sheller/YR-MPE/releases/latest/download/YR-MPE-bins-win64.zip"
+            "url": "https://github.com/Gipsy-The-Sheller/YR-MPE/releases/latest/download/{archive}"
         },
         {
             "name": "Gitee",
-            "url": "https://gitee.com/ZJXMolls/YR-MPE/releases/download/v{version}/YR-MPE-bins-win64.zip"
+            "url": "https://gitee.com/ZJXMolls/YR-MPE/releases/download/v{version}/{archive}"
         }
     ]
 }

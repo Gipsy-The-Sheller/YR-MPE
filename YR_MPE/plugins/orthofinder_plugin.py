@@ -58,6 +58,25 @@ from PyQt5.QtWidgets import (
 )
 
 from ..templates.base_plugin_ui import BasePlugin
+
+
+def _executable_names(name: str):
+    """Return the platform spellings of a bundled executable."""
+    return (name, name + ".exe")
+
+
+def _find_runtime_tool(name: str, *directories):
+    """Find ``name`` in a tool directory, its ``bin/`` child, or the dirs."""
+    for directory in directories:
+        if not directory:
+            continue
+        root = Path(directory)
+        for candidate_dir in (root, root / "bin"):
+            for executable in _executable_names(name):
+                candidate = candidate_dir / executable
+                if candidate.is_file():
+                    return candidate
+    return None
 from ..templates.base_process_thread import BaseProcessThread
 from ..runtime.results import DatasetItemSpec, DatasetSpec, ResultSpec
 from .components.methods.gbff_utils import parse_folder, write_dataset
@@ -181,12 +200,8 @@ class OrthoFinderThread(BaseProcessThread):
         if not self.orthofinder_path or not self.orthofinder_path.exists():
             raise ValueError(f"OrthoFinder executable not found: {self.orthofinder_path}")
         missing = []
-        for name in ("blastp.exe", "makeblastdb.exe", "mcl.exe"):
-            candidates = []
-            if self.blast_dir:
-                candidates.append(self.blast_dir / name)
-            candidates.append(self.orthofinder_path.parent / name)
-            if not any(p.exists() for p in candidates):
+        for name in ("diamond", "mcl"):
+            if _find_runtime_tool(name, self.blast_dir, self.orthofinder_path.parent) is None:
                 missing.append(name)
         if missing:
             raise ValueError(
@@ -217,7 +232,7 @@ class OrthoFinderThread(BaseProcessThread):
         results_root = (self.output_dir / "orthofinder").resolve()
         if results_root.exists():
             shutil.rmtree(results_root)
-        # OrthoFinder 2.5.5 uses a relative '..\temp\WorkingDirectory' path.
+        # OrthoFinder uses a relative '..\temp\WorkingDirectory' path.
         (self.output_dir.parent / "temp" / "WorkingDirectory").mkdir(parents=True, exist_ok=True)
 
         env = os.environ.copy()
@@ -225,6 +240,7 @@ class OrthoFinderThread(BaseProcessThread):
         if self.blast_dir:
             path_parts.append(str(self.blast_dir))
         path_parts.append(str(self.orthofinder_path.parent))
+        path_parts.append(str(self.orthofinder_path.parent / "bin"))
         env["PATH"] = os.pathsep.join(path_parts + [env.get("PATH", "")])
 
         cmd = [
@@ -232,7 +248,7 @@ class OrthoFinderThread(BaseProcessThread):
             "-f", str((self.output_dir / "proteomes").resolve()),
             "-o", str(results_root),
             "-t", str(self.threads),
-            "-S", "blast",
+            "-S", "diamond",
             "-og",
             "-X",
         ]
@@ -301,7 +317,7 @@ class OrthoFinderThread(BaseProcessThread):
             return
 
         if self.run_mode == "full":
-            self.progress.emit("Running OrthoFinder (BLAST + MCL)...")
+            self.progress.emit("Running OrthoFinder (DIAMOND + MCL)...")
             self._run_orthofinder()
 
         # Post-process either the new run or an existing results folder.
@@ -540,7 +556,10 @@ class OrthoFinderPlugin(BasePlugin):
         if not self.tool_path:
             return ""
         base = os.path.dirname(self.tool_path)
-        # Development layout: orthofinder.exe lives next to tools/blast_tb.
+        # CYAN's OrthoFinder 3 package keeps DIAMOND and MCL in bin/.
+        if os.path.isdir(os.path.join(base, "bin")):
+            return os.path.join(base, "bin")
+        # Legacy development layout: orthofinder.exe lives next to tools/blast_tb.
         candidate = os.path.join(base, "tools", "blast_tb")
         if os.path.isdir(candidate):
             return candidate
@@ -564,11 +583,11 @@ class OrthoFinderPlugin(BasePlugin):
         runtime_form.addRow("Executable:", _path_row(self.orthofinder_edit, self.orthofinder_browse_button))
 
         self.blast_edit = QLineEdit()
-        self.blast_edit.setPlaceholderText("Directory with blastp/makeblastdb/mcl")
+        self.blast_edit.setPlaceholderText("Directory with diamond/mcl")
         self.blast_edit.setText(self._default_blast_dir())
         self.blast_browse_button = QPushButton("Browse")
         self.blast_browse_button.clicked.connect(self._browse_blast)
-        runtime_form.addRow("BLAST+ / MCL dir:", _path_row(self.blast_edit, self.blast_browse_button))
+        runtime_form.addRow("DIAMOND / MCL dir:", _path_row(self.blast_edit, self.blast_browse_button))
 
         self.threads_spin = QSpinBox()
         self.threads_spin.setRange(1, 16)
@@ -730,7 +749,7 @@ class OrthoFinderPlugin(BasePlugin):
         elif mode == "existing":
             self.mode_hint.setText("Reuse an existing OrthoFinder result folder; CDS mapping needs cds_map.tsv in the output folder.")
         else:
-            self.mode_hint.setText("Runs OrthoFinder with BLAST+ and writes single-copy orthogroups.")
+            self.mode_hint.setText("Runs OrthoFinder with DIAMOND and writes single-copy orthogroups.")
 
     # ------------------------------------------------------------------
     # browse / validation
@@ -766,7 +785,7 @@ class OrthoFinderPlugin(BasePlugin):
             self.orthofinder_edit.setText(path)
 
     def _browse_blast(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select BLAST+/MCL directory", self.blast_edit.text() or os.path.expanduser("~"))
+        path = QFileDialog.getExistingDirectory(self, "Select DIAMOND/MCL directory", self.blast_edit.text() or os.path.expanduser("~"))
         if path:
             self.blast_edit.setText(path)
 
@@ -995,19 +1014,15 @@ class OrthoFinderPlugin(BasePlugin):
         missing = []
         if not orthofinder.is_file():
             missing.append("orthofinder")
-        for name in ("blastp.exe", "makeblastdb.exe", "mcl.exe"):
-            candidates = []
-            if blast_dir:
-                candidates.append(blast_dir / name)
-            candidates.append(orthofinder.parent / name)
-            if not any(p.is_file() for p in candidates):
+        for name in ("diamond", "mcl"):
+            if _find_runtime_tool(name, blast_dir, orthofinder.parent) is None:
                 missing.append(name)
         if missing:
             self.runtime_status.setText("⚠ Missing: " + ", ".join(missing))
             self.runtime_status.setStyleSheet("color: #b00020;")
             ok = False
         else:
-            self.runtime_status.setText("✓ OrthoFinder, blastp, makeblastdb, mcl found.")
+            self.runtime_status.setText("✓ OrthoFinder, diamond, mcl found.")
             self.runtime_status.setStyleSheet("color: #2e7d32;")
             ok = True
         if show and not ok:

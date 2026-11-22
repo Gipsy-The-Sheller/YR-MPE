@@ -97,6 +97,16 @@ class GBlocksThreadTests(unittest.TestCase):
         self.assertTrue(output.is_file())
         self.assertIn(">a", output.read_text(encoding="utf-8").lower())
 
+        reports = payloads[0]["html_files"]
+        self.assertEqual(len(reports), 1)
+        from YR_MPE.plugins.components.masked_alignment_report import (
+            parse_report,
+        )
+        names, rows, nchar = parse_report(reports[0])
+        self.assertEqual(names, ["a", "b", "c"])
+        self.assertEqual(nchar, 12)
+        self.assertEqual(rows[0][0][0], "A")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Bayesian phylogenetic inference with MrBayes 3.2.7a, including partitioned
+Bayesian phylogenetic inference with MrBayes 3.2.8, including partitioned
 models, mixed protein models, MCMC diagnostics and optional dating priors.
 The Windows MPI+BEAGLE build is exposed as a separate plugin entry.
 
@@ -37,7 +37,14 @@ checked, that block is used instead of generating a new one.
 | Burn-in as states | `sump burnin=N;` and `sumt burnin=N;` |
 | Partition mode | `charset`/`partition` definitions in NEXUS, then `prset applyto=(all)` as appropriate |
 | Dating | `prset brlenspr=clock:uniform;` plus clock and calibration priors |
-| BEAGLE | `set usebeagle=yes beagledevice=... beagleprecision=... beaglescaling=...;` |
+| Clock model = strict | no `clockvarpr` line |
+| Clock model = WN | `prset clockvarpr=wn wnvarpr=fixed(x)\|exponential(rate)\|uniform(min,max);` |
+| Clock model = IGR | `prset clockvarpr=igr igrvarpr=...;` |
+| Clock model = ILN | `prset clockvarpr=iln ilnvarpr=...;` |
+| Clock model = Mixed IGR+ILN | `prset clockvarpr=mixed mixedvarpr=...;` |
+| Clock model = CPP | `prset clockvarpr=cpp cppratepr=...;` plus `prset cppmultdevpr=fixed(sd);` |
+| Clock model = TK02 | `prset clockvarpr=tk02 tk02varpr=...;` |
+| BEAGLE | `set usebeagle=yes beagledevice=... beagleprecision=... beaglescaling=... beaglethreads=yes\|no [beaglethreadcount=N];` |
 
 ## Flow
 
@@ -58,6 +65,16 @@ checked, that block is used instead of generating a new one.
   automatically.
 - Burn-in is either a fraction (`relburnin=yes burninfrac=`) or a state count
   (`burnin=`), never both.
+- MrBayes 3.2.8 renamed the old relaxed clock called "IGR" to **WN**, and
+  introduced a new **IGR** (i.i.d. gamma rates) plus **ILN** and a **mixed
+  IGR+ILN** model. Saved runs without `clock_model_version=2` are replayed as
+  WN so the earlier meaning is preserved.
+- `uniform(min,max)` needs two bounds. The panel writes both; an older record
+  with one value is read as `uniform(0, value)`.
+- BEAGLE 4 in MrBayes 3.2.8 can thread on the CPU. `beaglethreads=yes` with
+  `beaglethreadcount=N` sets N threads per process; `N=0` (the panel's
+  "auto") lets MrBayes use the physical core count. With MPI, keep
+  `N x MPI processes` within the available cores.
 - Partition definitions must live inside the NEXUS file; GUI partition mode
   only writes them when configured.
 - The supermatrix uses the union of taxa across partitions; missing taxa are

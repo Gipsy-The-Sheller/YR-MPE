@@ -1,0 +1,235 @@
+{
+  "release": "v2026.11.22",
+  "tools": {
+    "aster": {
+      "version": "1.25",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-x64"
+      ]
+    },
+    "aster2": {
+      "version": "2.6.1",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-arm64",
+        "Windows-x64"
+      ]
+    },
+    "bmge": {
+      "version": "2.0",
+      "targets": [
+        "Windows-x64"
+      ]
+    },
+    "clustalo": {
+      "version": "1.2.4",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-arm64",
+        "Windows-x64"
+      ]
+    },
+    "decenttree": {
+      "version": "1.0.0",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-arm64",
+        "Windows-x64"
+      ]
+    },
+    "diamond": {
+      "version": "2.2.9",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-x64"
+      ]
+    },
+    "famsa": {
+      "version": "2.5.2",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "Windows-x64"
+      ]
+    },
+    "fastme": {
+      "version": "2.1.6.3",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-arm64",
+        "Windows-x64"
+      ]
+    },
+    "fasttree": {
+      "version": "2.2.0",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-arm64",
+        "Windows-x64"
+      ]
+    },
+    "hyphy": {
+      "version": "2.5.103",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-x64"
+      ]
+    },
+    "iqtree3": {
+      "version": "3.1.4",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-x64"
+      ]
+    },
+    "lsd2": {
+      "version": "2.4.4",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-arm64",
+        "Windows-x64"
+      ]
+    },
+    "mafft": {
+      "version": "7.505",
+      "targets": [
+        "Windows-x64"
+      ]
+    },
+    "mcl": {
+      "version": "22-282",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-arm64",
+        "Windows-x64"
+      ]
+    },
+    "modeltest-ng": {
+      "version": "0.1.7",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-x64"
+      ]
+    },
+    "mpboot": {
+      "version": "1.1.1",
+      "targets": [
+        "Linux-x64",
+        "Windows-x64"
+      ]
+    },
+    "mrbayes": {
+      "version": "3.2.8",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-x64"
+      ]
+    },
+    "muscle5": {
+      "version": "5.3",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-arm64",
+        "Windows-x64"
+      ]
+    },
+    "orthofinder3": {
+      "version": "3.0.1b1",
+      "targets": [
+        "Linux-x64",
+        "Windows-x64"
+      ]
+    },
+    "paml": {
+      "version": "4.10.10",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-arm64",
+        "Windows-x64"
+      ]
+    },
+    "pbmpi": {
+      "version": "1.9",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-x64"
+      ]
+    },
+    "raxml-ng": {
+      "version": "1.2.2",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-x64"
+      ]
+    },
+    "treerecs": {
+      "version": "1.3",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-arm64",
+        "Windows-x64"
+      ]
+    },
+    "trimal": {
+      "version": "1.5.1",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-x64"
+      ]
+    },
+    "ygblocks": {
+      "version": "1.0.0",
+      "targets": [
+        "Linux-arm64",
+        "Linux-x64",
+        "macOS-arm64",
+        "Windows-x64"
+      ]
+    },
+    "icytree": {
+      "version": "48ed43e",
+      "targets": [
+        "Windows-x64"
+      ]
+    }
+  }
+}

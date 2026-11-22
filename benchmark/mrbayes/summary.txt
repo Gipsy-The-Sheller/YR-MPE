@@ -1,0 +1,9 @@
+20OTU_1000bp   ratio 0.223  speedup 4.63  rf [0, 0, 0]
+20OTU_100bp    ratio 0.488  speedup 2.05  rf [0, 0, 0]
+50OTU_1000bp   ratio 0.252  speedup 3.99  rf [0, 0, 0]
+50OTU_100bp    ratio 0.428  speedup 2.34  rf [0, 0, 0]
+ratio range 0.172-0.505
+speedup range 1.98-5.80
+RF 20: {0: 6}
+RF 50: {0: 6}
+RF total: 12 zero: 12

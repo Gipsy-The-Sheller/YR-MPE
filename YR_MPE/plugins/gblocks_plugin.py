@@ -20,7 +20,7 @@
 from PyQt5.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QRadioButton,
-    QScrollArea, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
+    QScrollArea, QSpinBox, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 from PyQt5.QtCore import pyqtSignal
 import os
@@ -32,13 +32,16 @@ from Bio import SeqIO
 
 from ..templates.base_plugin_ui import BasePlugin
 from ..templates.base_process_thread import BaseProcessThread
-from .components.alignment_common import (
-    build_result, prepare_import, records_temp, setup_preview, show_preview,
-)
+from .components.alignment_common import build_result, prepare_import, records_temp
+from .components.masked_alignment_report import render_report_html
 
 
 class GBlocksThread(BaseProcessThread):
-    """Run GBlocks and move its -gb.fa output to the requested path."""
+    """Run YGBlocks and move its -gb.fa output to the requested path.
+
+    YGBlocks is an independent C++14 reimplementation of GBlocks 0.91b with a
+    compatible command line; the packaged binary is MIT-licensed.
+    """
 
     result_ready = pyqtSignal(object)
 
@@ -60,6 +63,7 @@ class GBlocksThread(BaseProcessThread):
     def execute_commands(self):
         try:
             output_files = []
+            html_files = []
             total = len(self.input_files)
             for index, input_file in enumerate(self.input_files):
                 if not self.is_running:
@@ -73,7 +77,7 @@ class GBlocksThread(BaseProcessThread):
                 output_file = self._output_path(input_file)
                 cmd = [
                     self.tool_path, input_file, *self.parameters,
-                    "-p=n", "-q=n", "-r=n", "-e=-gb",
+                    "-p=y", "-q=n", "-r=n", "-e=-gb",
                 ]
                 result = self.execute_command(
                     cmd, cwd=str(output_file.parent)
@@ -97,9 +101,25 @@ class GBlocksThread(BaseProcessThread):
                     raise RuntimeError("GBlocks wrote an empty file: %s" % output_file)
                 output_files.append(str(output_file))
 
+                # YGBlocks 1.0.0 writes a masked PHYLIP report (.txt);
+                # older builds wrote .html.  Keep whichever exists.
+                report = None
+                for suffix in (".txt", ".html"):
+                    generated = Path("%s-gb%s" % (input_file, suffix))
+                    if generated.is_file():
+                        target = output_file.with_suffix(".report" + suffix)
+                        if generated.resolve() != target.resolve():
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.move(str(generated), str(target))
+                        report = target
+                        break
+                if report is not None:
+                    html_files.append(str(report))
+
             self.progress.emit("All trimming completed")
-            self.result_ready.emit({"output_files": output_files})
-            self.finished.emit(output_files, [])
+            self.result_ready.emit(
+                {"output_files": output_files, "html_files": html_files})
+            self.finished.emit(output_files, html_files)
         except Exception as exc:
             self.error.emit("Trimming exception: %s" % exc)
 
@@ -120,7 +140,7 @@ class GBlocksPlugin(BasePlugin):
         self.run_button.setText("Run GBlocks")
 
     def init_plugin_info(self):
-        self.plugin_name = "GBlocks Trimmer"
+        self.plugin_name = "GBlocks Trimmer (YGBlocks)"
         self.tool_name = "GBlocks"
         self.citation = []
         self.citation_keys = ["talavera2007improvement"]
@@ -452,7 +472,18 @@ class GBlocksPlugin(BasePlugin):
         self.control_layout.addWidget(self.import_to_platform_btn)
     
     def setup_output_tab(self):
-        setup_preview(self, "The GBlocks-trimmed FASTA alignment will appear here.")
+        layout = QVBoxLayout(self.output_tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        self.summary_label = QLabel("No alignment yet.")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setStyleSheet("font-weight: 600;")
+        layout.addWidget(self.summary_label)
+        self.report_view = QTextBrowser()
+        self.report_view.setHtml(
+            "<p style='color:#57606a'>"
+            "The YGBlocks masked-alignment report will appear here.</p>"
+        )
+        layout.addWidget(self.report_view, 1)
 
     def get_parameters(self):
         params = []
@@ -571,7 +602,24 @@ class GBlocksPlugin(BasePlugin):
         self.stop_button.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.alignment_output_files = output_files
-        show_preview(self, output_files)
+        if output_files:
+            self.summary_label.setText(
+                "%d alignment file(s) · %s"
+                % (len(output_files), Path(output_files[0]).name)
+            )
+        if html_files:
+            try:
+                self.report_view.setHtml(render_report_html(html_files[0]))
+            except Exception as exc:
+                self.report_view.setHtml(
+                    "<p style='color:#9a6700'>Cannot render the YGBlocks "
+                    "report: %s</p>" % exc
+                )
+        else:
+            self.report_view.setHtml(
+                "<p style='color:#9a6700'>"
+                "YGBlocks did not write a masked-alignment report for this run.</p>"
+            )
         self.tab_widget.setCurrentIndex(1)
         self.add_console_message("GBlocks trimming completed.", "info")
         if self.result_has_consumer() or self.import_from in [

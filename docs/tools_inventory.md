@@ -14,14 +14,14 @@ the source of truth until that exists.
 | ASTER/ASTRAL | `YR_MPE/bin/aster/astral4.exe`, `wastral.exe`, `astral-pro3.exe`, `astral.bat` | ASTRAL-IV 1.24.4.8 | `astral.bat` takes a version token |
 | CASTER-site | `YR_MPE/bin/aster/caster-site.exe` | 1.24.2.6 | — |
 | LSD2 | `YR_MPE/bin/lsd2/lsd2.exe` | 2.4.4 | no standalone `settings.json` entry |
-| MrBayes | `YR_MPE/bin/mb/mb.exe` | 3.2.7a | BEAGLE/MS-MPI DLLs alongside |
+| MrBayes | `YR_MPE/bin/mb/mb.exe` | 3.2.8 | BEAGLE 4 / MS-MPI DLLs alongside |
 | PhyloBayes | `YR_MPE/bin/pbmpi-1.9/` | 1.9 | also 1.8c |
 | MPBoot | `YR_MPE/bin/mpboot/mpboot.exe` | 1.1.1 | folder says 1.2; fix |
 | DecentTree | `YR_MPE/bin/decenttree/decenttree.exe` | 1.0.0 | no standalone `settings.json` entry |
 | MAFFT | `YR_MPE/bin/mafft/mafft.bat` | 7.505 | — |
 | MACSE | `YR_MPE/bin/macse/macse_v2.07.jar` + JRE | 2.07 | — |
 | TrimAl | `YR_MPE/bin/trimAl/bin/trimal.exe` | 1.2rev57 | — |
-| Gblocks | `YR_MPE/bin/Gblocks/Gblocks.exe` | 1.0 | manifest says 0.91b; fix |
+| Gblocks (YGBlocks) | `YR_MPE/bin/Gblocks/Gblocks.exe` | 1.0.0 | MIT C++14 reimplementation of GBlocks 0.91b |
 | MUSCLE | `YR_MPE/bin/muscle5/muscle.exe` | 5.3 | — |
 | Clustal Omega | `YR_MPE/bin/clustalo/clustalo.exe` | 1.2.2 | — |
 | FastTree | `YR_MPE/bin/FastTree/FastTree.exe` | 2.1.11 No SSE3 | **not wired** |
@@ -30,7 +30,7 @@ the source of truth until that exists.
 
 | Tool | Path | Version | Notes |
 |---|---|---|---|
-| OrthoFinder | `E:\Codes\gf_mito_b\orthofinder.exe` | 2.5.5 | BLAST+/MCL in the same folder |
+| OrthoFinder | `YR_MPE/bin/orthofinder/orthofinder.exe` | 3.0.1b1 | DIAMOND/MCL in `orthofinder/bin/` |
 | MCMCTree | `E:\Codes\PYML\release\mcmctree_{scalar,SSE,AVX2,AVX512}.exe` | PAML 4.10.10 | default to `scalar`; SIMD builds lack node scaling |
 | baseml | `E:\Codes\gf_mito_b\baseml.exe` | PAML 4.10.7 | — |
 | FastME | `E:\Codes\fastme\src\fastme.exe` | — | not wired |
@@ -52,5 +52,5 @@ the source of truth until that exists.
   20-entry `config.template.json`; `config.template.json` and
   `binary_sources.json` are the release inputs. Keep them in sync when a
   bundled executable is added or renamed.
-- Version mismatches: IQ-TREE 3.0.6 vs 3.0.1; Gblocks 0.91b vs 1.0; MPBoot 1.2
+- Version mismatches: IQ-TREE 3.1.4; YGBlocks 1.0.0; MPBoot 1.1.1
   vs 1.1.1; LSD2 2.4.1 vs 2.4.4; `__version__` 0.2.0 vs manifest 0.1.0.

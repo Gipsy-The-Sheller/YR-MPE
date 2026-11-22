@@ -89,9 +89,10 @@
     },
     {
       "id": "gblocks",
-      "title": "GBlocks",
+      "title": "GBlocks (YGBlocks)",
       "summary": "Select conserved alignment blocks and remove divergent or gap-rich columns.",
       "plugin_names": [
+        "GBlocks Trimmer (YGBlocks)",
         "GBlocks Trimmer"
       ],
       "tool_names": [
