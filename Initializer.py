@@ -558,7 +558,7 @@ class Initializer(QWidget):
 
             return __version__
         except Exception:
-            return "1.2.0"
+            return "1.2.1"
 
     def _resolved_url(self, template):
         return (template
