@@ -44,6 +44,11 @@ def tag_name() -> str:
             ["git", "describe", "--tags", "--exact-match"],
             text=True, stderr=subprocess.DEVNULL).strip()
     except subprocess.CalledProcessError:
+        response = requests.get(
+            "https://api.github.com/repos/%s/releases/latest" % GITHUB_REPO,
+            timeout=60, headers={"Accept": "application/vnd.github+json"})
+        if response.status_code == 200:
+            return response.json()["tag_name"]
         fail("cannot determine the tag; run the pipeline on a tag")
 
 

@@ -121,3 +121,21 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" \
             "YR-MPE-bins-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.ext }}" \
             --clobber
+
+  publish-gitee:
+    name: Publish to Gitee
+    needs: bundle
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install requests
+        run: python -m pip install requests
+      - name: Mirror release assets
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_TAG: ${{ github.ref_name }}
+        run: python dev/release/sync_gitee_release.py
