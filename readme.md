@@ -116,7 +116,8 @@ More interface figures are in the [user manual](docs/manual/manual.pdf) and
    `YR-MPE-bins-Linux-arm64.tar.gz` or `YR-MPE-bins-macOS-arm64.tar.gz` —
    and extract it at the `YR_MPE/` level so its `bin/` directory merges into
    `YR_MPE/bin`. The **Initializer** can also download the bundle for the
-   current platform, or a single tool from the pinned CYAN release.
+   current platform, or a single tool from the pinned CYAN release. The Gitee
+   mirror serves the same bundles as `.tar.xz` (the 100 MB attachment limit).
    Windows on ARM uses the x64 bundle under emulation.
 4. Run `launcher.vbs` in the YRTools root on Windows, or `python main.py`
    (or `python3 main.py`) on Linux/macOS.
