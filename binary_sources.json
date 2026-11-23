@@ -5,6 +5,12 @@
         "Linux-arm64": "YR-MPE-bins-Linux-arm64.tar.gz",
         "macOS-arm64": "YR-MPE-bins-macOS-arm64.tar.gz"
     },
+    "archives_xz": {
+        "Windows-x64": "YR-MPE-bins-Windows-x64.tar.xz",
+        "Linux-x64": "YR-MPE-bins-Linux-x64.tar.xz",
+        "Linux-arm64": "YR-MPE-bins-Linux-arm64.tar.xz",
+        "macOS-arm64": "YR-MPE-bins-macOS-arm64.tar.xz"
+    },
     "sources": [
         {
             "name": "GitHub",
@@ -12,7 +18,8 @@
         },
         {
             "name": "Gitee",
-            "url": "https://gitee.com/ZJXMolls/YR-MPE/releases/download/v{version}/{archive}"
+            "url": "https://gitee.com/ZJXMolls/YR-MPE/releases/download/v{version}/{archive}",
+            "archives_key": "xz"
         }
     ]
 }

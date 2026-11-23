@@ -360,6 +360,7 @@ class Initializer(QWidget):
         self.tools_data = []
         self.configured_tools = []
         self.binary_sources = []
+        self._archive_maps = {}
         platform_name, arch = cyan_target()
         self.binary_archive = "YR-MPE-bins-%s-%s.%s" % (
             platform_name, arch, "zip" if platform_name == "Windows" else "tar.gz")
@@ -500,6 +501,10 @@ class Initializer(QWidget):
             try:
                 data = json.loads(manifest_path.read_text(encoding="utf-8"))
                 archives = data.get("archives") or {}
+                self._archive_maps = {
+                    "default": archives,
+                    "xz": data.get("archives_xz") or {},
+                }
                 if archives:
                     archive = archives.get(
                         "%s-%s" % cyan_target(), archive)
@@ -584,6 +589,11 @@ class Initializer(QWidget):
                 "Paste a direct URL to a .zip or .tar.gz binary archive"
             )
             return
+        archive_key = source.get("archives_key", "default")
+        archive_map = self._archive_maps.get(archive_key) or {}
+        chosen = archive_map.get("%s-%s" % cyan_target())
+        if chosen:
+            self.binary_archive = chosen
         self.url_edit.setReadOnly(False)
         self.url_edit.setText(self._resolved_url(source.get("url", "")))
         self.url_edit.setCursorPosition(0)
@@ -636,7 +646,7 @@ class Initializer(QWidget):
             return
         suffix = ".zip"
         lower = url.lower().split("?")[0]
-        for candidate in (".tar.gz", ".tgz", ".zip"):
+        for candidate in (".tar.gz", ".tgz", ".tar.xz", ".txz", ".zip"):
             if lower.endswith(candidate):
                 suffix = candidate
                 break
