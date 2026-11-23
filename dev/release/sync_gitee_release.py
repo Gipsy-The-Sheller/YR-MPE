@@ -67,10 +67,12 @@ def ensure_release(tag: str, body: str) -> int:
     response = requests.get(
         API + "/repos/%s/releases/tags/%s" % (GITEE_REPO, tag),
         headers={"Authorization": "token %s" % TOKEN}, timeout=60)
-    if response.status_code == 200:
-        return int(response.json()["id"])
+    data = response.json() if response.status_code == 200 else None
+    if isinstance(data, dict) and data.get("id"):
+        return int(data["id"])
     payload = {
         "tag_name": tag,
+        "target_commitish": os.environ.get("GITEE_TARGET", "master"),
         "name": "YPhylo Workbench %s" % tag.lstrip("v"),
         "body": body or "Mirror of the GitHub release.",
         "prerelease": False,
