@@ -53,10 +53,10 @@ def tag_name() -> str:
 
 
 def gitee(method: str, path: str, **kwargs):
-    params = kwargs.pop("params", {})
-    params["access_token"] = TOKEN
+    headers = kwargs.pop("headers", {})
+    headers["Authorization"] = "token %s" % TOKEN
     response = requests.request(
-        method, API + path, params=params, timeout=120, **kwargs)
+        method, API + path, headers=headers, timeout=120, **kwargs)
     if response.status_code >= 400:
         fail("%s %s -> %s %s" % (
             method, path, response.status_code, response.text[:500]))
@@ -66,7 +66,7 @@ def gitee(method: str, path: str, **kwargs):
 def ensure_release(tag: str, body: str) -> int:
     response = requests.get(
         API + "/repos/%s/releases/tags/%s" % (GITEE_REPO, tag),
-        params={"access_token": TOKEN}, timeout=60)
+        headers={"Authorization": "token %s" % TOKEN}, timeout=60)
     if response.status_code == 200:
         return int(response.json()["id"])
     payload = {
